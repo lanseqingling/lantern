@@ -170,11 +170,13 @@ type EditorCapability = {
   agentAccess: "disabled" | "observe" | "preview" | "execute"
   risk: "low" | "medium" | "high"
   preconditions: string[]
-  outputCommands: WorkspaceCommand[]
+  outputCommandTypes: WorkspaceCommand["type"][]
   previewPolicy: "inline" | "candidate" | "staged"
   undoPolicy: "atomic"
 }
 ```
+
+Registry 与 dry-run 位于 `packages/editor-core`，命令和 ChangeSet 的运行时 schema 位于 `packages/shared`。后续编辑能力直接扩充这一事实源，不在 API、UI 或 Agent 中复制 schema、ID 和业务默认值。
 
 默认规则是 `agentAccess <= humanEntry`。AI-first 例外必须登记原因、输出边界、回退方式和未来人类入口。
 

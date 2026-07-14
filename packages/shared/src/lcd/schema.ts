@@ -1,10 +1,10 @@
 import { z } from "zod";
 import type { ComicDocument } from "./types";
 
-const rectSchema = z.object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() });
-const geometrySchema = rectSchema.extend({ rotate: z.number().optional() });
-const normalizedRectSchema = rectSchema.refine((rect) => rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= 1 && rect.y + rect.height <= 1, "normalized rectangle must stay inside 0..1");
-const localTransformSchema = geometrySchema;
+export const rectSchema = z.object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() });
+export const geometrySchema = rectSchema.extend({ rotate: z.number().optional() });
+export const normalizedRectSchema = rectSchema.refine((rect) => rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= 1 && rect.y + rect.height <= 1, "normalized rectangle must stay inside 0..1");
+export const localTransformSchema = geometrySchema;
 const overflowSchema = z.enum(["inherit", "clip", "visible"]);
 const visibilitySchema = { visible: z.boolean().optional(), name: z.string().optional() };
 
@@ -25,7 +25,7 @@ const balloonStyleSchema = z.object({
   fontFamily: z.string(), fontSize: z.number().positive(), textColor: z.string(), fill: z.string(), stroke: z.string(),
   strokeWidth: z.number().nonnegative(), writingMode: z.enum(["horizontal", "vertical"]).optional(),
 });
-const balloonElementSchema = z.object({
+export const balloonElementSchema = z.object({
   id: z.string().min(1), kind: z.literal("balloon"), dialogueId: z.string().min(1), transform: localTransformSchema,
   tailTarget: z.object({ x: z.number(), y: z.number() }).optional(),
   shape: z.enum(["normal", "thought", "caption_box"]), style: balloonStyleSchema,
@@ -35,25 +35,29 @@ const effectElementSchema = z.object({
   id: z.string().min(1), kind: z.literal("effect"), effectType: z.enum(["speed_lines", "tone", "focus", "sfx_art", "custom"]),
   transform: localTransformSchema, assetId: z.string().optional(), assetVersionId: z.string().optional(), opacity: z.number().min(0).max(1).optional(), ...visibilitySchema,
 });
-const frameElementSchema = z.discriminatedUnion("kind", [artElementSchema, textElementSchema, balloonElementSchema, effectElementSchema]);
+export const frameElementSchema = z.discriminatedUnion("kind", [artElementSchema, textElementSchema, balloonElementSchema, effectElementSchema]);
 const layerBase = {
   id: z.string().min(1), name: z.string(), zIndex: z.number().int(), visible: z.boolean(), locked: z.boolean().optional(), overflow: overflowSchema,
 };
-const frameLayerSchema = z.discriminatedUnion("kind", [
+export const frameLayerSchema = z.discriminatedUnion("kind", [
   z.object({ ...layerBase, kind: z.literal("art"), elements: z.array(artElementSchema) }),
   z.object({ ...layerBase, kind: z.literal("text"), elements: z.array(z.union([textElementSchema, balloonElementSchema])) }),
   z.object({ ...layerBase, kind: z.literal("effect"), elements: z.array(effectElementSchema) }),
 ]);
-const frameSchema = z.object({
+export const frameBorderSchema = z.object({ color: z.string(), width: z.number().nonnegative(), style: z.enum(["solid", "none", "rough"]) });
+export const frameShapeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("rect"), radius: z.number().nonnegative().optional() }),
+  z.object({ kind: z.literal("polygon"), points: z.array(z.object({ x: z.number(), y: z.number() })).min(3) }),
+  z.object({ kind: z.literal("ellipse") }),
+]);
+export const frameMaskSchema = z.object({ mode: z.enum(["clip", "visible", "bleed"]) });
+
+export const frameSchema = z.object({
   id: z.string().min(1), geometry: geometrySchema, zIndex: z.number().int(),
   storyRefs: z.array(z.object({ storyboardBeatId: z.string().min(1), storyboardBeatVersionId: z.string().min(1), role: z.enum(["primary", "continuity"]) })),
-  border: z.object({ color: z.string(), width: z.number().nonnegative(), style: z.enum(["solid", "none", "rough"]) }),
-  shape: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("rect"), radius: z.number().nonnegative().optional() }),
-    z.object({ kind: z.literal("polygon"), points: z.array(z.object({ x: z.number(), y: z.number() })).min(3) }),
-    z.object({ kind: z.literal("ellipse") }),
-  ]),
-  mask: z.object({ mode: z.enum(["clip", "visible", "bleed"]) }), layers: z.array(frameLayerSchema),
+  border: frameBorderSchema,
+  shape: frameShapeSchema,
+  mask: frameMaskSchema, layers: z.array(frameLayerSchema),
   constraints: z.array(z.enum(["stay_on_surface", "preserve_aspect", "locked"])).optional(), ...visibilitySchema,
 });
 const overlayElementSchema = frameElementSchema;
@@ -62,12 +66,12 @@ const overlayLayerSchema = z.object({
   anchor: z.discriminatedUnion("type", [z.object({ type: z.literal("unit") }), z.object({ type: z.literal("frame"), frameId: z.string().min(1) })]),
   purpose: z.enum(["breakout", "cross_frame", "cross_page", "page_effect", "decoration"]), elements: z.array(overlayElementSchema),
 });
-const surfaceSchema = z.object({
+export const surfaceSchema = z.object({
   id: z.string().min(1), role: z.enum(["single", "left", "right", "segment"]), geometry: rectSchema,
   trim: z.object({ top: z.number(), right: z.number(), bottom: z.number(), left: z.number() }).optional(),
   bleed: z.object({ top: z.number(), right: z.number(), bottom: z.number(), left: z.number() }).optional(), pageNumber: z.number().int().positive().optional(),
 });
-const unitSchema = z.object({
+export const presentationUnitSchema = z.object({
   id: z.string().min(1), kind: z.enum(["single_page", "spread", "vertical_segment", "four_panel_unit"]),
   canvas: z.object({ width: z.number().positive(), height: z.number().positive(), background: z.object({ color: z.string() }) }),
   surfaces: z.array(surfaceSchema).min(1), frames: z.array(frameSchema), overlayLayers: z.array(overlayLayerSchema),
@@ -78,7 +82,7 @@ const unitSchema = z.object({
 export const comicDocumentSchema = z.object({
   protocolVersion: z.literal("lcd-0.4"), comicId: z.string().min(1), chapterId: z.string().min(1), format: z.enum(["page", "vertical", "four_panel"]),
   reading: z.object({ direction: z.enum(["ltr", "rtl", "ttb"]), viewer: z.enum(["paged", "spread", "scroll", "unit"]), unitOrder: z.array(z.string().min(1)), gap: z.number().nonnegative().optional(), showPageNumber: z.boolean().optional() }),
-  units: z.array(unitSchema),
+  units: z.array(presentationUnitSchema),
   resources: z.array(z.object({ assetId: z.string().min(1), assetVersionId: z.string().min(1), kind: z.enum(["image", "font", "texture"]), mediaType: z.string().min(1), width: z.number().positive().optional(), height: z.number().positive().optional(), checksum: z.string().optional() })),
   dialogues: z.array(z.object({ id: z.string().min(1), storyboardBeatId: z.string().optional(), storyboardBeatVersionId: z.string().optional(), speakerAssetId: z.string().optional(), content: z.string() })),
 });

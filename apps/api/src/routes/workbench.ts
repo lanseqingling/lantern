@@ -2,8 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import {
-  comicDocumentSchema,
-  normalizeStoryboardBeat,
+  workspaceChangeSetRequestSchema,
   type WorkspaceChangeSet,
 } from "../../../../packages/shared/src";
 import { prisma } from "../../../../packages/server/src/db";
@@ -25,53 +24,6 @@ const selectionSchema = z.object({
   label: z.string().optional(),
   canvasX: z.number().finite().optional(),
   canvasY: z.number().finite().optional(),
-});
-
-const storyboardBeatSchema = z.preprocess(normalizeStoryboardBeat, z.object({
-  id: z.string().min(1),
-  versionId: z.string().min(1),
-  title: z.string().min(1).max(80),
-  description: z.string().max(4000),
-}));
-
-const workspaceOperationSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("replace_chapter_presentation"), document: comicDocumentSchema }),
-  z.object({ type: z.literal("replace_chapter_layout"), document: comicDocumentSchema }),
-  z.object({ type: z.literal("replace_storyboard_beats"), storyboardBeats: z.array(storyboardBeatSchema).max(120) }),
-  z.object({ type: z.literal("create_frame_storyboard_beat"), unitId: z.string().min(1), frameId: z.string().min(1), storyboardBeat: storyboardBeatSchema }),
-  z.object({ type: z.literal("add_presentation_unit"), unit: z.unknown(), readingIndex: z.number().int().nonnegative().optional() }),
-  z.object({ type: z.literal("move_frame"), unitId: z.string().min(1), frameId: z.string().min(1), position: z.object({ x: z.number(), y: z.number() }) }),
-  z.object({ type: z.literal("resize_frame"), unitId: z.string().min(1), frameId: z.string().min(1), geometry: z.object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive(), rotate: z.number().optional() }) }),
-  z.object({ type: z.literal("reorder_frame"), unitId: z.string().min(1), frameId: z.string().min(1), zIndex: z.number().int() }),
-  z.object({ type: z.literal("set_frame_style"), unitId: z.string().min(1), frameId: z.string().min(1), border: z.unknown().optional(), shape: z.unknown().optional(), mask: z.unknown().optional() }),
-  z.object({ type: z.literal("replace_presentation_layout"), unitId: z.string().min(1), expectedFrameIds: z.array(z.string()), layout: z.unknown() }),
-  z.object({ type: z.literal("add_frame"), unitId: z.string().min(1), frame: z.unknown(), readingIndex: z.number().int().nonnegative().optional() }),
-  z.object({ type: z.literal("remove_frame"), unitId: z.string().min(1), frameId: z.string().min(1) }),
-  z.object({ type: z.literal("set_art_crop"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), crop: z.object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() }) }),
-  z.object({ type: z.literal("set_element_transform"), unitId: z.string().min(1), frameId: z.string().optional(), layerId: z.string().min(1), elementId: z.string().min(1), transform: z.object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive(), rotate: z.number().optional() }) }),
-  z.object({ type: z.literal("add_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), element: z.unknown() }),
-  z.object({ type: z.literal("remove_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),
-  z.object({ type: z.literal("duplicate_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), newElementId: z.string().min(1) }),
-  z.object({ type: z.literal("reorder_layer"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), zIndex: z.number().int() }),
-  z.object({ type: z.literal("update_balloon"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), changes: z.record(z.string(), z.unknown()) }),
-  z.object({ type: z.literal("update_dialogue"), dialogueId: z.string().min(1), content: z.string() }),
-  z.object({
-    type: z.literal("update_storyboard_beat"),
-    storyboardBeatId: z.string().min(1),
-    patch: z.object({ title: z.string().min(1).max(80), description: z.string().max(4000) }).partial().refine((value) => Object.keys(value).length > 0),
-  }),
-]);
-
-const changeSetRequestSchema = z.object({
-  expectedWorkingRevision: z.number().int().positive(),
-  changeSet: z.object({
-    id: z.string().min(1),
-    projectId: z.string().min(1),
-    baseRevision: z.number().int().positive(),
-    source: z.enum(["manual", "candidate", "undo", "redo", "migration"]),
-    sourceCandidateId: z.string().optional(),
-    commands: z.array(workspaceOperationSchema).min(1).max(200),
-  }),
 });
 
 const contextDebugRequestSchema = z.object({
@@ -120,7 +72,7 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { projectId: string }; Body: { expectedWorkingRevision: number; changeSet: WorkspaceChangeSet } }>("/v1/projects/:projectId/changesets", async (request) => {
     const user = await currentUser(request);
-    const body = changeSetRequestSchema.parse(request.body) as { expectedWorkingRevision: number; changeSet: WorkspaceChangeSet };
+    const body = workspaceChangeSetRequestSchema.parse(request.body) as { expectedWorkingRevision: number; changeSet: WorkspaceChangeSet };
     return ok(request, await commitChangeSet({
       ownerUserId: user.id,
       projectId: request.params.projectId,

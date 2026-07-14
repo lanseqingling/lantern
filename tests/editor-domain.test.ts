@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
-import { frameElements, normalizeStoryboardBeat, resolveLocalTransform, validateComicDocument, type PresentationUnit } from "../packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot } from "../packages/editor-core/src";
+import { frameElements, normalizeStoryboardBeat, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type PresentationUnit } from "../packages/shared/src";
+import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapability } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
 
@@ -97,6 +97,83 @@ test("adding a presentation unit appends a valid blank page without changing exi
   assert.equal(result.working.document.reading.unitOrder.at(-1), blank.id);
   assert.deepEqual(result.working.document.units.at(-1), blank);
   assert.deepEqual(result.working.document.units[0].frames, fixture.working.document.units[0].frames);
+});
+
+test("editor capabilities are registered but remain unavailable to Agent execution", () => {
+  const capabilities = listEditorCapabilities();
+  assert.deepEqual(capabilities.map((capability) => capability.id), [
+    "update_dialogue",
+    "update_storyboard_beat",
+    "create_frame_storyboard_beat",
+    "set_art_crop",
+    "create_page",
+  ]);
+  assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
+  assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
+});
+
+test("create_page plans defaults in the domain executor and dry-runs without mutating the source", () => {
+  const fixture = createInitialFixture();
+  const before = structuredClone(fixture);
+  const dryRun = dryRunEditorCapability("create_page", {}, {
+    fixture,
+    createId: () => "page-from-capability",
+    actor: "human",
+  });
+
+  assert.equal(dryRun.commands.length, 1);
+  assert.equal(dryRun.commands[0].type, "add_presentation_unit");
+  assert.deepEqual(dryRun.diffSummary.commandTypes, ["add_presentation_unit"]);
+  assert.equal(dryRun.result.working.document.units.length, fixture.working.document.units.length + 1);
+  assert.equal(dryRun.result.working.document.units.at(-1)?.id, "page-from-capability");
+  assert.deepEqual(fixture, before);
+});
+
+test("capability preconditions reject invalid targets before commands are committed", () => {
+  const fixture = createInitialFixture();
+  assert.throws(() => planEditorCapability("update_dialogue", {
+    dialogueId: "missing-dialogue",
+    content: "不会写入",
+  }, {
+    fixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  }), /missing Dialogue/);
+});
+
+test("Agent planning cannot bypass the capability allowlist", () => {
+  const fixture = createInitialFixture();
+  assert.throws(() => planEditorCapability("create_page", {}, {
+    fixture,
+    createId: (prefix) => `${prefix}-agent`,
+    actor: "agent",
+  }), /disabled for Agent/);
+});
+
+test("shared workspace schemas reject malformed commands at every runtime boundary", () => {
+  assert.throws(() => workspaceCommandSchema.parse({
+    type: "add_frame",
+    unitId: "page-1",
+    frame: { id: "incomplete-frame" },
+  }));
+  assert.throws(() => workspaceCommandSchema.parse({
+    type: "update_balloon",
+    unitId: "page-1",
+    frameId: "frame-1",
+    layerId: "text-1",
+    elementId: "balloon-1",
+    changes: { arbitraryProtocolField: true },
+  }));
+  assert.doesNotThrow(() => workspaceChangeSetRequestSchema.parse({
+    expectedWorkingRevision: 1,
+    changeSet: {
+      id: "validated-change",
+      projectId: "project-1",
+      baseRevision: 1,
+      source: "manual",
+      commands: [{ type: "update_dialogue", dialogueId: "dialogue-1", content: "新的对白" }],
+    },
+  }));
 });
 
 test("crop and dialogue commands cannot mutate unrelated layers", () => {

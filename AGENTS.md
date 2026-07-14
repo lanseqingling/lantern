@@ -73,6 +73,9 @@ React / Vinext Web
 ### 迭代同步清单
 
 - 新增或删除持久化对象、版本引用或 LCD 对象 ID 时，同时检查 Prisma 迁移、服务层读写、上下文构建、保存快照、导出、复制和 ID 重映射。
+- 新增或重构持久化编辑能力时，在 `packages/editor-core` 为 capability 定义唯一的运行时输入 schema，并登记 id、作用范围、风险、前置条件、预览、撤销和 Agent 权限；原子命令与 ChangeSet schema 统一放在 `packages/shared`，API、UI 与 Agent 不复制参数契约或业务默认值。
+- `WorkspaceCommand` 是编辑器内部的原子写入语言，不直接作为 Agent 工具。领域执行器负责 ID、默认值、坐标约束和复合命令；新增的 UI 与 Agent 入口通过同一 capability 规划结果进入 ChangeSet。
+- 新 capability 的 `agentAccess` 默认是 `disabled`。开放前必须具备人类入口或登记 AI-first 例外，并覆盖输入拒绝、前置条件、dry-run、原子应用和不改变原工作稿的测试。
 - 修改 Agent 可见上下文、选择范围、显式引用或输入数据时，同时检查任务 context snapshot 和 `context-debug` 输出。
 - 涉及多个画格或多个范围的 AI 能力，使用“计划 → 分阶段 Candidate → 用户确认 → 基于新 revision 继续”，不得在一个任务里静默重排页面并覆盖多格内容。
 - 新增 API 时在 `apps/api` 收口解析、schema 和所有权校验，并在浏览器 API 客户端建立对应调用；不要在组件中散落未约束请求。

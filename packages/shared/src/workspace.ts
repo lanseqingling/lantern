@@ -1,64 +1,22 @@
+import type { z } from "zod";
 import type {
-  BalloonElement,
   ComicDocument,
-  Frame,
-  FrameLayer,
-  FrameReadingEntry,
-  Geometry,
-  LocalTransform,
-  NormalizedRect,
-  PageSurface,
-  PresentationUnit,
   SnapshotEnvelope,
   StoryboardBeat,
   WorkingEnvelope,
 } from "./lcd/types";
+import { presentationUnitLayoutSchema, workspaceChangeSetSchema, workspaceCommandSchema } from "./workspace-schema";
 
-export type PresentationUnitLayout = {
-  canvas?: PresentationUnit["canvas"];
-  surfaces?: PageSurface[];
-  frames: Array<Pick<Frame, "id" | "geometry" | "zIndex"> & Partial<Pick<Frame, "border" | "shape" | "mask">>>;
-  readingSequence: FrameReadingEntry[];
-  layoutPolicy?: PresentationUnit["layoutPolicy"];
-};
+export type PresentationUnitLayout = z.infer<typeof presentationUnitLayoutSchema>;
 
-/** Public v0.4 write vocabulary. UI and Agent both submit these commands. */
-export type WorkspaceCommand =
-  | { type: "replace_chapter_presentation"; document: ComicDocument }
-  | { type: "replace_chapter_layout"; document: ComicDocument }
-  | { type: "replace_storyboard_beats"; storyboardBeats: WorkbenchFixture["storyboardBeats"] }
-  | { type: "create_frame_storyboard_beat"; unitId: string; frameId: string; storyboardBeat: StoryboardBeat }
-  | { type: "add_presentation_unit"; unit: PresentationUnit; readingIndex?: number }
-  | { type: "move_frame"; unitId: string; frameId: string; position: { x: number; y: number } }
-  | { type: "resize_frame"; unitId: string; frameId: string; geometry: Geometry }
-  | { type: "reorder_frame"; unitId: string; frameId: string; zIndex: number }
-  | { type: "set_frame_style"; unitId: string; frameId: string; border?: Frame["border"]; shape?: Frame["shape"]; mask?: Frame["mask"] }
-  | { type: "replace_presentation_layout"; unitId: string; expectedFrameIds: string[]; layout: PresentationUnitLayout }
-  | { type: "add_frame"; unitId: string; frame: Frame; readingIndex?: number }
-  | { type: "remove_frame"; unitId: string; frameId: string }
-  | { type: "set_art_crop"; unitId: string; frameId: string; layerId: string; elementId: string; crop: NormalizedRect }
-  | { type: "set_element_transform"; unitId: string; frameId?: string; layerId: string; elementId: string; transform: LocalTransform | Geometry }
-  | { type: "add_layer_element"; unitId: string; frameId: string; layerId: string; element: FrameLayer["elements"][number] }
-  | { type: "remove_layer_element"; unitId: string; frameId: string; layerId: string; elementId: string }
-  | { type: "duplicate_layer_element"; unitId: string; frameId: string; layerId: string; elementId: string; newElementId: string }
-  | { type: "reorder_layer"; unitId: string; frameId: string; layerId: string; zIndex: number }
-  | { type: "update_balloon"; unitId: string; frameId: string; layerId: string; elementId: string; changes: Partial<Pick<BalloonElement, "transform" | "tailTarget" | "shape" | "style" | "overflow">> }
-  | { type: "update_dialogue"; dialogueId: string; content: string }
-  | { type: "update_storyboard_beat"; storyboardBeatId: string; patch: Partial<Pick<StoryboardBeat, "title" | "description">> };
+/** Internal write vocabulary produced by editor capabilities and persisted in ChangeSets. */
+export type WorkspaceCommand = z.infer<typeof workspaceCommandSchema>;
 
 // Kept as a source alias while application modules migrate terminology.
 export type WorkspaceOperation = WorkspaceCommand;
 
-export type WorkspaceChangeSet = {
-  id: string;
-  projectId: string;
-  baseRevision: number;
-  source: "manual" | "candidate" | "undo" | "redo" | "migration";
-  sourceCandidateId?: string;
-  commands?: WorkspaceCommand[];
-  /** Read-only compatibility during the one-time v0.3 data migration. */
-  operations?: WorkspaceCommand[];
-};
+/** `operations` remains a read-only compatibility field for the one-time legacy data migration. */
+export type WorkspaceChangeSet = z.infer<typeof workspaceChangeSetSchema>;
 
 export function changeSetCommands(changeSet: WorkspaceChangeSet): WorkspaceCommand[] {
   return changeSet.commands ?? changeSet.operations ?? [];

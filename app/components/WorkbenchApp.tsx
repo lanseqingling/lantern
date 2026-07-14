@@ -18,14 +18,13 @@ import type {
   ComicPage,
   ImageElement,
   PageVariant,
-  PresentationUnit,
   ReferencePlacement,
   SpeechBalloonElement,
   WorkspaceChangeSet,
   WorkspaceOperation,
 } from "@/packages/shared/src";
 import { createComicPageViews, deriveLocalTransform } from "@/packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot } from "@/packages/editor-core/src";
+import { applyWorkspaceChangeSet, createSnapshot, planEditorCapability, type EditorCapabilityId } from "@/packages/editor-core/src";
 import {
   createContinuationCandidate,
   createStoryboardLayoutCandidate,
@@ -777,6 +776,20 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
+  const commitCapability = (id: EditorCapabilityId, input: unknown, label: string, nextPageIndex?: number) => {
+    try {
+      const plan = planEditorCapability(id, input, {
+        fixture: { working: state.fixture.working, storyboardBeats: state.fixture.storyboardBeats },
+        createId: uid,
+        actor: "human",
+      });
+      return commitOperations(plan.commands, label, "manual", undefined, nextPageIndex);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "编辑能力输入无效");
+      return false;
+    }
+  };
+
   const commandsForElementPatch = (unitId: string, elementId: string, patch: Record<string, unknown>): WorkspaceOperation[] => {
     const pageView = workingPages.find((item) => item.id === unitId);
     const element = pageView?.elements.find((item) => item.id === elementId);
@@ -1311,7 +1324,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (selection.type === "speech_balloon") {
       const balloon = selectedElement as SpeechBalloonElement | undefined;
       const value = editDraft.dialogue ?? balloon?.content.text ?? "";
-      if (balloon?.dialogueId) commitOperations([{ type: "update_dialogue", dialogueId: balloon.dialogueId, content: value }], "编辑气泡对白");
+      if (balloon?.dialogueId) commitCapability("update_dialogue", { dialogueId: balloon.dialogueId, content: value }, "编辑气泡对白");
     } else if (editingStoryboardTarget) {
       const title = (editDraft.title ?? editingStoryboardBeat?.title ?? "").trim();
       const description = (editDraft.description ?? editingStoryboardBeat?.description ?? "").trim();
@@ -1325,21 +1338,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           ...(editDraft.description !== undefined ? { description: editDraft.description.trim() } : {}),
         };
         if (Object.keys(patch).length) {
-          commitOperations([{ type: "update_storyboard_beat", storyboardBeatId: editingStoryboardBeatId, patch }], "编辑单格画面");
+          commitCapability("update_storyboard_beat", { storyboardBeatId: editingStoryboardBeatId, patch }, "编辑单格画面");
         }
       } else {
-        const storyboardBeatId = uid("storyboard-beat");
-        commitOperations([{
-          type: "create_frame_storyboard_beat",
+        commitCapability("create_frame_storyboard_beat", {
           unitId: editingStoryboardTarget.unitId,
           frameId: editingStoryboardTarget.frameId,
-          storyboardBeat: {
-            id: storyboardBeatId,
-            versionId: `${storyboardBeatId}-v1`,
-            title,
-            description,
-          },
-        }], "创建单格画面");
+          title,
+          description,
+        }, "创建单格画面");
       }
     }
     setEditDraft({});
@@ -1362,7 +1369,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (direction === "down") next.y = Math.min(1 - next.height, crop.y + 0.03);
     if (direction === "reset") Object.assign(next, { x: 0, y: 0, width: 1, height: 1 });
     next.x = Math.min(next.x, 1 - next.width); next.y = Math.min(next.y, 1 - next.height);
-    commitOperations(commandsForElementPatch(selection.pageId, selectedElement.id, { crop: next }), "调整图片裁切");
+    commitCapability("set_art_crop", {
+      unitId: selection.pageId,
+      frameId: selectedElement.comicFrameId,
+      layerId: selectedElement.layerId,
+      elementId: selectedElement.id,
+      crop: next,
+    }, "调整图片裁切");
   };
 
   const beginCrop = () => {
@@ -1902,27 +1915,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const addBlankComicPage = () => {
-    const document = state.fixture.working.document;
-    const pageIndex = document.units.length;
-    const kind: PresentationUnit["kind"] = document.format === "vertical" ? "vertical_segment" : document.format === "four_panel" ? "four_panel_unit" : "single_page";
-    const previousUnit = document.units[document.units.length - 1];
-    const canvas = previousUnit?.kind === kind
-      ? structuredClone(previousUnit.canvas)
-      : document.format === "vertical"
-        ? { width: 640, height: 980, background: { color: "#ffffff" } }
-        : { width: 720, height: 1080, background: { color: "#ffffff" } };
-    const id = uid(kind === "vertical_segment" ? "segment" : kind === "four_panel_unit" ? "four-panel-unit" : "page");
-    const unit: PresentationUnit = {
-      id,
-      kind,
-      canvas,
-      surfaces: [{ id: `${id}-surface`, role: kind === "vertical_segment" ? "segment" : "single", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: pageIndex + 1 }],
-      frames: [],
-      overlayLayers: [],
-      readingSequence: [],
-      layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },
-    };
-    if (commitOperations([{ type: "add_presentation_unit", unit, readingIndex: pageIndex }], "新增空白页", "manual", undefined, pageIndex)) setSelection(noSelection);
+    const pageIndex = state.fixture.working.document.units.length;
+    if (commitCapability("create_page", {}, "新增空白页", pageIndex)) setSelection(noSelection);
   };
 
   const currentPages = workingPages;

@@ -6,7 +6,10 @@ import type {
   WorkspaceChangeSet,
   WorkspaceCommand,
 } from "../../shared/src";
-import { changeSetCommands, normalizeStoryboardBeats, validateComicDocument } from "../../shared/src";
+import { changeSetCommands, normalizeStoryboardBeats, validateComicDocument, workspaceChangeSetSchema } from "../../shared/src";
+import { planEditorCapability, type EditorCapabilityContext, type EditorCapabilityId } from "./capabilities";
+
+export * from "./capabilities";
 
 export type ApplyChangeResult = Pick<WorkbenchFixture, "working" | "storyboardBeats">;
 
@@ -17,7 +20,8 @@ export function applyWorkspaceChangeSet(
   if (changeSet.baseRevision !== fixture.working.revision) {
     throw new Error(`REVISION_CONFLICT:${changeSet.baseRevision}:${fixture.working.revision}`);
   }
-  if (changeSet.source === "candidate" && !changeSet.sourceCandidateId) {
+  const parsedChangeSet = workspaceChangeSetSchema.parse(changeSet) as WorkspaceChangeSet;
+  if (parsedChangeSet.source === "candidate" && !parsedChangeSet.sourceCandidateId) {
     throw new Error("candidate ChangeSet requires sourceCandidateId");
   }
 
@@ -42,7 +46,7 @@ export function applyWorkspaceChangeSet(
     return { unit, frame, layer };
   };
 
-  for (const operation of changeSetCommands(changeSet)) {
+  for (const operation of changeSetCommands(parsedChangeSet)) {
     if (operation.type === "replace_storyboard_beats") {
       storyboardBeats.splice(0, storyboardBeats.length, ...structuredClone(operation.storyboardBeats));
       continue;
@@ -238,5 +242,26 @@ export function createSnapshot(working: WorkingEnvelope, expectedRevision: numbe
     sourceWorkingRevision: working.revision,
     document: structuredClone(working.document),
     resolvedResources: structuredClone(working.resolvedResources),
+  };
+}
+
+export function dryRunEditorCapability(id: EditorCapabilityId, rawInput: unknown, context: EditorCapabilityContext) {
+  const plan = planEditorCapability(id, rawInput, context);
+  const result = applyWorkspaceChangeSet(context.fixture, {
+    id: `dry-run:${id}`,
+    projectId: context.fixture.working.projectId,
+    baseRevision: context.fixture.working.revision,
+    source: "manual",
+    commands: plan.commands,
+  });
+  return {
+    ...plan,
+    result,
+    diffSummary: {
+      baseRevision: context.fixture.working.revision,
+      nextRevision: result.working.revision,
+      commandCount: plan.commands.length,
+      commandTypes: plan.commands.map((command) => command.type),
+    },
   };
 }

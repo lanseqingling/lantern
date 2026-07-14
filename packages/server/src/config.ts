@@ -10,6 +10,7 @@ const envSchema = z.object({
   OBJECT_STORAGE_DRIVER: z.literal("local").default("local"),
   OBJECT_STORAGE_LOCAL_DIR: z.string().default(".lantern-runtime/objects"),
   SESSION_SECRET: z.string().min(16).default("lantern-local-session-secret"),
+  AGENT_EXECUTION_MODE: z.enum(["disabled", "observe", "tool_preview", "enabled"]).default("disabled"),
   TEXT_MODEL_PROVIDER: z.enum(["deepseek", "test"]).default("test"),
   TEXT_MODEL_BASE_URL: z.string().url().default("https://api.deepseek.com"),
   TEXT_MODEL_NAME: z.string().default("deepseek-v4-flash"),
@@ -30,16 +31,17 @@ export function getConfig() {
   if (cachedConfig.APP_ENV === "production" && cachedConfig.SESSION_SECRET === "lantern-local-session-secret") {
     throw new Error("SESSION_SECRET must be replaced in production");
   }
-  if (cachedConfig.APP_ENV === "production" && cachedConfig.TEXT_MODEL_PROVIDER === "test") {
+  const agentExecutionEnabled = cachedConfig.AGENT_EXECUTION_MODE === "enabled";
+  if (cachedConfig.APP_ENV === "production" && agentExecutionEnabled && cachedConfig.TEXT_MODEL_PROVIDER === "test") {
     throw new Error("TEXT_MODEL_PROVIDER=test is not allowed in production");
   }
-  if (cachedConfig.APP_ENV === "production" && !cachedConfig.TEXT_MODEL_API_KEY) {
+  if (cachedConfig.APP_ENV === "production" && agentExecutionEnabled && !cachedConfig.TEXT_MODEL_API_KEY) {
     throw new Error("TEXT_MODEL_API_KEY is required in production");
   }
-  if (cachedConfig.APP_ENV === "production" && cachedConfig.IMAGE_MODEL_PROVIDER === "test") {
+  if (cachedConfig.APP_ENV === "production" && agentExecutionEnabled && cachedConfig.IMAGE_MODEL_PROVIDER === "test") {
     throw new Error("IMAGE_MODEL_PROVIDER=test is not allowed in production");
   }
-  if (cachedConfig.APP_ENV === "production" && !cachedConfig.IMAGE_MODEL_API_KEY) {
+  if (cachedConfig.APP_ENV === "production" && agentExecutionEnabled && !cachedConfig.IMAGE_MODEL_API_KEY) {
     throw new Error("IMAGE_MODEL_API_KEY is required in production");
   }
   return cachedConfig;

@@ -13,6 +13,7 @@ import {
   type CreateTaskInput,
 } from "../../../../packages/agent-runtime/src/task-service";
 import { applyAssetCandidate } from "../../../../packages/server/src/candidate-service";
+import { getConfig } from "../../../../packages/server/src/config";
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
 import {
@@ -70,6 +71,9 @@ type InteractionBody = {
 
 export function registerAgentRoutes(app: FastifyInstance) {
   app.post<{ Params: { conversationId: string }; Body: InteractionBody }>("/v1/conversations/:conversationId/interactions", async (request) => {
+    if (getConfig().AGENT_EXECUTION_MODE !== "enabled") {
+      throw new AppError("agent_execution_disabled", "AI 对话任务暂时不可用，现有作品和历史记录不受影响。", 503);
+    }
     const user = await currentUser(request);
     const body = interactionRequestSchema.parse(request.body) as InteractionBody;
     const conversation = await prisma.agentConversation.findFirst({ where: { id: request.params.conversationId, ownerUserId: user.id, archivedAt: null } });

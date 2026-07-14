@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store/
 /.pnp
 .pnp.*
 .yarn/*
@@ -16,6 +17,7 @@
 # next.js
 /.next/
 /.vinext/
+/.vite/
 /out/
 
 # misc
@@ -31,6 +33,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -42,3 +45,6 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# local runtime data
+/.lantern-runtime/

@@ -1,0 +1,83 @@
+{
+  "name": "lantern-ai",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.10"
+    }
+  },
+  "scripts": {
+    "dev": "concurrently -k -n web,api,worker -c cyan,green,magenta \"npm run dev:web\" \"npm run dev:api\" \"npm run dev:worker\"",
+    "dev:web": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "dev:api": "tsx watch apps/api/src/index.ts",
+    "dev:worker": "tsx watch apps/worker/src/index.ts",
+    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
+    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "test": "npm run test:unit",
+    "test:unit": "tsx --test tests/*.test.ts",
+    "test:editor": "tsx --test tests/editor-domain.test.ts",
+    "test:agent": "tsx --test tests/agent-runtime.test.ts",
+    "test:api-client": "tsx --test tests/api-client.test.ts",
+    "test:provider": "tsx --test tests/provider.test.ts",
+    "test:export": "tsx --test tests/export.test.ts",
+    "test:storage": "tsx --test tests/storage.test.ts",
+    "test:capacity": "tsx --test tests/runtime-capacity.test.ts",
+    "test:integration": "tsx --test tests/integration/db.test.ts",
+    "test:render": "npm run build && node --test tests/rendered-html.test.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "infra:up": "docker compose up -d postgres redis",
+    "infra:down": "docker compose down",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:seed:if-empty": "tsx prisma/seed-if-empty.ts",
+    "db:sample:rainy-station": "tsx samples/rainy-station/seed.ts",
+    "db:reset:rainy-station": "tsx scripts/reset-to-rainy-station.ts",
+    "db:studio": "prisma studio",
+    "provider:probe": "tsx scripts/probe-providers.ts",
+    "smoke:runtime": "OBJECT_STORAGE_LOCAL_DIR=.lantern-runtime/smoke-objects tsx scripts/smoke-runtime.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.1.0",
+    "@fastify/multipart": "9.2.1",
+    "@prisma/client": "6.19.3",
+    "bullmq": "5.61.2",
+    "dotenv": "17.2.3",
+    "fastify": "5.10.0",
+    "ioredis": "5.8.1",
+    "lucide-react": "^1.24.0",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "sharp": "0.34.5",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "concurrently": "9.2.1",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "prisma": "6.19.3",
+    "tailwindcss": "4.2.1",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module"
+}

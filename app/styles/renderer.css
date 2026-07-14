@@ -1,0 +1,52 @@
+.comic-page-spread { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; align-items: start; }
+.comic-page-spread.one { grid-template-columns: minmax(0, 1fr); }
+.comic-page-spread:not(.one) { overflow: visible; border: 1px solid rgba(23,32,38,.14); border-radius: 6px; box-shadow: 0 26px 70px rgba(23,32,38,.16); }
+.comic-page-spread:not(.one) .comic-page { border: 0; border-radius: 0; box-shadow: none; }
+.comic-page-spread:not(.one)::after { content: ""; position: absolute; z-index: 40; left: 50%; top: 0; bottom: 0; border-left: 1px dashed rgba(36,127,130,.34); pointer-events: none; }
+.spread-page { position: relative; min-width: 0; }
+
+.comic-page { position: relative; width: 100%; overflow: visible; border: 1px solid rgba(23,32,38,.14); border-radius: 6px; background: var(--paper); box-shadow: 0 26px 70px rgba(23,32,38,.16); user-select: none; touch-action: none; }
+.paper-grain { position: absolute; inset: 0; z-index: 0; border-radius: inherit; background: linear-gradient(115deg, rgba(23,32,38,.018), transparent 35%), #fff; pointer-events: none; }
+.lcd-image, .lcd-frame, .lcd-balloon { position: absolute; box-sizing: border-box; }
+.lcd-image { overflow: visible; background: #eef1f2; cursor: pointer; }
+.lcd-image-crop { width: 100%; height: 100%; overflow: hidden; }
+.lcd-image img { display: block; width: 100%; height: 100%; object-fit: cover; transform-origin: center; transition: filter 140ms ease; pointer-events: none; }
+.missing-frame-image { display: grid; width: 100%; height: 100%; place-items: center; background: linear-gradient(135deg, rgba(100,200,200,.12), rgba(255,255,255,.78)); color: rgba(36,127,130,.68); font-size: 10px; letter-spacing: .04em; }
+.lcd-image:hover img { filter: contrast(1.03); }
+.lcd-image.selected { box-shadow: inset 0 0 0 2px rgba(100,200,200,.66); }
+.lcd-image.multi-selected { box-shadow: inset 0 0 0 2px rgba(225,174,75,.94), 0 0 0 3px rgba(225,174,75,.13); }
+.lcd-image.selected img { overflow: hidden; }
+.comic-page.interaction-crop .lcd-image.selected { cursor: grab; pointer-events: auto; touch-action: none; }
+.comic-page.interaction-crop .lcd-image.selected:active { cursor: grabbing; }
+.lcd-frame { pointer-events: none; border-style: solid; }
+.lcd-frame.multi-selected { outline: 2px solid rgba(225,174,75,.94); outline-offset: 2px; background: rgba(225,174,75,.035); filter: drop-shadow(0 0 4px rgba(225,174,75,.26)); }
+.comic-page.interaction-move .lcd-frame.selected { cursor: move; pointer-events: auto; background: rgba(100,200,200,.035); }
+.reading-order { position: absolute; z-index: 10; left: -12px; top: -12px; display: grid; place-items: center; width: 25px; height: 25px; border: 2px solid #fff; border-radius: 50%; background: #172026; color: #fff; box-shadow: 0 6px 15px rgba(23,32,38,.18); font-size: 10px; font-weight: 900; pointer-events: auto; cursor: grab; }
+.reading-order:active { cursor: grabbing; }
+.selection-corners { position: absolute; z-index: 20; inset: -3px; pointer-events: none; background: linear-gradient(var(--cyan), var(--cyan)) left top / 17% 2px no-repeat, linear-gradient(var(--cyan), var(--cyan)) left top / 2px 24% no-repeat, linear-gradient(var(--cyan), var(--cyan)) right top / 12% 2px no-repeat, linear-gradient(var(--cyan), var(--cyan)) right top / 2px 18% no-repeat, linear-gradient(var(--cyan), var(--cyan)) left bottom / 17% 2px no-repeat, linear-gradient(var(--cyan), var(--cyan)) left bottom / 2px 24% no-repeat, linear-gradient(var(--cyan), var(--cyan)) right bottom / 12% 2px no-repeat, linear-gradient(var(--cyan), var(--cyan)) right bottom / 2px 18% no-repeat; filter: drop-shadow(0 0 6px rgba(100,200,200,.7)); }
+.selection-corners::after { content: ""; position: absolute; inset: -8px; z-index: -1; border-radius: 14px; background: rgba(100,200,200,.1); filter: blur(5px); }
+.selection-label { position: absolute; left: 50%; top: -22px; transform: translateX(-50%); height: 22px; padding: 3px 9px; border: 1px solid rgba(100,200,200,.46); border-radius: 999px; background: rgba(255,255,255,.9); color: var(--cyan-deep); box-shadow: 0 8px 20px rgba(23,32,38,.1); backdrop-filter: blur(14px); font-size: 9px; font-weight: 900; white-space: nowrap; }
+.comic-page.interaction-move .selection-corners, .comic-page.interaction-crop .selection-corners { background: linear-gradient(#e1ae4b, #e1ae4b) left top / 17% 2px no-repeat, linear-gradient(#e1ae4b, #e1ae4b) left top / 2px 24% no-repeat, linear-gradient(#e1ae4b, #e1ae4b) right top / 12% 2px no-repeat, linear-gradient(#e1ae4b, #e1ae4b) right top / 2px 18% no-repeat, linear-gradient(#e1ae4b, #e1ae4b) left bottom / 17% 2px no-repeat, linear-gradient(#e1ae4b, #e1ae4b) left bottom / 2px 24% no-repeat, linear-gradient(#e1ae4b, #e1ae4b) right bottom / 12% 2px no-repeat, linear-gradient(#e1ae4b, #e1ae4b) right bottom / 2px 18% no-repeat; filter: drop-shadow(0 0 4px rgba(225,174,75,.4)); }
+.comic-page.interaction-move .selection-corners::after, .comic-page.interaction-crop .selection-corners::after { background: rgba(225,174,75,.07); }
+.comic-page.interaction-move .selection-label, .comic-page.interaction-crop .selection-label { border-color: rgba(225,174,75,.46); color: #8b641c; box-shadow: 0 8px 20px rgba(183,125,27,.1); }
+.resize-handle { position: absolute; z-index: 30; right: -7px; bottom: -7px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 5px; background: var(--cyan); box-shadow: 0 3px 10px rgba(36,127,130,.28); pointer-events: auto; cursor: nwse-resize; }
+.lcd-balloon { display: grid; place-items: center; overflow: visible; isolation: isolate; padding: 5px 7px; border: 0; background: transparent; box-shadow: none; font-weight: 720; line-height: 1.25; text-align: center; cursor: pointer; }
+.balloon-order { position: absolute; z-index: 4; right: -7px; bottom: -7px; display: grid; place-items: center; min-width: 17px; height: 15px; border: 1px solid #fff; border-radius: 5px; background: #172026; padding: 0 3px; color: #fff; box-shadow: 0 3px 8px rgba(23,32,38,.16); font-size: 8px; font-weight: 900; line-height: 1; pointer-events: none; }
+.balloon-shape { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 2px 0 rgba(0,0,0,.14)); }
+.lcd-balloon.shape-normal .balloon-shape { filter: none; }
+.lcd-balloon.shape-normal .balloon-outline { stroke-width: 3.8; }
+.lcd-balloon.shape-normal .balloon-tail-outline { stroke-width: 2; }
+.balloon-outline { fill: #fff; stroke: #111; stroke-width: 2.4; stroke-linejoin: round; }
+.balloon-tail-fill { fill: #fff; stroke: none; }
+.balloon-tail-outline { fill: none; stroke: #111; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.balloon-mask { fill: #fff; stroke: none; }
+.balloon-content { position: relative; z-index: 1; }
+.comic-page.interaction-crop .lcd-balloon.selected { outline: 4px solid rgba(225,174,75,.92); outline-offset: 5px; box-shadow: 0 2px 0 rgba(0,0,0,.14), 0 0 0 9px rgba(225,174,75,.08), 0 0 17px rgba(225,174,75,.26); }
+.balloon-resize-handle, .balloon-tail-handle { position: absolute; z-index: 35; display: block; width: 13px; height: 13px; border: 2px solid #fff; background: var(--cyan); box-shadow: 0 3px 9px rgba(36,127,130,.26); pointer-events: auto; }
+.balloon-resize-handle { right: -7px; bottom: -7px; border-radius: 4px; cursor: nwse-resize; }
+.balloon-tail-handle { border-radius: 50%; cursor: crosshair; transform: translate(-50%,-50%); }
+.lcd-balloon.selected { outline: 3px solid rgba(100,200,200,.82); outline-offset: 3px; }
+.lcd-balloon.multi-selected { outline: 2px solid rgba(225,174,75,.94); outline-offset: 4px; box-shadow: 0 0 0 5px rgba(225,174,75,.08), 0 0 12px rgba(225,174,75,.18); }
+.comic-page.interaction-move .lcd-balloon.selected { outline-color: rgba(225,174,75,.9); box-shadow: 0 2px 0 rgba(0,0,0,.14), 0 0 0 6px rgba(225,174,75,.08), 0 0 12px rgba(225,174,75,.24); }
+.comic-page.multi-moving .multi-selected, .reference-card.multi-moving { translate: var(--multi-move-x) var(--multi-move-y); }
+.page-watermark { position: absolute; right: 8px; bottom: 5px; z-index: 20; color: rgba(36,127,130,.34); font-size: 7px; font-weight: 900; letter-spacing: .12em; pointer-events: none; }

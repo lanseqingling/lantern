@@ -1,0 +1,25 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+confirmModulesPurge: false
+overrides:
+  next>postcss: 8.5.10
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - "esbuild"
+  - "fsevents"
+  - "msgpackr-extract"
+  - "prisma"
+  - "sharp"
+  - "unrs-resolver"
+  - "workerd"
+allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  "esbuild": true
+  "msgpackr-extract": true
+  "prisma": true
+  "sharp": true
+  "unrs-resolver": true
+  "workerd": true

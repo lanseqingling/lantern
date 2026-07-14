@@ -1,0 +1,492 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ComicFormat {
+  PAGE
+  VERTICAL
+  FOUR_PANEL
+}
+
+enum CanvasPageMode {
+  SINGLE
+  SPREAD
+}
+
+enum AssetKind {
+  CHARACTER
+  SCENE
+  STYLE
+  PROP
+  REFERENCE_IMAGE
+  SKETCH
+  GENERATED_IMAGE
+}
+
+enum AssetLibraryStatus {
+  CANVAS_ONLY
+  LIBRARY
+}
+
+enum MessageRole {
+  USER
+  AGENT
+  SYSTEM
+}
+
+enum MessageKind {
+  PLAIN
+  QUESTION
+  CONFIRMATION
+  TASK
+  CANDIDATE
+  FAILED
+  CANCELED
+}
+
+enum TaskType {
+  STORYBOARD
+  PAGE_LAYOUT
+  FRAME_IMAGE_GENERATE
+  FRAME_IMAGE_REFINE
+  ASSET_PARSE
+  DIALOGUE
+  EXPORT
+}
+
+enum TaskStatus {
+  CREATED
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCEL_REQUESTED
+  CANCELED
+}
+
+enum CandidateKind {
+  STORYBOARD
+  PAGE_LAYOUT
+  FRAME_IMAGE
+  FRAME_IMAGE_PATCH
+  ASSET
+  DIALOGUE
+}
+
+enum CandidateStatus {
+  AVAILABLE
+  APPLIED
+  REVERTED
+  DISCARDED
+  STALE
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  displayName String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  comics        Comic[]
+  chapters      Chapter[]
+  projects      Project[]
+  assets        Asset[]
+  conversations AgentConversation[]
+  messages      Message[]
+  tasks         GenerationTask[]
+  candidates    Candidate[]
+  snapshots     SavedSnapshot[]
+  pageVariants  PageVariant[]
+  canvasAssetItems CanvasAssetListItem[]
+}
+
+model Comic {
+  id               String      @id @default(cuid())
+  ownerUserId      String
+  title            String
+  summary          String      @default("")
+  worldSummary     String      @default("")
+  format           ComicFormat @default(PAGE)
+  canvasPageMode   CanvasPageMode @default(SINGLE)
+  readingDirection String      @default("ltr")
+  styleSummary     String      @default("")
+  coverObjectKey   String?
+  coverContentType String?
+  coverWidth       Int?
+  coverHeight      Int?
+  archivedAt       DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  owner    User      @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  chapters Chapter[]
+
+  @@index([ownerUserId, archivedAt])
+}
+
+model Chapter {
+  id          String    @id @default(cuid())
+  ownerUserId String
+  comicId     String
+  number      Int
+  title       String
+  summary     String    @default("")
+  coverObjectKey   String?
+  coverContentType String?
+  coverWidth       Int?
+  coverHeight      Int?
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner     User            @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  comic     Comic           @relation(fields: [comicId], references: [id], onDelete: Restrict)
+  project   Project?
+  snapshots SavedSnapshot[]
+
+  @@unique([comicId, number])
+  @@index([ownerUserId, archivedAt])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  ownerUserId String
+  chapterId   String   @unique
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner            User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  chapter          Chapter                    @relation(fields: [chapterId], references: [id], onDelete: Restrict)
+  workingRevisions WorkingRevision[]
+  storyboardBeats  StoryboardBeat[]
+  assets           Asset[]
+  canvasAssetItems CanvasAssetListItem[]
+  conversations    AgentConversation[]
+  placements       CanvasReferencePlacement[]
+  tasks            GenerationTask[]
+  candidates       Candidate[]
+  snapshots        SavedSnapshot[]
+  pageVariants     PageVariant[]
+
+  @@index([ownerUserId])
+}
+
+model WorkingRevision {
+  id                String   @id @default(cuid())
+  projectId         String
+  revision          Int
+  document          Json
+  storyboardBeats            Json
+  storyboardBeatVersionHeads Json     @default("{}")
+  assetVersionHeads Json     @default("{}")
+  changeSet         Json?
+  sourceCandidateId String?
+  createdAt         DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, revision])
+  @@index([projectId, createdAt])
+}
+
+model SavedSnapshot {
+  id                    String   @id @default(cuid())
+  ownerUserId           String
+  chapterId             String
+  projectId             String
+  sourceWorkingRevision Int
+  document              Json
+  storyboardBeatVersions Json
+  assetVersions         Json
+  createdAt             DateTime @default(now())
+
+  owner   User    @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  chapter Chapter @relation(fields: [chapterId], references: [id], onDelete: Restrict)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, chapterId, createdAt])
+  @@index([projectId, sourceWorkingRevision])
+}
+
+model StoryboardBeat {
+  id                   String    @id @default(cuid())
+  ownerUserId          String
+  projectId            String
+  currentVersionNumber Int       @default(1)
+  archivedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  project  Project        @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  versions StoryboardBeatVersion[]
+
+  @@index([ownerUserId, projectId, archivedAt])
+}
+
+model StoryboardBeatVersion {
+  id              String   @id @default(cuid())
+  storyboardBeatId         String
+  version         Int
+  title           String
+  description     String
+  sourceTaskId    String?
+  createdAt       DateTime @default(now())
+
+  storyboardBeat StoryboardBeat @relation(fields: [storyboardBeatId], references: [id], onDelete: Restrict)
+
+  @@unique([storyboardBeatId, version])
+  @@index([storyboardBeatId, createdAt])
+}
+
+model Asset {
+  id                   String    @id @default(cuid())
+  ownerUserId          String
+  projectId            String
+  kind                 AssetKind
+  name                 String
+  description          String    @default("")
+  attributes           Json      @default("{}")
+  libraryStatus        AssetLibraryStatus @default(LIBRARY)
+  currentVersionNumber Int       @default(1)
+  archivedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  owner      User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project    Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  versions   AssetVersion[]
+  placements CanvasReferencePlacement[]
+  canvasListItems CanvasAssetListItem[]
+
+  @@index([ownerUserId, projectId, kind, archivedAt])
+}
+
+/// A project-local view of an image that can be used on the canvas. The source
+/// is always stored as an Asset/AssetVersion for durable object storage, while
+/// libraryStatus decides whether it is exposed in the comic-wide Asset Studio.
+model CanvasAssetListItem {
+  id          String   @id @default(cuid())
+  ownerUserId String
+  projectId   String
+  assetId     String
+  displayName String
+  displayKind AssetKind
+  sortIndex   Int      @default(0)
+  pinned      Boolean  @default(false)
+  hiddenAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner   User    @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, assetId])
+  @@index([ownerUserId, projectId, hiddenAt, pinned, sortIndex])
+}
+
+model AssetVersion {
+  id           String   @id @default(cuid())
+  assetId      String
+  version      Int
+  objectKey    String?  @unique
+  contentType  String?
+  byteSize     Int?
+  width        Int?
+  height       Int?
+  checksum     String?
+  source       String
+  sourceTaskId String?
+  createdAt    DateTime @default(now())
+
+  asset      Asset                      @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  placements CanvasReferencePlacement[]
+
+  @@unique([assetId, version])
+  @@index([assetId, createdAt])
+}
+
+model AgentConversation {
+  id          String    @id @default(cuid())
+  ownerUserId String
+  projectId   String
+  title       String    @default("创作对话")
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner      User             @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project    Project          @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  messages   Message[]
+  tasks      GenerationTask[]
+  candidates Candidate[]
+
+  @@index([ownerUserId, projectId, archivedAt])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  ownerUserId    String
+  projectId      String
+  conversationId String
+  role           MessageRole
+  kind           MessageKind @default(PLAIN)
+  content        String
+  metadata       Json        @default("{}")
+  createdAt      DateTime    @default(now())
+
+  owner        User               @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  conversation AgentConversation  @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  references   MessageReference[]
+
+  @@index([ownerUserId, projectId, conversationId, createdAt])
+}
+
+model MessageReference {
+  id         String   @id @default(cuid())
+  messageId  String
+  objectType String
+  objectId   String
+  versionId  String?
+  createdAt  DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@index([messageId])
+  @@index([objectType, objectId, versionId])
+}
+
+model CanvasReferencePlacement {
+  id             String   @id @default(cuid())
+  ownerUserId    String
+  projectId      String
+  assetId        String
+  assetVersionId String
+  x              Float
+  y              Float
+  zoom           Float    @default(1)
+  zIndex         Int      @default(10)
+  collapsed      Boolean  @default(false)
+  pinned         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  asset        Asset        @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  assetVersion AssetVersion @relation(fields: [assetVersionId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, projectId])
+  @@index([assetId, assetVersionId])
+}
+
+model GenerationTask {
+  id                String     @id @default(cuid())
+  ownerUserId       String
+  projectId         String
+  conversationId    String?
+  type              TaskType
+  status            TaskStatus @default(CREATED)
+  idempotencyKey    String
+  baseRevision      Int
+  scope             String
+  target            Json
+  input             Json
+  contextSnapshot   Json
+  output            Json?
+  provider          String
+  model             String
+  progress          Int        @default(0)
+  cancelRequestedAt DateTime?
+  completedAt       DateTime?
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  owner        User                @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project      Project             @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  conversation AgentConversation?  @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  attempts     GenerationAttempt[]
+  candidates   Candidate[]
+
+  @@unique([ownerUserId, idempotencyKey])
+  @@index([ownerUserId, projectId, status, createdAt])
+}
+
+model GenerationAttempt {
+  id                String     @id @default(cuid())
+  taskId            String
+  attempt           Int
+  status            TaskStatus
+  providerRequestId String?
+  responseMeta      Json?
+  errorCode         String?
+  errorMessage      String?
+  startedAt         DateTime   @default(now())
+  completedAt       DateTime?
+
+  task GenerationTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, attempt])
+  @@index([taskId, startedAt])
+}
+
+model Candidate {
+  id              String          @id @default(cuid())
+  ownerUserId     String
+  projectId       String
+  conversationId  String?
+  taskId          String
+  kind            CandidateKind
+  status          CandidateStatus @default(AVAILABLE)
+  title           String
+  changeSummary   String
+  targetLabel     String
+  target          Json
+  baseRevision    Int
+  sourceRefs      Json            @default("[]")
+  outputRefs      Json            @default("[]")
+  payload         Json
+  operations      Json            @default("[]")
+  appliedRevision Int?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  owner        User               @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project      Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  conversation AgentConversation? @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  task         GenerationTask     @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, projectId, status, createdAt])
+  @@index([conversationId, status, createdAt])
+}
+
+model PageVariant {
+  id                      String   @id @default(cuid())
+  ownerUserId             String
+  projectId               String
+  unitId                  String
+  name                    String
+  kind                    String
+  scope                   Json
+  commands                Json
+  baseRevision            Int
+  sourceCandidateId       String?
+  thumbnailAssetVersionId String?
+  lastAppliedRevision     Int?
+  archivedAt              DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  owner   User    @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, projectId, unitId, archivedAt, createdAt])
+}

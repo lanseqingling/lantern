@@ -1,0 +1,14 @@
+{
+  "protocol": "lantern-export-0.2",
+  "pageCount": 2,
+  "pageWidth": 720,
+  "pageHeight": 1080,
+  "longWidth": 720,
+  "longHeight": 2184,
+  "storyboardBeatCount": 8,
+  "firstStoryboardBeatVersion": "golden-storyboardBeat-1-v1",
+  "lastStoryboardBeatVersion": "golden-storyboardBeat-8-v1",
+  "assetVersionHeads": {
+    "asset-character": "asset-character-v2"
+  }
+}

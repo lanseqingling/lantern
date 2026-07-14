@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "allowJs": false,
+    "isolatedModules": false,
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "apps/**/*.ts",
+    "packages/agent-runtime/**/*.ts",
+    "packages/server/**/*.ts",
+    "prisma/**/*.ts",
+    "tests/*.test.ts"
+  ]
+}

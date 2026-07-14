@@ -1,0 +1,31 @@
+.candidate-compare-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  z-index: 165;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid rgba(20, 92, 89, .15);
+  border-radius: 15px;
+  background: rgba(250, 253, 251, .96);
+  box-shadow: 0 12px 34px rgba(22, 49, 48, .16);
+  transform: translateX(-50%);
+}
+.candidate-compare-toolbar button {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #24413f;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.candidate-compare-toolbar button:hover { background: #edf7f5; }
+.candidate-compare-toolbar button.primary { background: #118f88; color: white; }
+.candidate-version-switch { display: flex; padding: 3px; border-radius: 11px; background: #e9f2f0; }
+.candidate-version-switch button { min-height: 28px; padding: 0 11px; }
+.candidate-version-switch button.active { background: white; color: #087b75; box-shadow: 0 2px 8px rgba(31, 74, 71, .12); }

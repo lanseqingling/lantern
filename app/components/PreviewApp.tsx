@@ -124,6 +124,19 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
       setDownloadMenuOpen(false);
     }
   };
+  const downloadLcd = () => {
+    const bytes = new Blob([`${JSON.stringify(document, null, 2)}\n`], { type: "application/json" });
+    const objectUrl = URL.createObjectURL(bytes);
+    const link = window.document.createElement("a");
+    link.href = objectUrl;
+    link.download = `${chapterId}-${source}.lcd.json`;
+    window.document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    setNotice("LCD 已开始下载");
+    setDownloadMenuOpen(false);
+  };
 
   if (loadError) return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>预览暂时无法载入</h1><p>{loadError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
 
@@ -147,7 +160,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         </div>
         <div className="preview-save-tool">
           <button type="button" aria-label="下载选项" aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
-          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><span>下载到本地</span><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadPageIndices.length === 2 ? `下载当前双页 · ${downloadPageIndices.map((index) => index + 1).join("、")}` : `下载当前页 · ${shownPageIndex + 1}`}</button></div> : null}
+          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><span>下载到本地</span><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadPageIndices.length === 2 ? `下载当前双页 · ${downloadPageIndices.map((index) => index + 1).join("、")}` : `下载当前页 · ${shownPageIndex + 1}`}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
         </div>
       </nav>
       {notice ? <div className="preview-notice" role="status">{notice}</div> : null}

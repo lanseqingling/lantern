@@ -295,7 +295,7 @@ AGENT_EXECUTION_MODE=disabled | observe | tool_preview | enabled
 | 核心 | 对白与气泡 | 调整气泡位置、尺寸、尾巴和基础样式 | 通用 | `BalloonElement.transform / tailTarget / shape / style`；只提供少量预设 | 已接入 | 未登记 |
 | 核心 | 资产与一致性 | 上传、摆放、整理和复用人物、场景与风格参考 | 通用 | `AssetVersion / ReferencePlacement / context snapshot` | 已接入 | 不适用：作为生成上下文 |
 | 核心 | 版本与输出 | 保存、预览、应用、撤销和恢复一次创作结果 | 通用 | `ChangeSet / Candidate / Undo / Snapshot` | 已接入 | 不适用 |
-| 核心 | 版本与输出 | 页漫单页/双页预览、条漫连续预览和当前范围下载 | 通用 | LCD 与固定资源版本的确定性渲染和导出 | 已接入 | 不适用 |
+| 核心 | 版本与输出 | 页漫单页/双页预览、条漫连续预览、当前范围 PNG 和选中版本 LCD 下载 | 通用 | LCD 与固定资源版本的确定性渲染和导出 | 已接入 | 不适用 |
 | 增强 | 基础组织 | 复制和重排页面或滚动段 | 通用 | `reading.unitOrder` 与展示单元复制、ID 重映射 | 未接入 | 未登记 |
 | 增强 | 画格编排 | 根据分镜生成 2-3 个页面布局候选 | 通用 | 混合：模型规划布局意图，确定性布局器生成结构 Candidate | 部分接入：旧任务直接替换大范围文档 | 未登记 |
 | 增强 | 画格表现 | 使用无框、出血、整页主视觉和局部断框 | 通用 | `Frame.border / mask / geometry` 的简单预设；局部断框由出格对象或遮罩覆盖，不扩协议 | 未接入 | 未登记 |

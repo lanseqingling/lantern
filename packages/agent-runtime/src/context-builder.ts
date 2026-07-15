@@ -261,8 +261,8 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
           } : undefined,
           images: art.map((image) => ({ elementId: image.id, assetId: image.assetId, assetVersionId: image.assetVersionId, transform: image.transform, crop: image.crop })),
           dialogueElements: dialogueElements.map((element) => element.kind === "balloon"
-            ? { id: element.id, type: element.kind, dialogueId: element.dialogueId, content: dialogueById.get(element.dialogueId), transform: element.transform }
-            : { id: element.id, type: element.kind, content: element.content, transform: element.transform }),
+            ? { id: element.id, type: element.kind, dialogueId: element.dialogueId, content: dialogueById.get(element.dialogueId), transform: element.transform, appearance: element.appearance }
+            : { id: element.id, type: element.kind, content: element.content, transform: element.transform, appearance: element.appearance }),
           layers: frame.layers.map((layer) => ({ id: layer.id, kind: layer.kind, name: layer.name, zIndex: layer.zIndex, overflow: layer.overflow, elementIds: layer.elements.map((element) => element.id) })),
         };
       });

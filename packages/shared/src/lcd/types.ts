@@ -67,6 +67,9 @@ export type ResourceBinding = {
   checksum?: string;
 };
 
+/** A fixed visual resource used by a semantic text or balloon element. */
+export type VisualAssetReference = Pick<ResourceBinding, "assetId" | "assetVersionId">;
+
 export type ResolvedResourceMap = Record<string, { url: string; expiresAt?: string }>;
 
 export type Dialogue = {
@@ -118,6 +121,7 @@ export type TextElement = {
     align?: "left" | "center" | "right";
     writingMode?: "horizontal" | "vertical";
   };
+  appearance?: VisualAssetReference;
   visible?: boolean;
   name?: string;
 };
@@ -138,6 +142,7 @@ export type BalloonElement = {
     strokeWidth: number;
     writingMode?: "horizontal" | "vertical";
   };
+  appearance?: VisualAssetReference;
   overflow?: LayerOverflow;
   visible?: boolean;
   name?: string;
@@ -337,8 +342,9 @@ export type TextCanvasElement = CanvasViewBase & {
   type: "text";
   comicFrameId?: string;
   readingOrder?: number;
-  content: { text: string; role: "caption" | "narration" };
+  content: { text: string; role: TextElement["role"] };
   style: TextElement["style"];
+  appearance?: VisualAssetReference;
   layerId: string;
 };
 
@@ -351,6 +357,7 @@ export type SpeechBalloonElement = CanvasViewBase & {
   readingOrder: number;
   content: { text: string; shape: BalloonElement["shape"]; tailTarget?: Point };
   style: BalloonElement["style"];
+  appearance?: VisualAssetReference;
   layerId: string;
 };
 
@@ -389,12 +396,12 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
         id: element.id, type: "speech_balloon", geometry, zIndex: frame.zIndex * 100 + layer.zIndex, layerId: layer.id, comicFrameId: frame.id,
         linkedStoryboardBeatId: primary?.storyboardBeatId ?? "unassigned", linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId ?? "unassigned-v1",
         dialogueId: element.dialogueId, readingOrder: 1, content: { text: dialogueById.get(element.dialogueId) ?? "", shape: element.shape, tailTarget: element.tailTarget ? { x: frame.geometry.x + element.tailTarget.x * frame.geometry.width, y: frame.geometry.y + element.tailTarget.y * frame.geometry.height } : undefined },
-        style: element.style, visible: element.visible, name: element.name,
+        style: element.style, appearance: element.appearance, visible: element.visible, name: element.name,
       });
       else if (element.kind === "text") elements.push({
         id: element.id, type: "text", geometry, zIndex: frame.zIndex * 100 + layer.zIndex, layerId: layer.id, comicFrameId: frame.id,
         linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
-        content: { text: element.content, role: element.role === "sfx" ? "caption" : element.role }, style: element.style, visible: element.visible, name: element.name,
+        content: { text: element.content, role: element.role }, style: element.style, appearance: element.appearance, visible: element.visible, name: element.name,
       });
     }));
   });

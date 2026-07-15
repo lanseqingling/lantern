@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import type { ArtElement, BalloonElement, ComicDocument, Frame, Geometry, LocalTransform, Point, ResolvedResourceMap } from "@/packages/shared/src";
+import type { ArtElement, BalloonElement, ComicDocument, Frame, Geometry, LocalTransform, Point, ResolvedResourceMap, TextElement } from "@/packages/shared/src";
 import { resolveLocalTransform } from "@/packages/shared/src";
 import type { Selection } from "@/app/lib/workbench-state";
 
@@ -66,6 +66,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const framesById = new Map(frames.map((frame) => [frame.id, frame]));
   const readingOrder = new Map(unit.readingSequence.map((entry, index) => [entry.frameId, index + 1]));
   const images = frames.flatMap((frame) => frame.layers.flatMap((layer) => layer.kind === "art" ? layer.elements.map((image) => ({ frame, layer, image: { ...image, ...(drafts[image.id] as Partial<ArtElement> | undefined) } })) : []));
+  const texts = frames.flatMap((frame) => frame.layers.flatMap((layer) => layer.kind === "text" ? layer.elements.filter((element): element is TextElement => element.kind === "text").map((text) => ({ frame, layer, text })) : []));
   const balloons = frames.flatMap((frame) => frame.layers.flatMap((layer) => layer.kind === "text" ? layer.elements.filter((element): element is BalloonElement => element.kind === "balloon").map((balloon) => ({ frame, layer, balloon: { ...balloon, ...(drafts[balloon.id] as Partial<BalloonElement> | undefined) } })) : []));
 
   const frameLabel = (frame: Frame) => `画格 ${readingOrder.get(frame.id) ?? ""}`.trim();
@@ -179,6 +180,14 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         {selected && editable ? <><div className="selection-corners frame-corners" aria-hidden="true"><span className="selection-label">{frameLabel(frame)}</span></div>{interactionMode === "move" ? <button type="button" aria-label="调整画格大小" className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) })}/> : null}</> : null}
       </div>;
     })}
+    {texts.map(({ frame, layer, text }) => {
+      if (text.visible === false) return null;
+      const appearanceSrc = text.appearance ? resolvedResources?.[text.appearance.assetVersionId]?.url : undefined;
+      return <div className={`lcd-text role-${text.role}`} data-element-id={text.id} data-page-id={unit.id} key={text.id}
+        style={{ ...geometryStyle(resolveLocalTransform(frame.geometry, text.transform), unit.canvas.width, unit.canvas.height), zIndex: frame.zIndex * 100 + layer.zIndex + 95, color: text.style.color, fontFamily: text.style.fontFamily, fontSize: `${Math.max(8, text.style.fontSize / 2.4)}px`, fontWeight: text.style.fontWeight, textAlign: text.style.align }}>
+        {appearanceSrc ? <img src={appearanceSrc} alt="" draggable={false} /> : <span>{text.content}</span>}
+      </div>;
+    })}
     {balloons.map(({ frame, layer, balloon }, index) => {
       const selected = selection?.type === "speech_balloon" && selection.id === balloon.id; const label = balloon.name ?? `${frameLabel(frame)}气泡`;
       const rawTail = balloon.tailTarget ?? { x: balloon.transform.x + balloon.transform.width * 1.14, y: balloon.transform.y + balloon.transform.height * 1.14 };
@@ -198,7 +207,8 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const tailTip = { x: centerX + unitX * (edgeDistance + tailLength), y: centerY + unitY * (edgeDistance + tailLength) };
       const tailTipX = (tailTip.x - balloon.transform.x) / balloon.transform.width * 100;
       const tailTipY = (tailTip.y - balloon.transform.y) / balloon.transform.height * 100;
-      const supportsTail = balloon.shape === "normal";
+      const appearanceSrc = balloon.appearance ? resolvedResources?.[balloon.appearance.assetVersionId]?.url : undefined;
+      const supportsTail = balloon.shape === "normal" && !appearanceSrc;
       const tailDirection = Math.atan2((tailTipY - 50) / 46, (tailTipX - 50) / 48);
       const tailRoot = (offset: number) => ({ x: 50 + 48 * Math.cos(tailDirection + offset), y: 50 + 46 * Math.sin(tailDirection + offset) });
       const tailStart = tailRoot(-.22);
@@ -214,10 +224,10 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         onClick={(event) => { event.stopPropagation(); if (!suppressClick.current) onSelect?.({ type: "speech_balloon", id: balloon.id, pageId: unit.id, label }); }}
         onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!suppressClick.current) onSelect?.({ type: "speech_balloon", id: balloon.id, pageId: unit.id, label }); }}
         onPointerDown={(event) => { if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label }); }}>
-        <svg className="balloon-shape" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
+        {appearanceSrc ? <img className="balloon-appearance" src={appearanceSrc} alt="" draggable={false} /> : <svg className="balloon-shape" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
           {balloon.shape === "caption_box" ? <rect className="balloon-outline" x="1.5" y="1.5" width="97" height="97" rx="3" vectorEffect="non-scaling-stroke" /> : <ellipse className="balloon-outline" cx="50" cy="50" rx="48" ry="46" vectorEffect="non-scaling-stroke" />}
           {supportsTail ? <><path className="balloon-tail-fill" d={tailFillPath} /><path className="balloon-tail-outline" d={tailOutlinePath} vectorEffect="non-scaling-stroke" /><ellipse className="balloon-mask" cx="50" cy="50" rx="48" ry="46" /></> : null}
-        </svg>
+        </svg>}
         {editable ? <span className="balloon-order" aria-hidden="true">{index + 1}</span> : null}
         <span className="balloon-content">{dialogueById.get(balloon.dialogueId) ?? ""}</span>
         {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label="调整气泡大小" onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label })}/>{supportsTail ? <span className="balloon-tail-handle" aria-label="调整气泡尾巴长度与指向" style={{ left: `${tailTipX}%`, top: `${tailTipY}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform, startTailTarget: tailTip }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label })}/> : null}</> : null}

@@ -28,6 +28,13 @@ function frameShape(frame: Frame, fill: string, stroke: string, strokeWidth: num
   return `<rect x="${g.x}" y="${g.y}" width="${g.width}" height="${g.height}" rx="${frame.shape.radius ?? 0}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
 }
 
+function renderAppearance(appearance: { assetVersionId: string } | undefined, geometry: Geometry, assets: Map<string, string>, clip: string) {
+  if (!appearance) return undefined;
+  const data = assets.get(appearance.assetVersionId);
+  if (!data) return undefined;
+  return `<image href="${data}" x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" preserveAspectRatio="none"${clip}/>`;
+}
+
 function renderElement(element: FrameElement, geometry: Geometry, assets: Map<string, string>, dialogues: Map<string, string>, clipId?: string) {
   if (element.visible === false) return "";
   const clip = clipId ? ` clip-path="url(#${clipId})"` : "";
@@ -39,11 +46,14 @@ function renderElement(element: FrameElement, geometry: Geometry, assets: Map<st
   }
   if (element.kind === "balloon") {
     const value = dialogues.get(element.dialogueId) ?? ""; const style = element.style;
-    const shape = element.shape === "caption_box" ? `<rect x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" rx="5"/>` : `<ellipse cx="${geometry.x + geometry.width / 2}" cy="${geometry.y + geometry.height / 2}" rx="${geometry.width / 2}" ry="${geometry.height / 2}"/>`;
+    const appearance = renderAppearance(element.appearance, geometry, assets, "");
+    const shape = appearance ?? (element.shape === "caption_box" ? `<rect x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" rx="5"/>` : `<ellipse cx="${geometry.x + geometry.width / 2}" cy="${geometry.y + geometry.height / 2}" rx="${geometry.width / 2}" ry="${geometry.height / 2}"/>`);
     const lines = textLines(value, Math.max(5, Math.floor(geometry.width / Math.max(12, style.fontSize))));
-    return `<g${clip}><g fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${style.strokeWidth}">${shape}</g><text x="${geometry.x + geometry.width / 2}" y="${geometry.y + Math.max(style.fontSize + 5, (geometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize)}" text-anchor="middle" font-family="sans-serif" font-size="${style.fontSize}" fill="${escapeXml(style.textColor)}">${lines.map((line, index) => `<tspan x="${geometry.x + geometry.width / 2}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text></g>`;
+    const shell = appearance ? shape : `<g fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${style.strokeWidth}">${shape}</g>`;
+    return `<g${clip}>${shell}<text x="${geometry.x + geometry.width / 2}" y="${geometry.y + Math.max(style.fontSize + 5, (geometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize)}" text-anchor="middle" font-family="sans-serif" font-size="${style.fontSize}" fill="${escapeXml(style.textColor)}">${lines.map((line, index) => `<tspan x="${geometry.x + geometry.width / 2}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text></g>`;
   }
-  if (element.kind === "text") return `<text x="${geometry.x}" y="${geometry.y + element.style.fontSize}" font-family="sans-serif" font-size="${element.style.fontSize}" fill="${escapeXml(element.style.color)}"${clip}>${escapeXml(element.content)}</text>`;
+  if (element.kind === "text") return renderAppearance(element.appearance, geometry, assets, clip)
+    ?? `<text x="${geometry.x}" y="${geometry.y + element.style.fontSize}" font-family="sans-serif" font-size="${element.style.fontSize}" fill="${escapeXml(element.style.color)}"${clip}>${escapeXml(element.content)}</text>`;
   return "";
 }
 

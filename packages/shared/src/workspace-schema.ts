@@ -11,6 +11,7 @@ import {
   normalizedRectSchema,
   presentationUnitSchema,
   surfaceSchema,
+  visualAssetReferenceSchema,
 } from "./lcd/schema";
 import { normalizeStoryboardBeat } from "./lcd/types";
 
@@ -59,6 +60,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("remove_frame"), unitId: z.string().min(1), frameId: z.string().min(1) }),
   z.strictObject({ type: z.literal("set_art_crop"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), crop: normalizedRectSchema }),
   z.strictObject({ type: z.literal("set_element_transform"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), transform: geometrySchema }),
+  z.strictObject({ type: z.literal("set_element_appearance"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), appearance: visualAssetReferenceSchema.nullable() }),
   z.strictObject({ type: z.literal("add_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), element: frameElementSchema }),
   z.strictObject({ type: z.literal("remove_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),
   z.strictObject({ type: z.literal("duplicate_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), newElementId: z.string().min(1) }),

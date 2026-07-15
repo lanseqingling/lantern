@@ -17,9 +17,14 @@ const textStyleSchema = z.object({
   fontFamily: z.string(), fontSize: z.number().positive(), fontWeight: z.number().optional(), color: z.string(),
   align: z.enum(["left", "center", "right"]).optional(), writingMode: z.enum(["horizontal", "vertical"]).optional(),
 });
+export const visualAssetReferenceSchema = z.strictObject({
+  assetId: z.string().min(1),
+  assetVersionId: z.string().min(1),
+});
 const textElementSchema = z.object({
   id: z.string().min(1), kind: z.literal("text"), transform: localTransformSchema, content: z.string(),
-  role: z.enum(["caption", "narration", "sfx"]), style: textStyleSchema, ...visibilitySchema,
+  role: z.enum(["caption", "narration", "sfx"]), style: textStyleSchema,
+  appearance: visualAssetReferenceSchema.optional(), ...visibilitySchema,
 });
 const balloonStyleSchema = z.object({
   fontFamily: z.string(), fontSize: z.number().positive(), textColor: z.string(), fill: z.string(), stroke: z.string(),
@@ -29,7 +34,7 @@ export const balloonElementSchema = z.object({
   id: z.string().min(1), kind: z.literal("balloon"), dialogueId: z.string().min(1), transform: localTransformSchema,
   tailTarget: z.object({ x: z.number(), y: z.number() }).optional(),
   shape: z.enum(["normal", "thought", "caption_box"]), style: balloonStyleSchema,
-  overflow: overflowSchema.optional(), ...visibilitySchema,
+  appearance: visualAssetReferenceSchema.optional(), overflow: overflowSchema.optional(), ...visibilitySchema,
 });
 const effectElementSchema = z.object({
   id: z.string().min(1), kind: z.literal("effect"), effectType: z.enum(["speed_lines", "tone", "focus", "sfx_art", "custom"]),
@@ -79,11 +84,16 @@ export const presentationUnitSchema = z.object({
   layoutPolicy: z.object({ frameOverlap: z.enum(["forbid", "allow"]), gutter: z.number().nonnegative().optional(), defaultOverflow: z.enum(["clip", "visible"]) }),
 });
 
+export const resourceBindingSchema = z.object({
+  assetId: z.string().min(1), assetVersionId: z.string().min(1), kind: z.enum(["image", "font", "texture"]), mediaType: z.string().min(1),
+  width: z.number().positive().optional(), height: z.number().positive().optional(), checksum: z.string().optional(),
+});
+
 export const comicDocumentSchema = z.object({
   protocolVersion: z.literal("lcd-0.4"), comicId: z.string().min(1), chapterId: z.string().min(1), format: z.enum(["page", "vertical", "four_panel"]),
   reading: z.object({ direction: z.enum(["ltr", "rtl", "ttb"]), viewer: z.enum(["paged", "spread", "scroll", "unit"]), unitOrder: z.array(z.string().min(1)), gap: z.number().nonnegative().optional(), showPageNumber: z.boolean().optional() }),
   units: z.array(presentationUnitSchema),
-  resources: z.array(z.object({ assetId: z.string().min(1), assetVersionId: z.string().min(1), kind: z.enum(["image", "font", "texture"]), mediaType: z.string().min(1), width: z.number().positive().optional(), height: z.number().positive().optional(), checksum: z.string().optional() })),
+  resources: z.array(resourceBindingSchema),
   dialogues: z.array(z.object({ id: z.string().min(1), storyboardBeatId: z.string().optional(), storyboardBeatVersionId: z.string().optional(), speakerAssetId: z.string().optional(), content: z.string() })),
 });
 
@@ -95,13 +105,20 @@ const insideCanvas = (geometry: z.infer<typeof rectSchema>, canvas: { width: num
 export function validateComicDocument(input: unknown): ComicDocument {
   const document = comicDocumentSchema.parse(input) as ComicDocument;
   const globalIds = new Set<string>();
-  const resourceKeys = new Set(document.resources.map((resource) => `${resource.assetId}:${resource.assetVersionId}`));
+  const resourceByKey = new Map(document.resources.map((resource) => [`${resource.assetId}:${resource.assetVersionId}`, resource]));
+  const resourceKeys = new Set(resourceByKey.keys());
   const dialogueIds = new Set(document.dialogues.map((dialogue) => dialogue.id));
   const unitIds = document.units.map((unit) => unit.id);
   if (new Set(document.reading.unitOrder).size !== unitIds.length || document.reading.unitOrder.some((id) => !unitIds.includes(id)) || unitIds.some((id) => !document.reading.unitOrder.includes(id))) {
     throw new Error("reading.unitOrder must contain every presentation unit exactly once");
   }
   const claimId = (id: string) => { if (globalIds.has(id)) throw new Error(`duplicate LCD object id: ${id}`); globalIds.add(id); };
+  const assertAppearanceResource = (element: { id: string; appearance?: { assetId: string; assetVersionId: string } }) => {
+    if (!element.appearance) return;
+    const resource = resourceByKey.get(`${element.appearance.assetId}:${element.appearance.assetVersionId}`);
+    if (!resource) throw new Error(`${element.id} appearance references an undeclared asset version`);
+    if (resource.kind !== "image" || !resource.mediaType.startsWith("image/")) throw new Error(`${element.id} appearance must reference an image resource`);
+  };
   document.resources.forEach((resource) => claimId(`resource:${resource.assetVersionId}`));
   document.dialogues.forEach((dialogue) => claimId(`dialogue:${dialogue.id}`));
   for (const unit of document.units) {
@@ -125,6 +142,7 @@ export function validateComicDocument(input: unknown): ComicDocument {
         layer.elements.forEach((element) => {
           claimId(element.id);
           if (element.kind === "image" && !resourceKeys.has(`${element.assetId}:${element.assetVersionId}`)) throw new Error(`${element.id} references an undeclared asset version`);
+          if (element.kind === "text" || element.kind === "balloon") assertAppearanceResource(element);
           if (element.kind === "balloon" && !dialogueIds.has(element.dialogueId)) throw new Error(`${element.id} references missing dialogue ${element.dialogueId}`);
         });
       });
@@ -135,6 +153,7 @@ export function validateComicDocument(input: unknown): ComicDocument {
       layer.elements.forEach((element) => {
         claimId(element.id);
         if (element.kind === "image" && !resourceKeys.has(`${element.assetId}:${element.assetVersionId}`)) throw new Error(`${element.id} references an undeclared asset version`);
+        if (element.kind === "text" || element.kind === "balloon") assertAppearanceResource(element);
         if (element.kind === "balloon" && !dialogueIds.has(element.dialogueId)) throw new Error(`${element.id} references missing dialogue ${element.dialogueId}`);
       });
     });

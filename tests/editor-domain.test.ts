@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
-import { frameElements, normalizeStoryboardBeat, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type PresentationUnit } from "../packages/shared/src";
+import { createComicPageView, frameElements, normalizeStoryboardBeat, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
@@ -63,6 +63,31 @@ test("validator rejects missing resources, overlap and bounds violations", () =>
   assert.throws(() => validateComicDocument(outside), /unit canvas/);
 });
 
+test("semantic text and balloons may reference one declared visual appearance", () => {
+  const document = structuredClone(previewFixtures.page);
+  const balloon = document.units.flatMap((unit) => unit.frames).flatMap(frameElements).find((element): element is BalloonElement => element.kind === "balloon");
+  const resource = document.resources[0];
+  assert.ok(balloon && resource);
+  balloon.appearance = { assetId: resource.assetId, assetVersionId: resource.assetVersionId };
+
+  const validated = validateComicDocument(document);
+  const canvasBalloon = createComicPageView(validated, validated.units[0]).elements.find((element) => element.id === balloon.id);
+  assert.deepEqual(canvasBalloon && "appearance" in canvasBalloon ? canvasBalloon.appearance : undefined, balloon.appearance);
+
+  const missing = structuredClone(document);
+  const missingBalloon = missing.units.flatMap((unit) => unit.frames).flatMap(frameElements).find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(missingBalloon);
+  missingBalloon.appearance = { assetId: "missing-asset", assetVersionId: "missing-version" };
+  assert.throws(() => validateComicDocument(missing), /appearance references an undeclared asset version/);
+
+  const nonImage = structuredClone(document);
+  const nonImageBalloon = nonImage.units.flatMap((unit) => unit.frames).flatMap(frameElements).find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(nonImageBalloon);
+  nonImage.resources.push({ assetId: "font-asset", assetVersionId: "font-version", kind: "font", mediaType: "font/woff2" });
+  nonImageBalloon.appearance = { assetId: "font-asset", assetVersionId: "font-version" };
+  assert.throws(() => validateComicDocument(nonImage), /appearance must reference an image resource/);
+});
+
 test("moving a frame changes only the frame while local art follows at render time", () => {
   const fixture = createInitialFixture();
   const unit = fixture.working.document.units[0]; const frame = unit.frames[0];
@@ -106,6 +131,7 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "update_storyboard_beat",
     "create_frame_storyboard_beat",
     "set_art_crop",
+    "set_element_appearance",
     "create_page",
     "create_vertical_segment",
     "update_presentation_unit",
@@ -113,6 +139,38 @@ test("editor capabilities are registered but remain unavailable to Agent executi
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
+});
+
+test("element appearance is an atomic human capability and remains disabled for Agent", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const layer = frame.layers.find((item) => item.kind === "text");
+  const balloon = layer?.elements.find((element): element is BalloonElement => element.kind === "balloon");
+  const resource = fixture.working.document.resources[0];
+  assert.ok(layer && balloon && resource);
+  const input = {
+    unitId: unit.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    appearance: { assetId: resource.assetId, assetVersionId: resource.assetVersionId },
+  };
+  const before = structuredClone(fixture);
+  const dryRun = dryRunEditorCapability("set_element_appearance", input, {
+    fixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  });
+  const changed = frameElements(dryRun.result.working.document.units[0].frames[0]).find((element) => element.id === balloon.id);
+  assert.ok(changed?.kind === "balloon");
+  assert.deepEqual(changed.appearance, input.appearance);
+  assert.deepEqual(fixture, before);
+  assert.throws(() => planEditorCapability("set_element_appearance", input, {
+    fixture,
+    createId: (prefix) => `${prefix}-agent`,
+    actor: "agent",
+  }), /disabled for Agent/);
 });
 
 test("create_page plans defaults in the domain executor and dry-runs without mutating the source", () => {
@@ -282,6 +340,14 @@ test("shared workspace schemas reject malformed commands at every runtime bounda
     type: "add_frame",
     unitId: "page-1",
     frame: { id: "incomplete-frame" },
+  }));
+  assert.throws(() => workspaceCommandSchema.parse({
+    type: "set_element_appearance",
+    unitId: "page-1",
+    frameId: "frame-1",
+    layerId: "text-1",
+    elementId: "balloon-1",
+    appearance: { assetId: "asset-1", assetVersionId: "asset-1-v1", svgPath: "M0 0" },
   }));
   assert.throws(() => workspaceCommandSchema.parse({
     type: "update_balloon",

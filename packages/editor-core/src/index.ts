@@ -214,6 +214,23 @@ export function applyWorkspaceChangeSet(
       }
       continue;
     }
+    if (operation.type === "set_element_appearance") {
+      if (operation.frameId) {
+        const { layer } = findLayer(operation.unitId, operation.frameId, operation.layerId);
+        const element = layer.elements.find((item) => item.id === operation.elementId);
+        if (!element || (element.kind !== "text" && element.kind !== "balloon")) throw new Error(`missing visual TextElement or BalloonElement: ${operation.elementId}`);
+        if (operation.appearance) element.appearance = structuredClone(operation.appearance);
+        else delete element.appearance;
+      } else {
+        const unit = findUnit(operation.unitId);
+        const layer = unit.overlayLayers.find((item) => item.id === operation.layerId);
+        const element = layer?.elements.find((item) => item.id === operation.elementId);
+        if (!element || (element.kind !== "text" && element.kind !== "balloon")) throw new Error(`missing visual OverlayElement: ${operation.elementId}`);
+        if (operation.appearance) element.appearance = structuredClone(operation.appearance);
+        else delete element.appearance;
+      }
+      continue;
+    }
     if (operation.type === "add_layer_element") {
       const { layer } = findLayer(operation.unitId, operation.frameId, operation.layerId);
       if (layer.elements.some((element) => element.id === operation.element.id)) throw new Error(`duplicate FrameElement id: ${operation.element.id}`);

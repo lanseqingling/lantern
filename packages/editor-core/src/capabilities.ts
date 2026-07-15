@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   normalizedRectSchema,
+  visualAssetReferenceSchema,
   type PresentationUnit,
   type WorkbenchFixture,
   type WorkspaceCommand,
@@ -168,6 +169,46 @@ const setArtCropCapability = defineCapability({
   },
 });
 
+const setElementAppearanceCapability = defineCapability({
+  id: "set_element_appearance",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1).optional(),
+    layerId: z.string().min(1),
+    elementId: z.string().min(1),
+    appearance: visualAssetReferenceSchema.nullable(),
+  }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["text_or_balloon_element_exists", "appearance_resource_is_declared"],
+  outputCommandTypes: ["set_element_appearance"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    const unit = document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    const frame = input.frameId ? unit.frames.find((item) => item.id === input.frameId) : undefined;
+    if (input.frameId && !frame) throw new Error(`missing Frame: ${input.frameId}`);
+    const layer = frame
+      ? frame.layers.find((item) => item.id === input.layerId)
+      : unit.overlayLayers.find((item) => item.id === input.layerId);
+    const element = layer?.elements.find((item) => item.id === input.elementId);
+    if (!element || (element.kind !== "text" && element.kind !== "balloon")) {
+      throw new Error(`missing visual TextElement or BalloonElement: ${input.elementId}`);
+    }
+    if (input.appearance) {
+      const resource = document.resources.find((item) => item.assetId === input.appearance?.assetId && item.assetVersionId === input.appearance?.assetVersionId);
+      if (!resource) throw new Error(`appearance references an undeclared asset version: ${input.appearance.assetVersionId}`);
+      if (resource.kind !== "image" || !resource.mediaType.startsWith("image/")) throw new Error("appearance must reference an image resource");
+    }
+    return [{ type: "set_element_appearance", ...input }];
+  },
+});
+
 const createPageCapability = defineCapability({
   id: "create_page",
   version: 1,
@@ -300,6 +341,7 @@ const capabilityRegistry = {
   update_storyboard_beat: updateStoryboardBeatCapability,
   create_frame_storyboard_beat: createFrameStoryboardBeatCapability,
   set_art_crop: setArtCropCapability,
+  set_element_appearance: setElementAppearanceCapability,
   create_page: createPageCapability,
   create_vertical_segment: createVerticalSegmentCapability,
   update_presentation_unit: updatePresentationUnitCapability,

@@ -24,7 +24,7 @@ import type {
   WorkspaceOperation,
 } from "@/packages/shared/src";
 import { createComicPageViews, deriveLocalTransform } from "@/packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot, planEditorCapability, verticalSegmentAspectRatios, type EditorCapabilityId, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
+import { applyWorkspaceChangeSet, createSnapshot, planEditorCapability, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
 import {
   createContinuationCandidate,
   createStoryboardLayoutCandidate,
@@ -95,6 +95,7 @@ type StoryboardFrameRow = {
 };
 type LeftView = "assets" | "storyboard" | "pages";
 type PageDisplayMode = "single" | "spread";
+type PageEditorMode = "edit" | "delete";
 type ContextDebugSection = "input" | "world" | "assets" | "storyboard" | "page_layout" | "activity" | "raw";
 type ComposerReference = {
   id: string;
@@ -145,6 +146,29 @@ function DeviceViewportGlyph({ mode }: { mode: VerticalViewportMode }) {
   const viewport = mode === "off" ? { width: 9, height: 16 } : verticalViewportModeMeta[mode];
   return <span className={`device-viewport-glyph mode-${mode}`} aria-hidden="true"><i style={{ aspectRatio: `${viewport.width} / ${viewport.height}` }} /></span>;
 }
+
+function defaultComicPageName(page: ComicPage, index: number) {
+  const number = String(index + 1).padStart(2, "0");
+  return page.kind === "vertical_segment" ? `滚动段 ${number}` : page.kind === "four_panel_unit" ? `四格 ${number}` : `Page ${number}`;
+}
+
+function closestVerticalSegmentRatio(width: number, height: number): VerticalSegmentAspectRatio {
+  return verticalSegmentAspectRatios.reduce((closest, ratio) =>
+    Math.abs(verticalSegmentHeight(width, ratio) - height) < Math.abs(verticalSegmentHeight(width, closest) - height) ? ratio : closest,
+  verticalSegmentAspectRatios[0]);
+}
+
+function verticalSegmentRatioLabel(width: number, height: number) {
+  const preset = verticalSegmentAspectRatios.find((ratio) => Math.abs(verticalSegmentHeight(width, ratio) - height) <= 1);
+  if (preset) return preset;
+  let left = Math.max(1, Math.round(width));
+  let right = Math.max(1, Math.round(height));
+  const originalLeft = left;
+  const originalRight = right;
+  while (right) [left, right] = [right, left % right];
+  return `${originalLeft / left}:${originalRight / left}`;
+}
+
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const isCanvasReference = (reference: ReferencePlacement) => reference.kind !== "style";
 const debugRecord = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -214,6 +238,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [assetSaveSubmitting, setAssetSaveSubmitting] = useState(false);
   const [storyboardMenuFrameId, setStoryboardMenuFrameId] = useState<string | null>(null);
   const [storyboardMenuPosition, setStoryboardMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [pageMenuId, setPageMenuId] = useState<string | null>(null);
+  const [pageMenuPosition, setPageMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [pageEditor, setPageEditor] = useState<{ unitId: string; mode: PageEditorMode } | null>(null);
+  const [pageEditDraft, setPageEditDraft] = useState<{ name: string; aspectRatio: VerticalSegmentAspectRatio; aspectRatioChanged: boolean }>({ name: "", aspectRatio: "9:16", aspectRatioChanged: false });
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [sessionCreateOpen, setSessionCreateOpen] = useState(false);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
@@ -265,13 +293,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const suppressStageClickRef = useRef(false);
   const scenarioHandled = useRef(false);
 
-  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "session" | "vertical_segment") => {
+  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "page" | "session" | "vertical_segment") => {
     if (keep !== "project") setProjectMenu(false);
     if (keep !== "asset") {
       setAssetMenuId(null);
       setAssetSaveFormId(null);
     }
     if (keep !== "storyboard") setStoryboardMenuFrameId(null);
+    if (keep !== "page") setPageMenuId(null);
     if (keep !== "session") setSessionMenuId(null);
     if (keep !== "vertical_segment") setVerticalSegmentMenuPosition(null);
   };
@@ -281,6 +310,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setAssetSaveFormId(null);
   });
   useOutsidePointerDismiss(Boolean(storyboardMenuFrameId), ".storyboard-frame-row, .storyboard-row-menu-floating", () => setStoryboardMenuFrameId(null));
+  useOutsidePointerDismiss(Boolean(pageMenuId), ".draft-page-more, .page-item-menu-floating", () => setPageMenuId(null));
+  useOutsidePointerDismiss(Boolean(pageEditor), ".page-edit-card-floating", () => setPageEditor(null));
 
   useEffect(() => {
     if (!verticalSegmentMenuPosition) return;
@@ -465,6 +496,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const canvasDocument = candidatePreviewMode === "candidate" && candidateDocument ? candidateDocument : state.fixture.working.document;
   const isVerticalWorkbench = state.fixture.working.document.format === "vertical";
   const isVerticalCanvas = canvasDocument.format === "vertical";
+  const verticalCanvasLayoutKey = canvasDocument.units.map((unit) => `${unit.id}:${unit.canvas.width}x${unit.canvas.height}`).join("|");
   const canvasResolvedResources = useMemo(() => {
     const next = { ...(state.fixture.working.resolvedResources ?? {}) };
     const versionId = previewingCandidate?.metadata?.outputAssetVersionId;
@@ -499,7 +531,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (!target) return;
     const top = clampValue(target.offsetTop - (strip.clientHeight - target.offsetHeight) / 2, 0, Math.max(0, strip.scrollHeight - strip.clientHeight));
     strip.scrollTo({ top, behavior: "smooth" });
-  }, [canvasDocument.units.length, canvasMode, isVerticalCanvas, state.currentPageIndex]);
+  }, [canvasMode, isVerticalCanvas, stageSize.height, stageSize.width, state.currentPageIndex, verticalCanvasLayoutKey, verticalViewportMode]);
 
   const activeConversation = state.conversations?.find((conversation) => conversation.id === runtimeIds?.conversationId);
   const sessionMenuConversation = state.conversations?.find((conversation) => conversation.id === sessionMenuId);
@@ -2067,6 +2099,72 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const currentPages = workingPages;
+  const activePageMenu = currentPages.find((comicPage) => comicPage.id === pageMenuId);
+  const activePageEditorPage = currentPages.find((comicPage) => comicPage.id === pageEditor?.unitId);
+  const activePageEditorUnit = state.fixture.working.document.units.find((unit) => unit.id === pageEditor?.unitId);
+  const activePageEditorIndex = activePageEditorPage ? currentPages.findIndex((comicPage) => comicPage.id === activePageEditorPage.id) : -1;
+  const pageEditTargetHeight = activePageEditorUnit?.kind === "vertical_segment"
+    ? verticalSegmentHeight(activePageEditorUnit.canvas.width, pageEditDraft.aspectRatio)
+    : undefined;
+  const pageEditError = pageEditDraft.aspectRatioChanged && activePageEditorUnit?.kind === "vertical_segment" && pageEditTargetHeight !== undefined
+    && activePageEditorUnit.frames.some((frame) => frame.geometry.y + frame.geometry.height > pageEditTargetHeight)
+    ? "页面下方空间不足，现有画格会被裁切，无法应用该比例"
+    : "";
+
+  const openPageMenu = (button: HTMLButtonElement, unitId: string) => {
+    const workbench = button.closest<HTMLElement>(".workbench");
+    const buttonRect = button.getBoundingClientRect();
+    const workbenchRect = workbench?.getBoundingClientRect();
+    setPageMenuPosition({
+      x: buttonRect.right - (workbenchRect?.left ?? 0) + 12,
+      y: clampValue(buttonRect.top - (workbenchRect?.top ?? 0) - 4, 12, window.innerHeight - 100),
+    });
+    closeFloatingMenus("page");
+    setPageMenuId((current) => current === unitId ? null : unitId);
+  };
+
+  const openPageEditor = (comicPage: ComicPage, mode: PageEditorMode) => {
+    const unit = state.fixture.working.document.units.find((item) => item.id === comicPage.id);
+    if (!unit) return;
+    setPageEditDraft({
+      name: unit.name ?? "",
+      aspectRatio: unit.kind === "vertical_segment" ? closestVerticalSegmentRatio(unit.canvas.width, unit.canvas.height) : "9:16",
+      aspectRatioChanged: false,
+    });
+    setPageMenuPosition((position) => position ? {
+      ...position,
+      y: clampValue(position.y, 12, Math.max(12, window.innerHeight - (unit.kind === "vertical_segment" && mode === "edit" ? 270 : 210))),
+    } : position);
+    setPageEditor({ unitId: unit.id, mode });
+    setPageMenuId(null);
+  };
+
+  const savePageEditor = () => {
+    if (!activePageEditorUnit || !activePageEditorPage || pageEditError) {
+      if (pageEditError) setToast(pageEditError);
+      return;
+    }
+    const input = {
+      unitId: activePageEditorUnit.id,
+      name: pageEditDraft.name,
+      ...(activePageEditorUnit.kind === "vertical_segment" && pageEditDraft.aspectRatioChanged ? { aspectRatio: pageEditDraft.aspectRatio } : {}),
+    };
+    if (commitCapability("update_presentation_unit", input, `编辑「${activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)}」`, activePageEditorIndex)) {
+      setPageEditor(null);
+    }
+  };
+
+  const deletePage = () => {
+    if (!activePageEditorPage || activePageEditorIndex < 0) return;
+    const nextPageIndex = Math.min(activePageEditorIndex, currentPages.length - 2);
+    if (commitCapability("delete_presentation_unit", { unitId: activePageEditorPage.id }, `删除「${activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)}」`, nextPageIndex)) {
+      setSelection(noSelection);
+      setPreviewCandidateId(null);
+      setPreviewVariantId(null);
+      setPageEditor(null);
+    }
+  };
+
   const trailingUnpairedPage = !isVerticalCanvas && pageDisplayMode === "spread" && currentPages.length % 2 === 1 && state.currentPageIndex === currentPages.length - 1;
   const spreadStartIndex = Math.floor(state.currentPageIndex / 2) * 2;
   const displayedPageIndices = isVerticalCanvas
@@ -2148,6 +2246,17 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const verticalViewportStyle: CSSProperties | undefined = activeVerticalViewport
     ? { width: verticalPageDisplayWidth, aspectRatio: `${activeVerticalViewport.width} / ${activeVerticalViewport.height}` }
     : undefined;
+  const firstVerticalUnit = isVerticalCanvas ? canvasDocument.units[0] : undefined;
+  const lastVerticalUnit = isVerticalCanvas ? canvasDocument.units.at(-1) : undefined;
+  const verticalStripViewportHeight = stageSize.height || 720;
+  const firstVerticalDisplayHeight = firstVerticalUnit ? verticalPageDisplayWidth * firstVerticalUnit.canvas.height / firstVerticalUnit.canvas.width : 0;
+  const lastVerticalDisplayHeight = lastVerticalUnit ? verticalPageDisplayWidth * lastVerticalUnit.canvas.height / lastVerticalUnit.canvas.width : 0;
+  const verticalStripTopSpace = Math.max(clampValue(verticalStripViewportHeight * .1, 72, 104), (verticalStripViewportHeight - firstVerticalDisplayHeight) / 2);
+  const verticalStripBottomSpace = Math.max(clampValue(verticalStripViewportHeight * .12, 92, 124), (verticalStripViewportHeight - lastVerticalDisplayHeight) / 2);
+  const verticalStripStyle = isVerticalCanvas ? {
+    "--vertical-strip-top-space": `${verticalStripTopSpace}px`,
+    "--vertical-strip-bottom-space": `${verticalStripBottomSpace}px`,
+  } as CSSProperties : undefined;
   const verticalNavigatorPaperSize = fitVerticalNavigatorPaper(
     canvasDocument.units[0]?.canvas.width ?? 0,
     canvasDocument.units.reduce((height, unit) => height + unit.canvas.height, 0),
@@ -2290,7 +2399,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <h2><span><Icon name="layout" /></span>页面方案</h2>
           <div className="layout-grid">
             {availableCandidates.filter((candidate) => candidate.kind === "page_layout").slice(-6).map((candidate) => <button type="button" key={candidate.id} className="layout-card" onClick={() => { setPreviewVariantId(null); setPreviewCandidateId(candidate.id); setToast(`已在画布展开「${candidate.title}」`); }}><span className="page-layout-preview"><i/><i/><i/><i/></span><b>{candidate.title}</b><em>{candidate.status === "stale" ? "过期" : "待预览"}</em></button>)}
-            {state.pageVariants.map((variant) => <button type="button" key={variant.id} className={`layout-card ${previewVariantId === variant.id ? "active" : ""}`} onClick={() => { setPreviewCandidateId(null); setPreviewVariantId(variant.id); setToast(`正在预览页面方案「${variant.name}」`); }}><span className="page-layout-preview"><i/><i/><i/><i/></span><b>{variant.name}</b><em>{variant.kind === "layout_only" ? "仅编排" : variant.kind === "partial_frames" ? "局部画格" : "完整页面"}</em></button>)}
+            {state.pageVariants.filter((variant) => currentPages.some((comicPage) => comicPage.id === variant.unitId)).map((variant) => <button type="button" key={variant.id} className={`layout-card ${previewVariantId === variant.id ? "active" : ""}`} onClick={() => { setPreviewCandidateId(null); setPreviewVariantId(variant.id); setToast(`正在预览页面方案「${variant.name}」`); }}><span className="page-layout-preview"><i/><i/><i/><i/></span><b>{variant.name}</b><em>{variant.kind === "layout_only" ? "仅编排" : variant.kind === "partial_frames" ? "局部画格" : "完整页面"}</em></button>)}
           </div>
           <h2><span><Icon name="storyboard" /></span>单格画面</h2>
           <div className="storyboard-frame-list">
@@ -2322,7 +2431,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </div>
         <section className="drawer-pages-fixed" aria-label={isVerticalWorkbench ? "滚动段" : "漫画页"}>
           <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>{isVerticalWorkbench ? "滚动段" : "漫画页"}</strong><small>{currentPages.length} {isVerticalWorkbench ? "段" : "页"}</small><button type="button" className="drawer-add-page" aria-label={isVerticalWorkbench ? "新增滚动段" : "新增一页"} aria-expanded={isVerticalWorkbench ? Boolean(verticalSegmentMenuPosition) : undefined} onClick={(event) => isVerticalWorkbench ? openVerticalSegmentMenu(event.currentTarget) : addBlankComicPage()}><Icon name="add" /></button></div>
-          <div className="draft-pages">{currentPages.map((comicPage, index) => { const thumbnail = pageThumbSrc(comicPage); return <button type="button" key={comicPage.id} className={`draft-page ${index === state.currentPageIndex ? "active" : ""}`} onClick={() => setCurrentComicPage(index)}>{thumbnail ? <img src={thumbnail} alt="漫画页缩略图" loading="lazy" decoding="async"/> : <div className="draft-page-empty" aria-label="空白漫画页"/>}<span><b>{comicPage.kind === "page" ? `Page ${String(index + 1).padStart(2, "0")}` : comicPage.kind === "vertical_segment" ? `滚动段 ${String(index + 1).padStart(2, "0")}` : `四格 ${String(index + 1).padStart(2, "0")}`}</b><small>{comicPage.elements.filter((element) => element.type === "comic_frame").length} 格 · {index === state.currentPageIndex ? "当前查看" : "工作稿"}</small></span></button>; })}</div>
+          <div className="draft-pages">{currentPages.map((comicPage, index) => {
+            const thumbnail = pageThumbSrc(comicPage);
+            const pageNumber = String(index + 1).padStart(2, "0");
+            const pageName = comicPage.name || defaultComicPageName(comicPage, index);
+            return <div key={comicPage.id} className={`draft-page ${index === state.currentPageIndex ? "active" : ""}`}>
+              <button type="button" className="draft-page-main" onClick={() => setCurrentComicPage(index)}>
+                {thumbnail ? <img src={thumbnail} alt="漫画页缩略图" loading="lazy" decoding="async"/> : <span className="draft-page-empty" aria-label="空白漫画页"/>}
+                <span className="draft-page-copy"><b>{pageName}</b><small><em>{pageNumber}</em>{comicPage.kind === "vertical_segment" ? <em className="page-ratio-tag">{verticalSegmentRatioLabel(comicPage.canvas.width, comicPage.canvas.height)}</em> : null}<span>{comicPage.elements.filter((element) => element.type === "comic_frame").length} 格 · {index === state.currentPageIndex ? "当前查看" : "工作稿"}</span></small></span>
+              </button>
+              <button type="button" className="draft-page-more" aria-label={`${pageName}更多选项`} aria-expanded={pageMenuId === comicPage.id} onClick={(event) => openPageMenu(event.currentTarget, comicPage.id)}><Icon name="moreVertical" /></button>
+            </div>;
+          })}</div>
         </section>
         </div>
       </CreationDrawer>
@@ -2346,6 +2466,25 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {activeStoryboardRow && storyboardMenuPosition ? <div className="storyboard-row-menu-floating" style={{ left: storyboardMenuPosition.x, top: storyboardMenuPosition.y }} role="menu">
         <button type="button" onClick={() => openStoryboardRowEditor(activeStoryboardRow)}><Icon name="edit" /><span>{activeStoryboardRow.beat ? "编辑单格画面" : "创建单格画面"}</span></button>
       </div> : null}
+      {activePageMenu && pageMenuPosition ? <FloatingMenu className="page-item-menu-floating" style={{ left: pageMenuPosition.x, top: pageMenuPosition.y }}>
+        <MenuSection className="asset-menu-section">
+          <button type="button" onClick={() => openPageEditor(activePageMenu, "edit")}><span><Icon name="edit" />编辑页</span></button>
+          <button type="button" className="page-item-delete" onClick={() => openPageEditor(activePageMenu, "delete")}><span><Icon name="trash" />删除页</span></button>
+        </MenuSection>
+      </FloatingMenu> : null}
+      {activePageEditorPage && activePageEditorUnit && pageEditor && pageMenuPosition ? <form className={`page-edit-card-floating mode-${pageEditor.mode}`} style={{ left: pageMenuPosition.x, top: pageMenuPosition.y }} onSubmit={(event) => { event.preventDefault(); if (pageEditor.mode === "edit") savePageEditor(); else deletePage(); }}>
+        <header><strong>{pageEditor.mode === "edit" ? `编辑${activePageEditorPage.kind === "vertical_segment" ? "滚动段" : "漫画页"}` : `删除${activePageEditorPage.kind === "vertical_segment" ? "滚动段" : "漫画页"}`}</strong><button type="button" aria-label="关闭页面卡片" onClick={() => setPageEditor(null)}><Icon name="x" /></button></header>
+        {pageEditor.mode === "edit" ? <>
+          <label><span>名称</span><input autoFocus value={pageEditDraft.name} maxLength={80} placeholder={defaultComicPageName(activePageEditorPage, activePageEditorIndex)} onChange={(event) => setPageEditDraft((current) => ({ ...current, name: event.target.value }))} /></label>
+          {activePageEditorUnit.kind === "vertical_segment" ? <label><span>页面比例 <small>（裁切页面底部）</small></span><CustomSelect ariaLabel="滚动段页面比例" className="page-ratio-select" value={pageEditDraft.aspectRatio} options={verticalSegmentAspectRatios.map((ratio) => ({ value: ratio, label: ratio }))} onChange={(value) => setPageEditDraft((current) => ({ ...current, aspectRatio: value as VerticalSegmentAspectRatio, aspectRatioChanged: true }))} /></label> : null}
+          {pageEditError ? <p className="page-edit-warning">{pageEditError}</p> : null}
+          <footer><button type="button" onClick={() => setPageEditor(null)}>取消</button><button type="submit" disabled={Boolean(pageEditError)}>保存</button></footer>
+        </> : <>
+          <p className="page-delete-copy">将删除“{activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)}”及其中的 {activePageEditorPage.elements.filter((element) => element.type === "comic_frame").length} 个画格。该操作可撤销。</p>
+          {currentPages.length <= 1 ? <p className="page-edit-warning">漫画至少需要保留一个页面。</p> : null}
+          <footer><button type="button" onClick={() => setPageEditor(null)}>取消</button><button type="submit" className="danger" disabled={currentPages.length <= 1}>确认删除</button></footer>
+        </>}
+      </form> : null}
       {activeAssetSave && assetMenuPosition ? <form className="asset-save-form-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }} onSubmit={(event) => { event.preventDefault(); void saveCanvasAssetToLibrary(activeAssetSave); }} onPointerDown={(event) => event.stopPropagation()}>
         <header><span>保存为资产</span><button type="button" aria-label="取消保存为资产" onClick={() => setAssetSaveFormId(null)}><Icon name="x" /></button></header>
         <p>原始文件名：{typeof activeAssetSave.attributes?.originalFilename === "string" ? activeAssetSave.attributes.originalFilename : activeAssetSave.name}</p>
@@ -2377,7 +2516,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅参考"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动参考图「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放参考图「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} />)}
           <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : pageDisplayMode === "spread" && !trailingUnpairedPage ? "spread" : ""}`} style={verticalStageWrapStyle}>
             <span className="page-tag">{isVerticalCanvas ? `SCROLL ${String(state.currentPageIndex + 1).padStart(2, "0")}` : pageDisplayMode === "spread" && !trailingUnpairedPage ? `PAGES ${displayedPageIndices.map((index) => String(index + 1).padStart(2, "0")).join("–")}` : page?.kind === "vertical_segment" ? `SCROLL ${String(state.currentPageIndex + 1).padStart(2, "0")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(state.currentPageIndex + 1).padStart(2, "0")}`}</span>
-            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasDocument.units[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onCommitElement={(unitId, elementId, patch, label) => commitOperations(commandsForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
+            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasDocument.units[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onCommitElement={(unitId, elementId, patch, label) => commitOperations(commandsForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
           </div>
           {candidateDocument && (previewingCandidate || previewingVariant) ? <nav className="candidate-compare-toolbar" aria-label="页面方案对比">
             <div className="candidate-version-switch"><button type="button" className={candidatePreviewMode === "original" ? "active" : ""} onClick={() => setCandidatePreviewMode("original")}>原稿</button><button type="button" className={candidatePreviewMode === "candidate" ? "active" : ""} onClick={() => setCandidatePreviewMode("candidate")}>新方案</button></div>

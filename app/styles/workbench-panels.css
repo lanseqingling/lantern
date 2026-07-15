@@ -27,7 +27,7 @@
 .multi-selection-dock .multi-mode-exit:hover:not(:disabled) { border-color: #d59d32; background: #e3ad45; color: #fff; }
 
 .canvas-global-actions { position: absolute; z-index: 64; top: 20px; right: 20px; display: flex; align-items: center; gap: 10px; }
-.agent-workspace { position: absolute; z-index: 55; top: 78px; right: 20px; bottom: 18px; width: 340px; display: grid; grid-template-rows: 42px minmax(0,1fr) auto; overflow: visible; border: 1px solid rgba(255,255,255,.9); border-radius: 30px; background: rgba(255,255,255,.79); box-shadow: var(--shadow); backdrop-filter: blur(24px); transition: transform 220ms ease, opacity 180ms ease, grid-template-rows 230ms cubic-bezier(.2,.8,.2,1); }
+.agent-workspace { position: absolute; z-index: 55; top: 78px; right: 20px; bottom: 18px; width: 340px; display: grid; grid-template-rows: 42px minmax(0,1fr) auto; overflow: visible; border: 1px solid rgba(255,255,255,.9); border-radius: 30px; background: radial-gradient(circle at 14% 4%, rgba(100,200,200,.075), transparent 26%), rgba(255,255,255,.79); box-shadow: var(--shadow); backdrop-filter: blur(24px); transition: transform 220ms ease, opacity 180ms ease, grid-template-rows 230ms cubic-bezier(.2,.8,.2,1); }
 .agent-workspace.closed { transform: translateX(108%); opacity: 0; pointer-events: none; }
 .agent-head { position: relative; min-height: 42px; padding: 9px 11px 0; }
 .agent-head-actions { position: absolute; top: 9px; right: 11px; display: flex; align-items: center; gap: 5px; }

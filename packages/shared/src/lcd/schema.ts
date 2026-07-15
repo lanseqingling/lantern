@@ -72,7 +72,7 @@ export const surfaceSchema = z.object({
   bleed: z.object({ top: z.number(), right: z.number(), bottom: z.number(), left: z.number() }).optional(), pageNumber: z.number().int().positive().optional(),
 });
 export const presentationUnitSchema = z.object({
-  id: z.string().min(1), kind: z.enum(["single_page", "spread", "vertical_segment", "four_panel_unit"]),
+  id: z.string().min(1), name: z.string().min(1).max(80).optional(), kind: z.enum(["single_page", "spread", "vertical_segment", "four_panel_unit"]),
   canvas: z.object({ width: z.number().positive(), height: z.number().positive(), background: z.object({ color: z.string() }) }),
   surfaces: z.array(surfaceSchema).min(1), frames: z.array(frameSchema), overlayLayers: z.array(overlayLayerSchema),
   readingSequence: z.array(z.object({ frameId: z.string().min(1), textOrder: z.array(z.string().min(1)).optional() })),

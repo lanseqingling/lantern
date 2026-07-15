@@ -108,6 +108,8 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "set_art_crop",
     "create_page",
     "create_vertical_segment",
+    "update_presentation_unit",
+    "delete_presentation_unit",
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
@@ -179,6 +181,79 @@ test("page and vertical segment creation reject the opposite comic format", () =
     createId: (prefix) => `${prefix}-test`,
     actor: "human",
   }));
+});
+
+test("presentation unit editing stores an optional name and resizes only vertical segment height", () => {
+  const fixture = createInitialFixture();
+  fixture.working.document = structuredClone(previewFixtures.vertical);
+  const unit = fixture.working.document.units[0];
+  unit.frames = [];
+  unit.readingSequence = [];
+  unit.overlayLayers = [];
+  const before = structuredClone(fixture);
+  const edited = dryRunEditorCapability("update_presentation_unit", {
+    unitId: unit.id,
+    name: "雨幕开场",
+    aspectRatio: "9:20",
+  }, {
+    fixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  });
+  const resultUnit = edited.result.working.document.units[0];
+  assert.equal(resultUnit.name, "雨幕开场");
+  assert.equal(resultUnit.canvas.width, unit.canvas.width);
+  assert.equal(resultUnit.canvas.height, verticalSegmentHeight(unit.canvas.width, "9:20"));
+  assert.deepEqual(resultUnit.surfaces[0].geometry, { x: 0, y: 0, width: resultUnit.canvas.width, height: resultUnit.canvas.height });
+  assert.deepEqual(fixture, before);
+
+  const cleared = dryRunEditorCapability("update_presentation_unit", { unitId: resultUnit.id, name: "" }, {
+    fixture: { ...fixture, working: edited.result.working, storyboardBeats: edited.result.storyboardBeats },
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  });
+  assert.equal(cleared.result.working.document.units[0].name, undefined);
+});
+
+test("vertical segment editing refuses a ratio that would crop an existing frame", () => {
+  const fixture = createInitialFixture();
+  fixture.working.document = structuredClone(previewFixtures.vertical);
+  const unit = fixture.working.document.units[0];
+  const targetHeight = verticalSegmentHeight(unit.canvas.width, "4:3");
+  unit.frames[0].geometry = { x: 0, y: targetHeight - 10, width: 100, height: 20 };
+  assert.throws(() => planEditorCapability("update_presentation_unit", {
+    unitId: unit.id,
+    name: "",
+    aspectRatio: "4:3",
+  }, {
+    fixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  }), /现有画格会被裁切/);
+});
+
+test("presentation unit deletion updates reading order and keeps one page minimum", () => {
+  const fixture = createInitialFixture();
+  const added = dryRunEditorCapability("create_page", {}, {
+    fixture,
+    createId: () => "page-to-delete",
+    actor: "human",
+  });
+  const expandedFixture = { ...fixture, working: added.result.working, storyboardBeats: added.result.storyboardBeats };
+  const before = structuredClone(expandedFixture);
+  const removed = dryRunEditorCapability("delete_presentation_unit", { unitId: "page-to-delete" }, {
+    fixture: expandedFixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  });
+  assert.equal(removed.result.working.document.units.length, 1);
+  assert.ok(!removed.result.working.document.reading.unitOrder.includes("page-to-delete"));
+  assert.deepEqual(expandedFixture, before);
+  assert.throws(() => planEditorCapability("delete_presentation_unit", { unitId: fixture.working.document.units[0].id }, {
+    fixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  }), /至少需要保留一个页面/);
 });
 
 test("capability preconditions reject invalid targets before commands are committed", () => {

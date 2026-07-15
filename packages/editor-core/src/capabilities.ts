@@ -243,6 +243,58 @@ const createVerticalSegmentCapability = defineCapability({
   },
 });
 
+const updatePresentationUnitCapability = defineCapability({
+  id: "update_presentation_unit",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    name: z.string().max(80),
+    aspectRatio: z.enum(verticalSegmentAspectRatios).optional(),
+  }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["presentation_unit_exists", "vertical_resize_preserves_frames"],
+  outputCommandTypes: ["set_presentation_unit_name", "resize_vertical_segment"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    const commands: WorkspaceCommand[] = [{ type: "set_presentation_unit_name", unitId: unit.id, name: input.name.trim() || null }];
+    if (input.aspectRatio) {
+      if (unit.kind !== "vertical_segment") throw new Error("只有滚动段可以修改页面比例");
+      const canvasHeight = verticalSegmentHeight(unit.canvas.width, input.aspectRatio);
+      if (unit.frames.some((frame) => frame.geometry.y + frame.geometry.height > canvasHeight)) {
+        throw new Error("页面下方空间不足，现有画格会被裁切，无法应用该比例");
+      }
+      commands.push({ type: "resize_vertical_segment", unitId: unit.id, canvasHeight });
+    }
+    return commands;
+  },
+});
+
+const deletePresentationUnitCapability = defineCapability({
+  id: "delete_presentation_unit",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1) }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "high",
+  preconditions: ["presentation_unit_exists", "chapter_keeps_one_presentation_unit"],
+  outputCommandTypes: ["remove_presentation_unit"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    if (!document.units.some((unit) => unit.id === input.unitId)) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    if (document.units.length <= 1) throw new Error("漫画至少需要保留一个页面");
+    return [{ type: "remove_presentation_unit", unitId: input.unitId }];
+  },
+});
+
 const capabilityRegistry = {
   update_dialogue: updateDialogueCapability,
   update_storyboard_beat: updateStoryboardBeatCapability,
@@ -250,6 +302,8 @@ const capabilityRegistry = {
   set_art_crop: setArtCropCapability,
   create_page: createPageCapability,
   create_vertical_segment: createVerticalSegmentCapability,
+  update_presentation_unit: updatePresentationUnitCapability,
+  delete_presentation_unit: deletePresentationUnitCapability,
 } satisfies Record<string, RegisteredCapability>;
 
 export type EditorCapabilityId = keyof typeof capabilityRegistry;

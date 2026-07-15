@@ -221,6 +221,7 @@ export type PageSurface = {
 
 export type PresentationUnit = {
   id: string;
+  name?: string;
   kind: "single_page" | "spread" | "vertical_segment" | "four_panel_unit";
   canvas: { width: number; height: number; background: { color: string } };
   surfaces: PageSurface[];
@@ -356,6 +357,7 @@ export type SpeechBalloonElement = CanvasViewBase & {
 export type CanvasElement = ComicFrameElement | ImageElement | TextCanvasElement | SpeechBalloonElement;
 export type ComicPage = {
   id: string;
+  name?: string;
   pageIndex: number;
   kind: "page" | "vertical_segment" | "four_panel_unit";
   canvas: { width: number; height: number; background: { color: string } };
@@ -398,6 +400,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
   });
   return {
     id: unit.id,
+    name: unit.name,
     pageIndex: document.reading.unitOrder.indexOf(unit.id),
     kind: unit.kind === "single_page" || unit.kind === "spread" ? "page" : unit.kind,
     canvas: unit.canvas,

@@ -93,6 +93,36 @@ export function applyWorkspaceChangeSet(
       document.reading.unitOrder.splice(index, 0, operation.unit.id);
       continue;
     }
+    if (operation.type === "set_presentation_unit_name") {
+      const unit = findUnit(operation.unitId);
+      if (operation.name === null) delete unit.name;
+      else unit.name = operation.name;
+      continue;
+    }
+    if (operation.type === "resize_vertical_segment") {
+      const unit = findUnit(operation.unitId);
+      if (unit.kind !== "vertical_segment") throw new Error("resize_vertical_segment requires a vertical segment");
+      if (unit.frames.some((frame) => frame.geometry.y + frame.geometry.height > operation.canvasHeight)) {
+        throw new Error("页面下方空间不足，现有画格会被裁切，无法应用该比例");
+      }
+      unit.canvas.height = operation.canvasHeight;
+      unit.surfaces = unit.surfaces.map((surface) => ({
+        ...surface,
+        geometry: { x: 0, y: 0, width: unit.canvas.width, height: operation.canvasHeight },
+      }));
+      continue;
+    }
+    if (operation.type === "remove_presentation_unit") {
+      if (document.units.length <= 1) throw new Error("漫画至少需要保留一个页面");
+      findUnit(operation.unitId);
+      document.units = document.units.filter((unit) => unit.id !== operation.unitId);
+      document.reading.unitOrder = document.reading.unitOrder.filter((unitId) => unitId !== operation.unitId);
+      document.reading.unitOrder.forEach((unitId, index) => {
+        const unit = document.units.find((item) => item.id === unitId);
+        if (unit?.surfaces.length === 1) unit.surfaces[0].pageNumber = index + 1;
+      });
+      continue;
+    }
     if (operation.type === "update_storyboard_beat") {
       const storyboardBeat = storyboardBeats.find((item) => item.id === operation.storyboardBeatId);
       if (!storyboardBeat) throw new Error(`missing StoryboardBeat: ${operation.storyboardBeatId}`);

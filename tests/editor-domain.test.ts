@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
 import { createComicPageView, frameElements, normalizeStoryboardBeat, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
+import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
 
@@ -131,6 +131,11 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "update_storyboard_beat",
     "create_frame_storyboard_beat",
     "set_art_crop",
+    "move_frame",
+    "resize_frame",
+    "set_element_transform",
+    "update_balloon",
+    "reorder_layer",
     "set_element_appearance",
     "create_page",
     "create_vertical_segment",
@@ -139,6 +144,43 @@ test("editor capabilities are registered but remain unavailable to Agent executi
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
+});
+
+test("multiple human capabilities plan one atomic ChangeSet without mutating their source", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const layer = frame.layers.find((item) => item.kind === "text");
+  const balloon = layer?.elements.find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(layer && balloon);
+  const before = structuredClone(fixture);
+  const content = `${fixture.working.document.dialogues.find((dialogue) => dialogue.id === balloon.dialogueId)?.content ?? "对白"}！`;
+  const plan = planEditorCapabilities([
+    {
+      id: "update_balloon",
+      input: { unitId: unit.id, frameId: frame.id, layerId: layer.id, elementId: balloon.id, changes: { shape: "thought" } },
+    },
+    { id: "update_dialogue", input: { dialogueId: balloon.dialogueId, content } },
+  ], {
+    fixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  });
+
+  assert.deepEqual(plan.commands.map((command) => command.type), ["update_balloon", "update_dialogue"]);
+  const result = applyWorkspaceChangeSet({ working: fixture.working, storyboardBeats: fixture.storyboardBeats }, {
+    id: "combined-capability-change",
+    projectId: fixture.working.projectId,
+    baseRevision: fixture.working.revision,
+    source: "manual",
+    commands: plan.commands,
+  });
+  const changed = frameElements(result.working.document.units[0].frames[0]).find((element) => element.id === balloon.id);
+  assert.equal(result.working.revision, fixture.working.revision + 1);
+  assert.ok(changed?.kind === "balloon");
+  assert.equal(changed.shape, "thought");
+  assert.equal(result.working.document.dialogues.find((dialogue) => dialogue.id === balloon.dialogueId)?.content, content);
+  assert.deepEqual(fixture, before);
 });
 
 test("element appearance is an atomic human capability and remains disabled for Agent", () => {

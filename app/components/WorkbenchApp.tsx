@@ -24,7 +24,7 @@ import type {
   WorkspaceOperation,
 } from "@/packages/shared/src";
 import { createComicPageViews, deriveLocalTransform } from "@/packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot, planEditorCapability, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
+import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
 import {
   createContinuationCandidate,
   createStoryboardLayoutCandidate,
@@ -842,7 +842,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setFuture([]);
   };
 
-  const commitOperations = (operations: WorkspaceOperation[], label: string, source: "manual" | "candidate" = "manual", candidateId?: string, nextPageIndex?: number) => {
+  const commitOperations = (operations: WorkspaceOperation[], label: string, source: "manual" | "candidate", candidateId?: string, nextPageIndex?: number) => {
     if (runtimeAdapter === "server" && runtimeIds) {
       const changeSet = {
         id: uid("changeset"),
@@ -888,13 +888,17 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
-  const commitCapability = (id: EditorCapabilityId, input: unknown, label: string, nextPageIndex?: number) => {
+  const planCapabilities = (requests: EditorCapabilityRequest[]) =>
+    planEditorCapabilities(requests, {
+      fixture: { working: state.fixture.working, storyboardBeats: state.fixture.storyboardBeats },
+      createId: uid,
+      actor: "human",
+    });
+
+  const commitCapabilities = (requests: EditorCapabilityRequest[], label: string, nextPageIndex?: number) => {
+    if (!requests.length) return false;
     try {
-      const plan = planEditorCapability(id, input, {
-        fixture: { working: state.fixture.working, storyboardBeats: state.fixture.storyboardBeats },
-        createId: uid,
-        actor: "human",
-      });
+      const plan = planCapabilities(requests);
       return commitOperations(plan.commands, label, "manual", undefined, nextPageIndex);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "编辑能力输入无效");
@@ -902,23 +906,26 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
-  const commandsForElementPatch = (unitId: string, elementId: string, patch: Record<string, unknown>): WorkspaceOperation[] => {
+  const commitCapability = (id: EditorCapabilityId, input: unknown, label: string, nextPageIndex?: number) =>
+    commitCapabilities([{ id, input }], label, nextPageIndex);
+
+  const capabilitiesForElementPatch = (unitId: string, elementId: string, patch: Record<string, unknown>): EditorCapabilityRequest[] => {
     const pageView = workingPages.find((item) => item.id === unitId);
     const element = pageView?.elements.find((item) => item.id === elementId);
     if (!pageView || !element) return [];
     if (element.type === "comic_frame" && patch.geometry) {
       const geometry = patch.geometry as ComicFrameElement["geometry"];
       return geometry.width === element.geometry.width && geometry.height === element.geometry.height
-        ? [{ type: "move_frame", unitId, frameId: element.id, position: { x: geometry.x, y: geometry.y } }]
-        : [{ type: "resize_frame", unitId, frameId: element.id, geometry }];
+        ? [{ id: "move_frame", input: { unitId, frameId: element.id, position: { x: geometry.x, y: geometry.y } } }]
+        : [{ id: "resize_frame", input: { unitId, frameId: element.id, geometry } }];
     }
     if (element.type === "image") {
-      if (patch.crop) return [{ type: "set_art_crop", unitId, frameId: element.comicFrameId!, layerId: element.layerId, elementId, crop: patch.crop as NonNullable<ImageElement["crop"]> }];
+      if (patch.crop) return [{ id: "set_art_crop", input: { unitId, frameId: element.comicFrameId!, layerId: element.layerId, elementId, crop: patch.crop as NonNullable<ImageElement["crop"]> } }];
       if (patch.geometry && element.comicFrameId) {
         const frame = pageView.elements.find((item): item is ComicFrameElement => item.type === "comic_frame" && item.id === element.comicFrameId);
-        if (frame) return [{ type: "set_element_transform", unitId, frameId: frame.id, layerId: element.layerId, elementId, transform: deriveLocalTransform(frame.geometry, patch.geometry as ImageElement["geometry"]) }];
+        if (frame) return [{ id: "set_element_transform", input: { unitId, frameId: frame.id, layerId: element.layerId, elementId, transform: deriveLocalTransform(frame.geometry, patch.geometry as ImageElement["geometry"]) } }];
       }
-      if (typeof patch.zIndex === "number") return [{ type: "reorder_layer", unitId, frameId: element.comicFrameId!, layerId: element.layerId, zIndex: patch.zIndex }];
+      if (typeof patch.zIndex === "number") return [{ id: "reorder_layer", input: { unitId, frameId: element.comicFrameId!, layerId: element.layerId, zIndex: patch.zIndex } }];
     }
     if (element.type === "speech_balloon") {
       const frame = pageView.elements.find((item): item is ComicFrameElement => item.type === "comic_frame" && item.id === element.comicFrameId);
@@ -929,16 +936,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const content = patch.content as SpeechBalloonElement["content"] | undefined;
       if (content?.shape) changes.shape = content.shape;
       if (content?.tailTarget && frame) changes.tailTarget = { x: (content.tailTarget.x - frame.geometry.x) / frame.geometry.width, y: (content.tailTarget.y - frame.geometry.y) / frame.geometry.height };
-      const commands: WorkspaceOperation[] = Object.keys(changes).length ? [{ type: "update_balloon", unitId, frameId: element.comicFrameId, layerId: element.layerId, elementId, changes: changes as never }] : [];
-      if (content && content.text !== element.content.text) commands.push({ type: "update_dialogue", dialogueId: element.dialogueId, content: content.text });
-      if (typeof patch.zIndex === "number") commands.push({ type: "reorder_layer", unitId, frameId: element.comicFrameId, layerId: element.layerId, zIndex: patch.zIndex });
-      return commands;
+      const requests: EditorCapabilityRequest[] = Object.keys(changes).length ? [{ id: "update_balloon", input: { unitId, frameId: element.comicFrameId, layerId: element.layerId, elementId, changes } }] : [];
+      if (content && content.text !== element.content.text) requests.push({ id: "update_dialogue", input: { dialogueId: element.dialogueId, content: content.text } });
+      if (typeof patch.zIndex === "number") requests.push({ id: "reorder_layer", input: { unitId, frameId: element.comicFrameId, layerId: element.layerId, zIndex: patch.zIndex } });
+      return requests;
     }
     return [];
   };
 
   const commitElementPatches = (unitId: string, patches: Array<{ elementId: string; patch: Record<string, unknown> }>, label: string) =>
-    commitOperations(patches.flatMap(({ elementId, patch }) => commandsForElementPatch(unitId, elementId, patch)), label);
+    commitCapabilities(patches.flatMap(({ elementId, patch }) => capabilitiesForElementPatch(unitId, elementId, patch)), label);
 
   const commitPlacement = (nextReferences: ReferencePlacement[], label: string) => {
     pushHistory(state.fixture, label, "placement");
@@ -1154,10 +1161,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           : targetPageElements.find((item): item is ImageElement => item.type === "image" && item.comicFrameId === targetElementCandidate);
       const targetElement = image?.id ?? "image-fixture-rain-beat-4";
       const crop = image?.crop ?? { x: 0, y: 0.68, width: 1, height: 0.32 };
-      operations = [
-        ...commandsForElementPatch(targetPage, targetElement, { crop: { ...crop, x: Math.min(1 - crop.width, crop.x + 0.02), y: Math.max(0, crop.y - 0.025) } }),
-        { type: "update_storyboard_beat", storyboardBeatId: targetStoryboardBeat, patch: { description: "少女更松弛地抬手，指尖轻轻拨开发梢。" } },
-      ];
+      operations = planCapabilities([
+        ...capabilitiesForElementPatch(targetPage, targetElement, { crop: { ...crop, x: Math.min(1 - crop.width, crop.x + 0.02), y: Math.max(0, crop.y - 0.025) } }),
+        { id: "update_storyboard_beat", input: { storyboardBeatId: targetStoryboardBeat, patch: { description: "少女更松弛地抬手，指尖轻轻拨开发梢。" } } },
+      ]).commands;
     } else if (candidate.document) {
       operations = candidate.commands ?? [{ type: "replace_chapter_presentation", document: candidate.document }];
     } else {
@@ -1555,7 +1562,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const updateBalloonShape = (shape: SpeechBalloonElement["content"]["shape"]) => {
     if (selection.type !== "speech_balloon" || selectedElement?.type !== "speech_balloon" || !selection.pageId) return;
-    commitOperations(commandsForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, shape } }), "调整对白气泡样式");
+    commitCapabilities(capabilitiesForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, shape } }), "调整对白气泡样式");
   };
 
   const handleAgentUpload = (file?: File) => {
@@ -1838,7 +1845,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (!stage) return;
     const pageNodes = new Map(Array.from(stage.querySelectorAll<HTMLElement>(".comic-page[data-page-id]")).map((node) => [node.dataset.pageId ?? "", node]));
     const selectedFrameIds = new Set(multiSelection.comic.filter((item) => item.type === "comic_frame" && item.id).map((item) => item.id!));
-    const operations: WorkspaceOperation[] = [];
+    const requests: EditorCapabilityRequest[] = [];
     multiSelection.comic.forEach((item) => {
       if (!item.id || !item.pageId) return;
       const comicPage = workingPages.find((candidate) => candidate.id === item.pageId);
@@ -1856,9 +1863,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         x: clampValue(element.geometry.x + canvasDeltaX, bounds.x, bounds.x + bounds.width - element.geometry.width),
         y: clampValue(element.geometry.y + canvasDeltaY, bounds.y, bounds.y + bounds.height - element.geometry.height),
       };
-      operations.push(...commandsForElementPatch(item.pageId, item.id, { geometry }));
+      requests.push(...capabilitiesForElementPatch(item.pageId, item.id, { geometry }));
     });
-    if (operations.length) commitOperations(operations, `已移动 ${multiSelection.comic.length} 个漫画元素`);
+    if (requests.length) commitCapabilities(requests, `已移动 ${multiSelection.comic.length} 个漫画元素`);
   };
 
   const finishMarqueeSelection = (selectionBox: MarqueeState) => {
@@ -2529,7 +2536,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅参考"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动参考图「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放参考图「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} />)}
           <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : pageDisplayMode === "spread" && !trailingUnpairedPage ? "spread" : ""}`} style={verticalStageWrapStyle}>
             <span className="page-tag">{isVerticalCanvas ? `SCROLL ${String(state.currentPageIndex + 1).padStart(2, "0")}` : pageDisplayMode === "spread" && !trailingUnpairedPage ? `PAGES ${displayedPageIndices.map((index) => String(index + 1).padStart(2, "0")).join("–")}` : page?.kind === "vertical_segment" ? `SCROLL ${String(state.currentPageIndex + 1).padStart(2, "0")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(state.currentPageIndex + 1).padStart(2, "0")}`}</span>
-            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasDocument.units[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onCommitElement={(unitId, elementId, patch, label) => commitOperations(commandsForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
+            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasDocument.units[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onCommitElement={(unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
           </div>
           {candidateDocument && (previewingCandidate || previewingVariant) ? <nav className="candidate-compare-toolbar" aria-label="页面方案对比">
             <div className="candidate-version-switch"><button type="button" className={candidatePreviewMode === "original" ? "active" : ""} onClick={() => setCandidatePreviewMode("original")}>原稿</button><button type="button" className={candidatePreviewMode === "candidate" ? "active" : ""} onClick={() => setCandidatePreviewMode("candidate")}>新方案</button></div>

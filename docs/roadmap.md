@@ -26,7 +26,7 @@
 | 3 文档治理 | 各正式文档 | 保留章节标题与一句结果 |
 | 4 代码治理 | 代码、测试与脚本 | 保留章节标题与一句结果 |
 | 5-7 编辑器能力 | 编辑器体验、LCD、代码与测试 | 删除具体待办，保留章节标题与一句结果 |
-| 8 工具治理 | Capability Registry、领域执行器 | 删除具体待办，保留章节标题与一句结果 |
+| 8 编辑能力入口 | Capability Registry、领域执行器 | 删除具体待办，保留章节标题与一句结果 |
 | 9 Agent | Agent 设计与运行代码 | 删除具体待办，保留章节标题与一句结果 |
 | 10 方向问题 | 对应正式事实源 | 删除问题明细，保留章节标题与一句结果 |
 
@@ -34,13 +34,12 @@
 
 ## 1. 剩余执行优先级
 
-已完成：产品事实源与文档收口；阶段命名和低风险代码整理；编辑、预览与导出渲染一致性基线。
+已完成：产品事实源与文档收口；阶段命名和低风险代码整理；编辑、预览与导出渲染一致性基线；确定性编辑能力统一入口。
 
 | 优先级 | 工作 | 为什么先做 | 完成标志 |
 |---|---|---|---|
 | 4 | 人类结构编辑与合成能力 | 这是作品可控和未来 Agent 可控的共同基础 | 页面、画格、气泡、层级、阅读顺序具备 UI、Undo 和测试 |
 | 5 | 页漫与条漫格式专项 | 在共享对象能力稳定后补格式差异，避免各做一套编辑器 | 页漫可完成真实作品；条漫具备手机预览和切片闭环 |
-| 6 | Capability Registry 与领域工具收口 | 把已有能力变成 Agent 能被允许调用的执行事实源 | UI 和 Agent 引用同一 capability id 与执行器 |
 | 7 | Agent 观察、预览和受控执行 | 最后接入模型，避免模型放大尚未确定的作品语义 | 低风险对象/单页案例可解释、可预览、可应用和撤销 |
 
 ## 2. 产品事实与早期设计遗留
@@ -67,45 +66,13 @@
 
 人类编辑能力的优先级、当前状态和格式差异统一由文末漫画编辑能力矩阵维护；确定性修改使用一致的选择、菜单、撤销和删除确认，页漫与条漫共享现有候选、页面方案和快照机制。
 
-## 8. 统一领域工具治理
+## 8. 编辑能力统一入口
 
-### 8.1 三层工具
-
-| 层 | 作用 | 示例 |
-|---|---|---|
-| 原子命令 | 单一、确定性领域写入 | `move_frame`、`update_dialogue` |
-| 复合编辑工具 | 多个命令组成一次事务和一次 Undo | 新增气泡、拆分画格、形成破框 |
-| 生成工具 | 调模型或算法，产出资产/方案，不直接覆盖作品 | 生成格内图、建议编排、重写对白 |
-
-人类 UI 通常调用复合工具，Agent 也调用同一个复合工具。原子命令是协议构件，不要求全部直接暴露。
-
-### 8.2 Capability Registry
-
-```ts
-type EditorCapability = {
-  id: string
-  version: number
-  inputSchema: ZodSchema
-  scope: "element" | "frame" | "unit" | "chapter"
-  humanEntry: "available" | "planned" | "exception"
-  agentAccess: "disabled" | "observe" | "preview" | "execute"
-  risk: "low" | "medium" | "high"
-  preconditions: string[]
-  outputCommandTypes: WorkspaceCommand["type"][]
-  previewPolicy: "inline" | "candidate" | "staged"
-  undoPolicy: "atomic"
-}
-```
-
-Registry 与 dry-run 位于 `packages/editor-core`，命令和 ChangeSet 的运行时 schema 位于 `packages/shared`。后续编辑能力直接扩充这一事实源，不在 API、UI 或 Agent 中复制 schema、ID 和业务默认值。
-
-默认规则是 `agentAccess <= humanEntry`。AI-first 例外必须登记原因、输出边界、回退方式和未来人类入口。
-
-低风险能力局限于当前对象、直接可见且一次 Undo 可恢复；改变当前页或多个对象必须展示计划和预览；跨页、整话、格式转换或批量删除必须分阶段候选。整组 replace 默认只用于导入、迁移、恢复或经过专门审查的方案应用。
+已完成：确定性漫画编辑由 `editor-core` 的语义 Capability 统一校验和规划，工作台组合能力后以原子 ChangeSet 提交；WorkspaceCommand 仅作为内部写入语言，新能力继续默认不向 Agent 开放。
 
 ## 9. Agent 放在编辑器之后
 
-[Agent](./agent.md)维护稳定协作、上下文和安全边界。本节只跟踪尚未落地的 Capability Registry、领域执行器和受控执行路径；对应能力完成后直接更新正式文档，并把本节收短为一句完成结果。
+[Agent](./agent.md)维护稳定协作、上下文和安全边界。本节只跟踪尚未落地的受控 Agent 执行路径；对应能力完成后直接更新正式文档，并把本节收短为一句完成结果。
 
 ### 9.1 旧 Agent 的问题
 
@@ -205,22 +172,22 @@ AGENT_EXECUTION_MODE=disabled | observe | tool_preview | enabled
 |---|---|---|---|---|---|---|
 | 核心 | 基础组织 | 创建、编辑和删除漫画与章节 | 通用 | `Comic / Chapter / Project` 持久化操作 | 已接入 | 未登记 |
 | 核心 | 基础组织 | 新增、命名和删除页面或滚动段，并修改滚动段比例 | 通用 | `PresentationUnit`；现有页面 Capability 组合 | 已接入 | 4 项已登记（禁用） |
-| 核心 | 画格编排 | 新增、删除、复制、移动和缩放常规矩形画格 | 通用 | `Frame.geometry / readingSequence`；保持基础间距和一次原子变更 | 部分接入：仅移动、缩放 | 未登记 |
+| 核心 | 画格编排 | 新增、删除、复制、移动和缩放常规矩形画格 | 通用 | `Frame.geometry / readingSequence`；保持基础间距和一次原子变更 | 部分接入：仅移动、缩放 | `move_frame`、`resize_frame`（已登记，禁用） |
 | 核心 | 画格编排 | 使用少量布局预设快速形成页面骨架 | 通用 | 1-6 格常用模板形成一次原子结构变更 | 未接入 | 未登记 |
 | 核心 | 分镜 | 为每格创建和编辑画面描述 | 通用 | `StoryboardBeat / Frame.storyRefs` | 已接入 | 2 项已登记（禁用） |
 | 核心 | 格内图片 | 把上传图片或已有资产放入指定画格 | 通用 | `ResourceRef + ImageElement` 作为一次受控放置 | 未接入 | 未登记 |
 | 核心 | 格内图片 | 根据单格描述、人物、场景和风格引用生成成稿 | 通用 | 混合：固定引用进入上下文，模型生成新 `AssetVersion`，局部候选替换 | 部分接入：旧任务与引用选择分离 | 未登记 |
 | 核心 | 格内图片 | 对指定格进行重画、扩图或局部精修 | 通用 | 混合：修图模型或 SDK 只处理当前格与选区，生成新 `AssetVersion` | 部分接入：旧任务仅支持整格 | 未登记 |
-| 核心 | 格内图片 | 调整格内图片取景 | 通用 | `ImageElement.crop`；平移、缩放、裁切和重置 | 已接入 | `set_art_crop`（已登记，禁用） |
+| 核心 | 格内图片 | 调整格内图片取景 | 通用 | `ImageElement.crop`；平移、缩放、裁切和重置 | 已接入 | `set_art_crop`、`set_element_transform`（已登记，禁用） |
 | 核心 | 对白与气泡 | 新增、编辑和删除普通对白气泡 | 通用 | `Dialogue + BalloonElement` 作为一个复合能力 | 部分接入：仅编辑现有对白 | 仅 `update_dialogue` 已登记（禁用） |
-| 核心 | 对白与气泡 | 调整气泡位置、尺寸、尾巴和基础样式 | 通用 | `BalloonElement.transform / tailTarget / shape / style`；只提供少量预设 | 已接入 | 未登记 |
+| 核心 | 对白与气泡 | 调整气泡位置、尺寸、尾巴和基础样式 | 通用 | `BalloonElement.transform / tailTarget / shape / style`；只提供少量预设 | 已接入 | `update_balloon`（已登记，禁用） |
 | 核心 | 资产与一致性 | 上传、摆放、整理和复用人物、场景与风格参考 | 通用 | `AssetVersion / ReferencePlacement / context snapshot` | 已接入 | 不适用：作为生成上下文 |
 | 核心 | 版本与输出 | 保存、预览、应用、撤销和恢复一次创作结果 | 通用 | `ChangeSet / Candidate / Undo / Snapshot` | 已接入 | 不适用 |
 | 核心 | 版本与输出 | 页漫单页/双页预览、条漫连续预览、最近保存快照的当前范围 PNG 和 LCD 下载 | 通用 | LCD 与固定资源版本的确定性渲染和导出 | 已接入 | 不适用 |
 | 增强 | 基础组织 | 复制和重排页面或滚动段 | 通用 | `reading.unitOrder` 与展示单元复制、ID 重映射 | 未接入 | 未登记 |
 | 增强 | 画格编排 | 根据分镜生成 2-3 个页面布局候选 | 通用 | 混合：模型规划布局意图，确定性布局器生成结构 Candidate | 部分接入：旧任务直接替换大范围文档 | 未登记 |
 | 增强 | 画格表现 | 使用无框、线宽、圆角、基础形状、出血、整页主视觉和局部断框 | 通用 | `Frame.border / shape / mask / geometry` 的简单预设；局部断框由出格对象或遮罩覆盖，不扩协议 | 未接入 | 未登记 |
-| 增强 | 页面合成 | 让人物或物体出格、跨格显示，并调整基础层级和可见性 | 通用 | `UnitOverlay` 使用 Frame 锚点；“移出画格/收回画格”保持视觉位置且可逆，不开放完整图层软件 | 未接入 | 未登记 |
+| 增强 | 页面合成 | 让人物或物体出格、跨格显示，并调整基础层级和可见性 | 通用 | `UnitOverlay` 使用 Frame 锚点；“移出画格/收回画格”保持视觉位置且可逆，不开放完整图层软件 | 未接入 | 仅 `reorder_layer` 已登记（禁用） |
 | 增强 | 文字 | 使用旁白、说明字和无气泡对白 | 通用 | `TextElement` 位于格内或页面覆盖层 | 未接入 | 未登记 |
 | 增强 | 对白与气泡 | 自动润色、压缩或改写指定对白 | 通用 | 混合：文本模型返回局部文字候选，确认后复用确定性更新 | 未接入 | 未登记 |
 | 增强 | 对白与气泡 | 使用喊叫、低声和电子声等表现型气泡 | 通用 | `Dialogue / BalloonElement` 保留语义与可编辑参数，`appearance` 引用固定版本的图像外观；三端按同一规则渲染 | 部分接入：协议与基础形状可用，外观入口未接入 | `set_element_appearance`（已登记，禁用） |

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  balloonElementSchema,
+  geometrySchema,
   normalizedRectSchema,
   visualAssetReferenceSchema,
   type PresentationUnit,
@@ -65,6 +67,20 @@ function findFrame(context: EditorCapabilityContext, unitId: string, frameId: st
   const frame = unit.frames.find((item) => item.id === frameId);
   if (!frame) throw new Error(`missing Frame: ${frameId}`);
   return { unit, frame };
+}
+
+function findFrameLayer(context: EditorCapabilityContext, unitId: string, frameId: string, layerId: string) {
+  const { unit, frame } = findFrame(context, unitId, frameId);
+  const layer = frame.layers.find((item) => item.id === layerId);
+  if (!layer) throw new Error(`missing FrameLayer: ${layerId}`);
+  return { unit, frame, layer };
+}
+
+function findFrameElement(context: EditorCapabilityContext, unitId: string, frameId: string, layerId: string, elementId: string) {
+  const { unit, frame, layer } = findFrameLayer(context, unitId, frameId, layerId);
+  const element = layer.elements.find((item) => item.id === elementId);
+  if (!element) throw new Error(`missing FrameElement: ${elementId}`);
+  return { unit, frame, layer, element };
 }
 
 const updateDialogueCapability = defineCapability({
@@ -166,6 +182,130 @@ const setArtCropCapability = defineCapability({
     const element = layer?.elements.find((item) => item.id === input.elementId);
     if (!element || element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
     return [{ type: "set_art_crop", ...input }];
+  },
+});
+
+const moveFrameCapability = defineCapability({
+  id: "move_frame",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    position: z.strictObject({ x: z.number(), y: z.number() }),
+  }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["frame_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["move_frame"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    findFrame(context, input.unitId, input.frameId);
+    return [{ type: "move_frame", ...input }];
+  },
+});
+
+const resizeFrameCapability = defineCapability({
+  id: "resize_frame",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    geometry: geometrySchema,
+  }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["frame_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["resize_frame"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    findFrame(context, input.unitId, input.frameId);
+    return [{ type: "resize_frame", ...input }];
+  },
+});
+
+const setElementTransformCapability = defineCapability({
+  id: "set_element_transform",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    layerId: z.string().min(1),
+    elementId: z.string().min(1),
+    transform: geometrySchema,
+  }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["frame_element_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["set_element_transform"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    return [{ type: "set_element_transform", ...input }];
+  },
+});
+
+const balloonChangesInputSchema = balloonElementSchema.pick({
+  transform: true,
+  tailTarget: true,
+  shape: true,
+  style: true,
+  overflow: true,
+}).partial().strict().refine((changes) => Object.keys(changes).length > 0, "balloon changes cannot be empty");
+
+const updateBalloonCapability = defineCapability({
+  id: "update_balloon",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    layerId: z.string().min(1),
+    elementId: z.string().min(1),
+    changes: balloonChangesInputSchema,
+  }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["balloon_element_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["update_balloon"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
+    return [{ type: "update_balloon", ...input }];
+  },
+});
+
+const reorderLayerCapability = defineCapability({
+  id: "reorder_layer",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    layerId: z.string().min(1),
+    zIndex: z.number().int(),
+  }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["frame_layer_exists"],
+  outputCommandTypes: ["reorder_layer"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    findFrameLayer(context, input.unitId, input.frameId, input.layerId);
+    return [{ type: "reorder_layer", ...input }];
   },
 });
 
@@ -341,6 +481,11 @@ const capabilityRegistry = {
   update_storyboard_beat: updateStoryboardBeatCapability,
   create_frame_storyboard_beat: createFrameStoryboardBeatCapability,
   set_art_crop: setArtCropCapability,
+  move_frame: moveFrameCapability,
+  resize_frame: resizeFrameCapability,
+  set_element_transform: setElementTransformCapability,
+  update_balloon: updateBalloonCapability,
+  reorder_layer: reorderLayerCapability,
   set_element_appearance: setElementAppearanceCapability,
   create_page: createPageCapability,
   create_vertical_segment: createVerticalSegmentCapability,
@@ -384,4 +529,14 @@ export function planEditorCapability(id: EditorCapabilityId, rawInput: unknown, 
   }
   const plan = capability.plan(rawInput, context);
   return { capability: descriptor(capability), ...plan };
+}
+
+export type EditorCapabilityRequest = { id: EditorCapabilityId; input: unknown };
+
+export function planEditorCapabilities(requests: EditorCapabilityRequest[], context: EditorCapabilityContext) {
+  const plans = requests.map((request) => planEditorCapability(request.id, request.input, context));
+  return {
+    plans,
+    commands: plans.flatMap((plan) => plan.commands),
+  };
 }

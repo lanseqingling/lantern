@@ -31,6 +31,14 @@ export type EditorCapabilityContext = {
   actor: "human" | "agent";
 };
 
+export const verticalSegmentAspectRatios = ["4:3", "1:1", "3:4", "2:3", "9:16", "9:20"] as const;
+export type VerticalSegmentAspectRatio = typeof verticalSegmentAspectRatios[number];
+
+export function verticalSegmentHeight(width: number, aspectRatio: VerticalSegmentAspectRatio) {
+  const [ratioWidth, ratioHeight] = aspectRatio.split(":").map(Number);
+  return Math.round(width * ratioHeight / ratioWidth);
+}
+
 type RegisteredCapability = EditorCapabilityDescriptor & {
   inputSchema: z.ZodType;
   plan: (rawInput: unknown, context: EditorCapabilityContext) => { input: unknown; commands: WorkspaceCommand[] };
@@ -174,20 +182,58 @@ const createPageCapability = defineCapability({
   undoPolicy: "atomic",
   execute(_input, context) {
     const document = context.fixture.working.document;
+    if (document.format === "vertical") throw new Error("create_page is unavailable for vertical comics");
     const readingIndex = document.units.length;
-    const kind: PresentationUnit["kind"] = document.format === "vertical" ? "vertical_segment" : document.format === "four_panel" ? "four_panel_unit" : "single_page";
+    const kind: PresentationUnit["kind"] = document.format === "four_panel" ? "four_panel_unit" : "single_page";
     const previousUnit = document.units.at(-1);
     const canvas = previousUnit?.kind === kind
       ? structuredClone(previousUnit.canvas)
-      : document.format === "vertical"
-        ? { width: 640, height: 980, background: { color: "#ffffff" } }
-        : { width: 720, height: 1080, background: { color: "#ffffff" } };
-    const id = context.createId(kind === "vertical_segment" ? "segment" : kind === "four_panel_unit" ? "four-panel-unit" : "page");
+      : { width: 720, height: 1080, background: { color: "#ffffff" } };
+    const id = context.createId(kind === "four_panel_unit" ? "four-panel-unit" : "page");
     const unit: PresentationUnit = {
       id,
       kind,
       canvas,
-      surfaces: [{ id: `${id}-surface`, role: kind === "vertical_segment" ? "segment" : "single", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: readingIndex + 1 }],
+      surfaces: [{ id: `${id}-surface`, role: "single", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: readingIndex + 1 }],
+      frames: [],
+      overlayLayers: [],
+      readingSequence: [],
+      layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },
+    };
+    return [{ type: "add_presentation_unit", unit, readingIndex }];
+  },
+});
+
+const createVerticalSegmentCapability = defineCapability({
+  id: "create_vertical_segment",
+  version: 1,
+  inputSchema: z.strictObject({ aspectRatio: z.enum(verticalSegmentAspectRatios) }),
+  scope: "chapter",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["vertical_working_document_exists", "aspect_ratio_is_supported"],
+  outputCommandTypes: ["add_presentation_unit"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    if (document.format !== "vertical") throw new Error("create_vertical_segment requires a vertical comic");
+    const readingIndex = document.units.length;
+    const firstSegment = document.units.find((unit) => unit.kind === "vertical_segment");
+    const previousSegment = [...document.units].reverse().find((unit) => unit.kind === "vertical_segment");
+    const width = firstSegment?.canvas.width ?? 640;
+    const canvas = {
+      width,
+      height: verticalSegmentHeight(width, input.aspectRatio),
+      background: structuredClone(previousSegment?.canvas.background ?? { color: "#ffffff" }),
+    };
+    const id = context.createId("segment");
+    const unit: PresentationUnit = {
+      id,
+      kind: "vertical_segment",
+      canvas,
+      surfaces: [{ id: `${id}-surface`, role: "segment", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: readingIndex + 1 }],
       frames: [],
       overlayLayers: [],
       readingSequence: [],
@@ -203,6 +249,7 @@ const capabilityRegistry = {
   create_frame_storyboard_beat: createFrameStoryboardBeatCapability,
   set_art_crop: setArtCropCapability,
   create_page: createPageCapability,
+  create_vertical_segment: createVerticalSegmentCapability,
 } satisfies Record<string, RegisteredCapability>;
 
 export type EditorCapabilityId = keyof typeof capabilityRegistry;

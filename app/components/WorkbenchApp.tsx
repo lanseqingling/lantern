@@ -24,7 +24,7 @@ import type {
   WorkspaceOperation,
 } from "@/packages/shared/src";
 import { createComicPageViews, deriveLocalTransform } from "@/packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot, planEditorCapability, type EditorCapabilityId } from "@/packages/editor-core/src";
+import { applyWorkspaceChangeSet, createSnapshot, planEditorCapability, verticalSegmentAspectRatios, type EditorCapabilityId, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
 import {
   createContinuationCandidate,
   createStoryboardLayoutCandidate,
@@ -41,6 +41,7 @@ import {
   type Selection,
 } from "@/app/lib/workbench-state";
 import { saveGeneratedImageFromUrl, saveUploadedImage } from "@/app/lib/local-assets-client";
+import { fitVerticalNavigatorPaper, fitVerticalViewportWidth, nextVerticalViewportMode, verticalNavigatorWindow, verticalViewportModeMeta, type VerticalViewportMode } from "@/app/lib/vertical-workspace";
 import {
   apiApplyCandidate,
   apiApplyPageVariant,
@@ -112,6 +113,10 @@ const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toStrin
 // Keep new references clear of the left creation drawer while still close enough
 // to be used alongside the page.
 const canvasReferenceDropX = 320;
+const verticalWheelThreshold = 180;
+const verticalWheelResetMs = 220;
+const verticalWheelLockMs = 320;
+const verticalNavigatorHideMs = 700;
 const intentOptions = ["分镜", "编排", "精修", "人物", "场景", "修改"].map((value) => ({ value, label: value }));
 const canvasAssetSaveTypeOptions: Array<{ value: CanvasAssetSaveKind; label: string }> = [
   { value: "character", label: "角色" },
@@ -129,6 +134,17 @@ const balloonStyleOptions = [
   { value: "broadcast_balloon", label: "电子气泡", disabled: true },
   { value: "wavy_balloon", label: "颤抖气泡", disabled: true },
 ];
+
+function AspectRatioGlyph({ ratio }: { ratio: VerticalSegmentAspectRatio }) {
+  const [width, height] = ratio.split(":").map(Number);
+  const scale = Math.min(18 / width, 18 / height);
+  return <span className="aspect-ratio-glyph" aria-hidden="true"><i style={{ width: width * scale, height: height * scale }} /></span>;
+}
+
+function DeviceViewportGlyph({ mode }: { mode: VerticalViewportMode }) {
+  const viewport = mode === "off" ? { width: 9, height: 16 } : verticalViewportModeMeta[mode];
+  return <span className={`device-viewport-glyph mode-${mode}`} aria-hidden="true"><i style={{ aspectRatio: `${viewport.width} / ${viewport.height}` }} /></span>;
+}
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const isCanvasReference = (reference: ReferencePlacement) => reference.kind !== "style";
 const debugRecord = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -210,6 +226,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [leftOpen, setLeftOpen] = useState(true);
   const [agentOpen, setAgentOpen] = useState(true);
   const [projectMenu, setProjectMenu] = useState(false);
+  const [verticalSegmentMenuPosition, setVerticalSegmentMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [pageDisplayMode, setPageDisplayMode] = useState<PageDisplayMode>("single");
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [editingStoryboardBeatId, setEditingStoryboardBeatId] = useState<string | null>(null);
@@ -220,6 +237,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("focus");
   const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
   const [canvasScale, setCanvasScale] = useState(1);
+  const [verticalViewportMode, setVerticalViewportMode] = useState<VerticalViewportMode>("off");
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [isCanvasPanning, setIsCanvasPanning] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [multiSelection, setMultiSelection] = useState<MultiSelectionState | null>(null);
@@ -235,13 +254,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const chatUploadRef = useRef<HTMLInputElement>(null);
   const dockUploadRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLElement>(null);
+  const verticalStripRef = useRef<HTMLDivElement>(null);
+  const verticalNavigatorRef = useRef<HTMLElement>(null);
+  const verticalNavigatorFrameRef = useRef<number | null>(null);
+  const verticalNavigatorHideTimerRef = useRef<number | null>(null);
+  const verticalWheelIntentRef = useRef({ amount: 0, direction: 0, lastAt: 0, lockedUntil: 0 });
   const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const marqueeRef = useRef<MarqueeState | null>(null);
   const multiMoveRef = useRef<MultiMoveState | null>(null);
   const suppressStageClickRef = useRef(false);
   const scenarioHandled = useRef(false);
 
-  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "session") => {
+  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "session" | "vertical_segment") => {
     if (keep !== "project") setProjectMenu(false);
     if (keep !== "asset") {
       setAssetMenuId(null);
@@ -249,6 +273,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     if (keep !== "storyboard") setStoryboardMenuFrameId(null);
     if (keep !== "session") setSessionMenuId(null);
+    if (keep !== "vertical_segment") setVerticalSegmentMenuPosition(null);
   };
 
   useOutsidePointerDismiss(Boolean(assetMenuId || assetSaveFormId), ".asset-row, .asset-reference-menu-floating, .asset-save-form-floating", () => {
@@ -256,6 +281,20 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setAssetSaveFormId(null);
   });
   useOutsidePointerDismiss(Boolean(storyboardMenuFrameId), ".storyboard-frame-row, .storyboard-row-menu-floating", () => setStoryboardMenuFrameId(null));
+
+  useEffect(() => {
+    if (!verticalSegmentMenuPosition) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setVerticalSegmentMenuPosition(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [verticalSegmentMenuPosition]);
+
+  useEffect(() => () => {
+    if (verticalNavigatorFrameRef.current !== null) window.cancelAnimationFrame(verticalNavigatorFrameRef.current);
+    if (verticalNavigatorHideTimerRef.current !== null) window.clearTimeout(verticalNavigatorHideTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const ids = (state.assets ?? []).filter((asset) => asset.kind !== "generated_image").map((asset) => asset.id);
@@ -424,6 +463,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }, [previewingVariant, state.fixture.storyboardBeats, state.fixture.working]);
   const candidateDocument = previewingCandidate?.document ?? variantPreviewDocument;
   const canvasDocument = candidatePreviewMode === "candidate" && candidateDocument ? candidateDocument : state.fixture.working.document;
+  const isVerticalWorkbench = state.fixture.working.document.format === "vertical";
+  const isVerticalCanvas = canvasDocument.format === "vertical";
   const canvasResolvedResources = useMemo(() => {
     const next = { ...(state.fixture.working.resolvedResources ?? {}) };
     const versionId = previewingCandidate?.metadata?.outputAssetVersionId;
@@ -431,6 +472,35 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (versionId && previewUrl) next[versionId] = { url: previewUrl };
     return next;
   }, [previewingCandidate, state.fixture.working.resolvedResources]);
+
+  useEffect(() => {
+    if (isVerticalWorkbench) return;
+    setVerticalViewportMode("off");
+    setVerticalSegmentMenuPosition(null);
+  }, [isVerticalWorkbench]);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!isVerticalCanvas || !stage) return;
+    const update = () => setStageSize({ width: stage.clientWidth, height: stage.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [isVerticalCanvas]);
+
+  useLayoutEffect(() => {
+    const strip = verticalStripRef.current;
+    if (!isVerticalCanvas || canvasMode !== "focus" || !strip) {
+      verticalWheelIntentRef.current = { amount: 0, direction: 0, lastAt: 0, lockedUntil: 0 };
+      return;
+    }
+    const target = strip.querySelector<HTMLElement>(`[data-page-index="${state.currentPageIndex}"]`);
+    if (!target) return;
+    const top = clampValue(target.offsetTop - (strip.clientHeight - target.offsetHeight) / 2, 0, Math.max(0, strip.scrollHeight - strip.clientHeight));
+    strip.scrollTo({ top, behavior: "smooth" });
+  }, [canvasDocument.units.length, canvasMode, isVerticalCanvas, state.currentPageIndex]);
+
   const activeConversation = state.conversations?.find((conversation) => conversation.id === runtimeIds?.conversationId);
   const sessionMenuConversation = state.conversations?.find((conversation) => conversation.id === sessionMenuId);
   const composerReferenceItems = useMemo(() => {
@@ -1706,6 +1776,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
+  const cycleVerticalViewportMode = () => {
+    const next = nextVerticalViewportMode(verticalViewportMode);
+    setVerticalViewportMode(next);
+    if (next !== "off" && canvasMode !== "focus") switchCanvasMode("focus");
+    setToast(next === "off" ? "设备视区已关闭" : `设备视区 · ${verticalViewportModeMeta[next].label}`);
+  };
+
   const commitMultiMove = (deltaX: number, deltaY: number) => {
     if (!multiSelection || (!deltaX && !deltaY)) return;
     const comicActive = multiSelection.comicActive && multiSelection.comic.length > 0;
@@ -1826,6 +1903,27 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const handleCanvasWheel = (event: ReactWheelEvent<HTMLElement>) => {
+    if (isVerticalCanvas && canvasMode === "focus" && !isFloatingCanvasControl(event.target)) {
+      const stage = stageRef.current;
+      if (!stage) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const now = performance.now();
+      const intent = verticalWheelIntentRef.current;
+      if (now < intent.lockedUntil) return;
+      const delta = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? stage.clientHeight : 1);
+      if (!delta) return;
+      const direction = Math.sign(delta);
+      if (now - intent.lastAt > verticalWheelResetMs || direction !== intent.direction) intent.amount = 0;
+      intent.amount += Math.abs(delta);
+      intent.direction = direction;
+      intent.lastAt = now;
+      if (intent.amount < verticalWheelThreshold) return;
+      intent.amount = 0;
+      intent.lockedUntil = now + verticalWheelLockMs;
+      setCurrentComicPage(state.currentPageIndex + direction);
+      return;
+    }
     if (canvasMode !== "free" || isFloatingCanvasControl(event.target)) return;
     const stage = stageRef.current;
     if (!stage) return;
@@ -1843,6 +1941,28 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         y: offset.y + (current - next) * pointerY,
       }));
       return next;
+    });
+  };
+
+  const handleVerticalStripScroll = () => {
+    if (canvasMode !== "focus" || verticalNavigatorFrameRef.current !== null) return;
+    verticalNavigatorFrameRef.current = window.requestAnimationFrame(() => {
+      verticalNavigatorFrameRef.current = null;
+      const strip = verticalStripRef.current;
+      const navigator = verticalNavigatorRef.current;
+      if (!strip || !navigator) return;
+      const pages = strip.querySelectorAll<HTMLElement>("[data-page-index]");
+      const first = pages.item(0);
+      const last = pages.item(pages.length - 1);
+      if (!first || !last) return;
+      const contentTop = first.offsetTop;
+      const contentHeight = last.offsetTop + last.offsetHeight - contentTop;
+      const viewport = verticalNavigatorWindow({ scrollTop: strip.scrollTop, viewportHeight: strip.clientHeight, contentTop, contentHeight });
+      navigator.style.setProperty("--navigator-window-top", `${viewport.top * 100}%`);
+      navigator.style.setProperty("--navigator-window-height", `${viewport.height * 100}%`);
+      navigator.classList.add("visible");
+      if (verticalNavigatorHideTimerRef.current !== null) window.clearTimeout(verticalNavigatorHideTimerRef.current);
+      verticalNavigatorHideTimerRef.current = window.setTimeout(() => navigator.classList.remove("visible"), verticalNavigatorHideMs);
     });
   };
 
@@ -1914,17 +2034,46 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (canvasMode === "focus") setSelection(noSelection);
   };
 
+  const handleWorkbenchPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!verticalSegmentMenuPosition) return;
+    if (event.target instanceof Element && event.target.closest(".drawer-add-page, .vertical-segment-ratio-menu")) return;
+    setVerticalSegmentMenuPosition(null);
+  };
+
   const addBlankComicPage = () => {
     const pageIndex = state.fixture.working.document.units.length;
     if (commitCapability("create_page", {}, "新增空白页", pageIndex)) setSelection(noSelection);
   };
 
+  const addVerticalSegment = (aspectRatio: VerticalSegmentAspectRatio) => {
+    setVerticalSegmentMenuPosition(null);
+    const pageIndex = state.fixture.working.document.units.length;
+    if (commitCapability("create_vertical_segment", { aspectRatio }, `新增滚动段 ${aspectRatio}`, pageIndex)) setSelection(noSelection);
+  };
+
+  const openVerticalSegmentMenu = (button: HTMLButtonElement) => {
+    if (verticalSegmentMenuPosition) {
+      setVerticalSegmentMenuPosition(null);
+      return;
+    }
+    closeFloatingMenus("vertical_segment");
+    const rect = button.getBoundingClientRect();
+    const width = 224;
+    const height = 176;
+    setVerticalSegmentMenuPosition({
+      left: clampValue(rect.right + 10, 12, Math.max(12, window.innerWidth - width - 12)),
+      top: clampValue(rect.top - 10, 12, Math.max(12, window.innerHeight - height - 12)),
+    });
+  };
+
   const currentPages = workingPages;
-  const trailingUnpairedPage = pageDisplayMode === "spread" && currentPages.length % 2 === 1 && state.currentPageIndex === currentPages.length - 1;
+  const trailingUnpairedPage = !isVerticalCanvas && pageDisplayMode === "spread" && currentPages.length % 2 === 1 && state.currentPageIndex === currentPages.length - 1;
   const spreadStartIndex = Math.floor(state.currentPageIndex / 2) * 2;
-  const displayedPageIndices = pageDisplayMode === "spread" && !trailingUnpairedPage
-    ? [spreadStartIndex, spreadStartIndex + 1].filter((index) => index < currentPages.length)
-    : [state.currentPageIndex].filter((index) => index < currentPages.length);
+  const displayedPageIndices = isVerticalCanvas
+    ? canvasDocument.units.map((_, index) => index)
+    : pageDisplayMode === "spread" && !trailingUnpairedPage
+      ? [spreadStartIndex, spreadStartIndex + 1].filter((index) => index < currentPages.length)
+      : [state.currentPageIndex].filter((index) => index < currentPages.length);
   const setCurrentComicPage = (index: number) => {
     setState((current) => ({ ...current, currentPageIndex: clampValue(index, 0, Math.max(0, current.fixture.working.document.units.length - 1)) }));
   };
@@ -1992,6 +2141,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     ? { left: toolbarPlacement.x, top: toolbarPlacement.y, right: "auto", bottom: "auto" }
     : undefined;
   const canvasWorldStyle: CSSProperties = { transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasScale})` };
+  const baseVerticalPageDisplayWidth = stageSize.width ? Math.min(430, stageSize.width * .56) : 430;
+  const verticalPageDisplayWidth = fitVerticalViewportWidth(baseVerticalPageDisplayWidth, Math.max(240, stageSize.height - 144), verticalViewportMode);
+  const activeVerticalViewport = verticalViewportMode === "off" ? undefined : verticalViewportModeMeta[verticalViewportMode];
+  const verticalStageWrapStyle: CSSProperties | undefined = isVerticalCanvas ? { width: verticalPageDisplayWidth + 40 } : undefined;
+  const verticalViewportStyle: CSSProperties | undefined = activeVerticalViewport
+    ? { width: verticalPageDisplayWidth, aspectRatio: `${activeVerticalViewport.width} / ${activeVerticalViewport.height}` }
+    : undefined;
+  const verticalNavigatorPaperSize = fitVerticalNavigatorPaper(
+    canvasDocument.units[0]?.canvas.width ?? 0,
+    canvasDocument.units.reduce((height, unit) => height + unit.canvas.height, 0),
+  );
+  const verticalNavigatorPaperStyle: CSSProperties = {
+    width: verticalNavigatorPaperSize.width,
+    height: verticalNavigatorPaperSize.height,
+  };
+  const verticalViewportLabel = activeVerticalViewport ? `设备视区：${activeVerticalViewport.label}` : "设备视区已关闭";
   const activeMultiComicIds = new Set(multiSelection?.comicActive ? multiSelection.comic.flatMap((item) => item.id ? [item.id] : []) : []);
   const activeMultiCanvasIds = new Set(multiSelection?.canvasActive ? multiSelection.canvasIds : []);
   const multiComicActive = Boolean(multiSelection?.comicActive && multiSelection.comic.length);
@@ -2074,7 +2239,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }
 
   return (
-    <WorkbenchShell data-testid="workbench">
+    <WorkbenchShell data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <header className="project-chip" data-testid="project-chip">
         <button className="project-main" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label="打开项目菜单">
@@ -2155,8 +2320,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </section> : null}
         </div>
         </div>
-        <section className="drawer-pages-fixed" aria-label="漫画页">
-          <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>漫画页</strong><small>{currentPages.length} 页</small><button type="button" className="drawer-add-page" aria-label="新增一页" onClick={addBlankComicPage}><Icon name="add" /></button></div>
+        <section className="drawer-pages-fixed" aria-label={isVerticalWorkbench ? "滚动段" : "漫画页"}>
+          <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>{isVerticalWorkbench ? "滚动段" : "漫画页"}</strong><small>{currentPages.length} {isVerticalWorkbench ? "段" : "页"}</small><button type="button" className="drawer-add-page" aria-label={isVerticalWorkbench ? "新增滚动段" : "新增一页"} aria-expanded={isVerticalWorkbench ? Boolean(verticalSegmentMenuPosition) : undefined} onClick={(event) => isVerticalWorkbench ? openVerticalSegmentMenu(event.currentTarget) : addBlankComicPage()}><Icon name="add" /></button></div>
           <div className="draft-pages">{currentPages.map((comicPage, index) => { const thumbnail = pageThumbSrc(comicPage); return <button type="button" key={comicPage.id} className={`draft-page ${index === state.currentPageIndex ? "active" : ""}`} onClick={() => setCurrentComicPage(index)}>{thumbnail ? <img src={thumbnail} alt="漫画页缩略图" loading="lazy" decoding="async"/> : <div className="draft-page-empty" aria-label="空白漫画页"/>}<span><b>{comicPage.kind === "page" ? `Page ${String(index + 1).padStart(2, "0")}` : comicPage.kind === "vertical_segment" ? `滚动段 ${String(index + 1).padStart(2, "0")}` : `四格 ${String(index + 1).padStart(2, "0")}`}</b><small>{comicPage.elements.filter((element) => element.type === "comic_frame").length} 格 · {index === state.currentPageIndex ? "当前查看" : "工作稿"}</small></span></button>; })}</div>
         </section>
         </div>
@@ -2188,6 +2353,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         <label>类型<CustomSelect ariaLabel="资产类型" className="asset-save-kind-select" value={assetSaveDraft.kind} options={canvasAssetSaveTypeOptions} onChange={(value) => setAssetSaveDraft((current) => ({ ...current, kind: value as CanvasAssetSaveKind }))} /></label>
         <footer><button type="button" onClick={() => setAssetSaveFormId(null)}>取消</button><button type="submit" disabled={!assetSaveDraft.name.trim() || assetSaveSubmitting}>{assetSaveSubmitting ? "保存中…" : "确认保存"}</button></footer>
       </form> : null}
+      {isVerticalWorkbench && verticalSegmentMenuPosition ? <FloatingMenu className="vertical-segment-ratio-menu" style={verticalSegmentMenuPosition} aria-label="选择滚动段比例">
+        <header><strong>新增滚动段</strong><small>宽 : 高</small></header>
+        <div>{verticalSegmentAspectRatios.map((ratio) => <button type="button" key={ratio} onClick={() => addVerticalSegment(ratio)}><AspectRatioGlyph ratio={ratio} /><span>{ratio}</span></button>)}</div>
+      </FloatingMenu> : null}
 
       <CanvasStage
         ref={stageRef}
@@ -2206,9 +2375,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       >
         <div className="canvas-world" style={canvasWorldStyle}>
           {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅参考"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动参考图「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放参考图「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} />)}
-          <div className={`comic-stage-wrap ${pageDisplayMode === "spread" && !trailingUnpairedPage ? "spread" : ""}`}>
-            <span className="page-tag">{pageDisplayMode === "spread" && !trailingUnpairedPage ? `PAGES ${displayedPageIndices.map((index) => String(index + 1).padStart(2, "0")).join("–")}` : page?.kind === "vertical_segment" ? `SCROLL ${String(state.currentPageIndex + 1).padStart(2, "0")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(state.currentPageIndex + 1).padStart(2, "0")}`}</span>
-            <div className={`comic-page-spread ${displayedPageIndices.length === 1 ? "one" : ""}`}>{displayedPageIndices.map((pageIndex) => <div className="spread-page" key={canvasDocument.units[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onCommitElement={(unitId, elementId, patch, label) => commitOperations(commandsForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
+          <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : pageDisplayMode === "spread" && !trailingUnpairedPage ? "spread" : ""}`} style={verticalStageWrapStyle}>
+            <span className="page-tag">{isVerticalCanvas ? `SCROLL ${String(state.currentPageIndex + 1).padStart(2, "0")}` : pageDisplayMode === "spread" && !trailingUnpairedPage ? `PAGES ${displayedPageIndices.map((index) => String(index + 1).padStart(2, "0")).join("–")}` : page?.kind === "vertical_segment" ? `SCROLL ${String(state.currentPageIndex + 1).padStart(2, "0")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(state.currentPageIndex + 1).padStart(2, "0")}`}</span>
+            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasDocument.units[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onCommitElement={(unitId, elementId, patch, label) => commitOperations(commandsForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
           </div>
           {candidateDocument && (previewingCandidate || previewingVariant) ? <nav className="candidate-compare-toolbar" aria-label="页面方案对比">
             <div className="candidate-version-switch"><button type="button" className={candidatePreviewMode === "original" ? "active" : ""} onClick={() => setCandidatePreviewMode("original")}>原稿</button><button type="button" className={candidatePreviewMode === "candidate" ? "active" : ""} onClick={() => setCandidatePreviewMode("candidate")}>新方案</button></div>
@@ -2217,6 +2386,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
             {previewingVariant ? <button type="button" onClick={() => removeSavedVariant(previewingVariant)}>删除方案</button> : <button type="button" onClick={() => { setPreviewCandidateId(null); setCandidatePreviewMode("original"); }}>取消</button>}
           </nav> : null}
         </div>
+        {isVerticalCanvas && canvasMode === "focus" && activeVerticalViewport ? <div className="device-viewport-guide" style={verticalViewportStyle} aria-hidden="true" /> : null}
+        {isVerticalCanvas && canvasMode === "focus" ? <aside ref={verticalNavigatorRef} className="vertical-scroll-navigator" aria-hidden="true"><div className="vertical-scroll-map" style={verticalNavigatorPaperStyle}>{canvasDocument.units.map((unit) => <span key={unit.id} style={{ flexGrow: unit.canvas.height }} />)}<i /></div></aside> : null}
         {marquee && marqueeStyle ? <div className="canvas-marquee" style={marqueeStyle} aria-hidden="true" /> : null}
 
         {canvasMode === "focus" && !multiSelection && !inspectorOpen && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象工具条" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("精修"); setAgentOpen(true); }}><Icon name="ai" /></button><button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : "开启或关闭移动画格"} disabled={selection.type !== "comic_frame" && selection.type !== "speech_balloon" || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button><button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label="裁切当前画格的格内图片" disabled={selection.type !== "comic_frame" && selection.type !== "image" || objectInteractionMode === "move"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button><button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button><button type="button" disabled aria-label="更多对象操作（即将支持）"><Icon name="moreVertical" /></button></ObjectToolbar> : null}
@@ -2286,7 +2457,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <CreationDock className={multiSelection ? "multi-hidden" : ""} aria-label="创作工具">
-        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/><button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button><button type="button" aria-label="上传图片到画布参考层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" aria-label="画格和页面编排" onClick={() => { setIntent("编排"); setComposer("重新编排当前漫画页，突出最后一个画格"); }}><Icon name="layout" /></button><button type="button" aria-label="文字和气泡" onClick={() => openBalloonEditor(page?.elements.find((element): element is SpeechBalloonElement => element.type === "speech_balloon"), page)}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 修改当前焦点" onClick={() => { setComposer("只精修当前画格的格内成稿图，让动作更自然，不改其他画格"); setIntent("精修"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
+        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布参考层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" aria-label="画格和页面编排" onClick={() => { setIntent("编排"); setComposer("重新编排当前漫画页，突出最后一个画格"); }}><Icon name="layout" /></button><button type="button" aria-label="文字和气泡" onClick={() => openBalloonEditor(page?.elements.find((element): element is SpeechBalloonElement => element.type === "speech_balloon"), page)}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 修改当前焦点" onClick={() => { setComposer("只精修当前画格的格内成稿图，让动作更自然，不改其他画格"); setIntent("精修"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
       </CreationDock>
       <nav className={`multi-selection-dock ${multiSelection ? "active" : ""}`} aria-label="多选工具">
         <button type="button" aria-label="将选中对象引用到对话" disabled={!multiComicActive && !multiCanvasActive} onClick={addMultiSelectionToDialogue}><Icon name="ai" /></button>

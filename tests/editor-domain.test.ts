@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
 import { frameElements, normalizeStoryboardBeat, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type PresentationUnit } from "../packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapability } from "../packages/editor-core/src";
+import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
 
@@ -107,6 +107,7 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "create_frame_storyboard_beat",
     "set_art_crop",
     "create_page",
+    "create_vertical_segment",
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
@@ -127,6 +128,57 @@ test("create_page plans defaults in the domain executor and dry-runs without mut
   assert.equal(dryRun.result.working.document.units.length, fixture.working.document.units.length + 1);
   assert.equal(dryRun.result.working.document.units.at(-1)?.id, "page-from-capability");
   assert.deepEqual(fixture, before);
+});
+
+test("create_vertical_segment keeps chapter width and applies every supported aspect ratio", () => {
+  const fixture = createInitialFixture();
+  fixture.working.document = structuredClone(previewFixtures.vertical);
+  const before = structuredClone(fixture);
+  const expectedHeights: Record<VerticalSegmentAspectRatio, number> = {
+    "4:3": 480,
+    "1:1": 640,
+    "3:4": 853,
+    "2:3": 960,
+    "9:16": 1138,
+    "9:20": 1422,
+  };
+
+  for (const [aspectRatio, expectedHeight] of Object.entries(expectedHeights) as Array<[VerticalSegmentAspectRatio, number]>) {
+    const dryRun = dryRunEditorCapability("create_vertical_segment", { aspectRatio }, {
+      fixture,
+      createId: () => `segment-${aspectRatio.replace(":", "-")}`,
+      actor: "human",
+    });
+    const segment = dryRun.result.working.document.units.at(-1)!;
+    assert.equal(verticalSegmentHeight(640, aspectRatio), expectedHeight);
+    assert.equal(segment.kind, "vertical_segment");
+    assert.deepEqual(segment.canvas, { width: 640, height: expectedHeight, background: fixture.working.document.units.at(-1)?.canvas.background });
+    assert.deepEqual(segment.surfaces[0]?.geometry, { x: 0, y: 0, width: 640, height: expectedHeight });
+    assert.equal(dryRun.result.working.document.reading.unitOrder.at(-1), segment.id);
+  }
+  assert.deepEqual(fixture, before);
+});
+
+test("page and vertical segment creation reject the opposite comic format", () => {
+  const pageFixture = createInitialFixture();
+  assert.throws(() => planEditorCapability("create_vertical_segment", { aspectRatio: "9:20" }, {
+    fixture: pageFixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  }), /requires a vertical comic/);
+
+  const verticalFixture = createInitialFixture();
+  verticalFixture.working.document = structuredClone(previewFixtures.vertical);
+  assert.throws(() => planEditorCapability("create_page", {}, {
+    fixture: verticalFixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  }), /unavailable for vertical comics/);
+  assert.throws(() => planEditorCapability("create_vertical_segment", { aspectRatio: "1:2" }, {
+    fixture: verticalFixture,
+    createId: (prefix) => `${prefix}-test`,
+    actor: "human",
+  }));
 });
 
 test("capability preconditions reject invalid targets before commands are committed", () => {

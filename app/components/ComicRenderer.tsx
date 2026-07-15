@@ -223,6 +223,6 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label="调整气泡大小" onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label })}/>{supportsTail ? <span className="balloon-tail-handle" aria-label="调整气泡尾巴长度与指向" style={{ left: `${tailTipX}%`, top: `${tailTipY}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform, startTailTarget: tailTip }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label })}/> : null}</> : null}
       </button>;
     })}
-    <span className="page-watermark">{unit.kind === "vertical_segment" ? "SCROLL" : unit.kind === "four_panel_unit" ? "4-KOMA" : `PAGE ${String(pageIndex + 1).padStart(2, "0")}`}</span>
+    <span className="page-watermark">{unit.kind === "vertical_segment" ? `SCROLL ${String(pageIndex + 1).padStart(2, "0")}` : unit.kind === "four_panel_unit" ? "4-KOMA" : `PAGE ${String(pageIndex + 1).padStart(2, "0")}`}</span>
   </div>;
 }

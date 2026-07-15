@@ -5,6 +5,12 @@
 .preview-shell .paged-reader.is-spread .preview-page-wrap { grid-template-columns: repeat(2, auto); }
 .preview-shell .paged-reader.is-spread .preview-page-wrap .comic-page { border-left: 1px solid rgba(23,32,38,.12); }
 .preview-shell .paged-reader.is-spread .preview-page-wrap .comic-page:first-child { border-left: 0; }
+.preview-shell.format-vertical .paged-reader.vertical-reader { display: block; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; scrollbar-width: none; }
+.preview-shell.format-vertical .paged-reader.vertical-reader::-webkit-scrollbar { display: none; }
+.preview-shell.format-vertical .preview-page-wrap.vertical-preview-strip { display: flex; width: 50vw; height: auto; min-height: 100dvh; margin: 0 auto; flex-direction: column; gap: 0; pointer-events: none; }
+.preview-shell.format-vertical .vertical-preview-page { width: 100%; flex: 0 0 auto; border: 0; box-shadow: none; }
+.preview-shell.format-vertical .vertical-preview-page .comic-page { width: 100%; height: auto; border: 0; border-radius: 0; box-shadow: none; }
+.preview-shell.format-vertical .vertical-preview-page .paper-grain { border-radius: 0; background: #fff; }
 .preview-page-turn { position: absolute; z-index: 3; top: 0; bottom: 0; width: 50vw; border: 0; background: transparent; }
 .preview-page-turn.previous { left: 0; cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath d='M22.2 4.2Q24.8 2.8 24.8 5.2v19.6q0 2.4-2.6 1L5.8 16.7q-2.1-1.2 0-3.4z' fill='%2364c8c8'/%3E%3C/svg%3E") 15 15, w-resize; }
 .preview-page-turn.next { right: 0; cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath d='M7.8 4.2Q5.2 2.8 5.2 5.2v19.6q0 2.4 2.6 1l16.4-9.1q2.1-1.2 0-3.4z' fill='%2364c8c8'/%3E%3C/svg%3E") 15 15, e-resize; }

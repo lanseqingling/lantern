@@ -5,9 +5,11 @@
 .comic-page-spread:not(.one)::after { content: ""; position: absolute; z-index: 40; left: 50%; top: 0; bottom: 0; border-left: 1px dashed rgba(36,127,130,.34); pointer-events: none; }
 .spread-page { position: relative; min-width: 0; }
 
-.comic-page { position: relative; width: 100%; overflow: visible; border: 1px solid rgba(23,32,38,.14); border-radius: 6px; background: var(--paper); box-shadow: 0 26px 70px rgba(23,32,38,.16); user-select: none; touch-action: none; }
-.paper-grain { position: absolute; inset: 0; z-index: 0; border-radius: inherit; background: linear-gradient(115deg, rgba(23,32,38,.018), transparent 35%), #fff; pointer-events: none; }
-.lcd-image, .lcd-frame, .lcd-text, .lcd-balloon { position: absolute; box-sizing: border-box; }
+.comic-page { position: relative; width: 100%; overflow: visible; container-type: inline-size; border: 1px solid rgba(23,32,38,.14); border-radius: 6px; background: var(--paper); box-shadow: 0 26px 70px rgba(23,32,38,.16); user-select: none; touch-action: none; }
+.paper-grain { position: absolute; inset: 0; z-index: 0; border-radius: inherit; background: linear-gradient(115deg, rgba(23,32,38,.018), transparent 35%); pointer-events: none; }
+.lcd-image, .lcd-frame, .lcd-frame-fill, .lcd-text, .lcd-balloon, .lcd-effect { position: absolute; box-sizing: border-box; }
+.lcd-frame-fill, .lcd-frame-shape { width: 100%; height: 100%; pointer-events: none; }
+.lcd-frame-shape { position: absolute; inset: 0; overflow: visible; }
 .lcd-image { overflow: visible; background: #eef1f2; cursor: pointer; }
 .lcd-image-crop { width: 100%; height: 100%; overflow: hidden; }
 .lcd-image img { display: block; width: 100%; height: 100%; object-fit: cover; transform-origin: center; transition: filter 140ms ease; pointer-events: none; }
@@ -18,9 +20,11 @@
 .lcd-image.selected img { overflow: hidden; }
 .comic-page.interaction-crop .lcd-image.selected { cursor: grab; pointer-events: auto; touch-action: none; }
 .comic-page.interaction-crop .lcd-image.selected:active { cursor: grabbing; }
-.lcd-frame { pointer-events: none; border-style: solid; }
+.lcd-frame { pointer-events: none; border: 0; }
 .lcd-text { display: grid; align-items: start; overflow: visible; line-height: 1.25; white-space: pre-wrap; pointer-events: none; }
 .lcd-text img { display: block; width: 100%; height: 100%; object-fit: fill; }
+.lcd-effect { overflow: hidden; }
+.lcd-effect img { display: block; width: 100%; height: 100%; object-fit: fill; }
 .lcd-frame.multi-selected { outline: 2px solid rgba(225,174,75,.94); outline-offset: 2px; background: rgba(225,174,75,.035); filter: drop-shadow(0 0 4px rgba(225,174,75,.26)); }
 .comic-page.interaction-move .lcd-frame.selected { cursor: move; pointer-events: auto; background: rgba(100,200,200,.035); }
 .reading-order { position: absolute; z-index: 10; left: -12px; top: -12px; display: grid; place-items: center; width: 25px; height: 25px; border: 2px solid #fff; border-radius: 50%; background: #172026; color: #fff; box-shadow: 0 6px 15px rgba(23,32,38,.18); font-size: 10px; font-weight: 900; pointer-events: auto; cursor: grab; }
@@ -33,16 +37,15 @@
 .comic-page.interaction-move .selection-label, .comic-page.interaction-crop .selection-label { border-color: rgba(225,174,75,.46); color: #8b641c; box-shadow: 0 8px 20px rgba(183,125,27,.1); }
 .resize-handle { position: absolute; z-index: 30; right: -7px; bottom: -7px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 5px; background: var(--cyan); box-shadow: 0 3px 10px rgba(36,127,130,.28); pointer-events: auto; cursor: nwse-resize; }
 .lcd-balloon { display: grid; place-items: center; overflow: visible; isolation: isolate; padding: 5px 7px; border: 0; background: transparent; box-shadow: none; font-weight: 720; line-height: 1.25; text-align: center; cursor: pointer; }
+.balloon-order-anchor { position: absolute; pointer-events: none; }
 .balloon-order { position: absolute; z-index: 4; right: -7px; bottom: -7px; display: grid; place-items: center; min-width: 17px; height: 15px; border: 1px solid #fff; border-radius: 5px; background: #172026; padding: 0 3px; color: #fff; box-shadow: 0 3px 8px rgba(23,32,38,.16); font-size: 8px; font-weight: 900; line-height: 1; pointer-events: none; }
 .balloon-shape { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 2px 0 rgba(0,0,0,.14)); }
 .balloon-appearance { position: absolute; z-index: 0; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
 .lcd-balloon.shape-normal .balloon-shape { filter: none; }
-.lcd-balloon.shape-normal .balloon-outline { stroke-width: 3.8; }
-.lcd-balloon.shape-normal .balloon-tail-outline { stroke-width: 2; }
-.balloon-outline { fill: #fff; stroke: #111; stroke-width: 2.4; stroke-linejoin: round; }
-.balloon-tail-fill { fill: #fff; stroke: none; }
-.balloon-tail-outline { fill: none; stroke: #111; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.balloon-mask { fill: #fff; stroke: none; }
+.balloon-outline { stroke-linejoin: round; }
+.balloon-tail-fill { stroke: none; }
+.balloon-tail-outline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.balloon-mask { stroke: none; }
 .balloon-content { position: relative; z-index: 1; }
 .comic-page.interaction-crop .lcd-balloon.selected { outline: 4px solid rgba(225,174,75,.92); outline-offset: 5px; box-shadow: 0 2px 0 rgba(0,0,0,.14), 0 0 0 9px rgba(225,174,75,.08), 0 0 17px rgba(225,174,75,.26); }
 .balloon-resize-handle, .balloon-tail-handle { position: absolute; z-index: 35; display: block; width: 13px; height: 13px; border: 2px solid #fff; background: var(--cyan); box-shadow: 0 3px 9px rgba(36,127,130,.26); pointer-events: auto; }

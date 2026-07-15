@@ -472,9 +472,9 @@ export function apiSaveSnapshot(chapterId: string, expectedWorkingRevision: numb
   });
 }
 
-export async function apiDownloadPage(chapterId: string, unitId: string, source: "snapshot" | "working") {
+export async function apiDownloadPage(chapterId: string, unitId: string) {
   if (!unitId) throw new Error("当前没有可下载的漫画页。");
-  const response = await fetch(apiUrl(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/download?source=${source}`));
+  const response = await fetch(apiUrl(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/download`));
   if (!response.ok) throw new Error("下载失败，请稍后重试。");
   const blob = await response.blob();
   const fileName = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] ?? `${unitId}.png`;

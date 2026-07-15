@@ -6,14 +6,16 @@ import { ComicRenderer } from "./ComicRenderer";
 import { createDefaultWorkbench, loadWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@/packages/ui/src";
 import { apiDownloadPage, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
+import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 
-type PreviewSource = "snapshot" | "working";
 type PageDisplayMode = "single" | "spread";
 
 export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId: string }) {
   const router = useRouter();
   const [state, setState] = useState<PersistedWorkbench>(() => createDefaultWorkbench());
-  const [source, setSource] = useState<PreviewSource>("working");
+  const [loaded, setLoaded] = useState(false);
+  const [dockEntering, setDockEntering] = useState(false);
+  const [modeSwitching, setModeSwitching] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageDisplayMode, setPageDisplayMode] = useState<PageDisplayMode>("single");
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
@@ -30,15 +32,15 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         const loaded = loadWorkbench();
         if (canceled) return;
         setState(loaded);
-        setSource(loaded.fixture.snapshot ? "snapshot" : "working");
+        setLoaded(true);
         return;
       }
       try {
         const loaded = await apiLoadWorkbench(chapterId);
         if (canceled) return;
         setState(loaded.state);
-        setSource(loaded.state.fixture.snapshot ? "snapshot" : "working");
         setPageDisplayMode(loaded.comic.canvasPageMode);
+        setLoaded(true);
       } catch (error) {
         if (!canceled) setLoadError(error instanceof Error ? error.message : "无法连接 Lantern API");
       }
@@ -57,8 +59,14 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     if (verticalScrollFrameRef.current !== null) window.cancelAnimationFrame(verticalScrollFrameRef.current);
   }, []);
 
-  const sourceEnvelope = source === "snapshot" && state.fixture.snapshot ? state.fixture.snapshot : state.fixture.working;
-  const document = sourceEnvelope.document;
+  const sourceEnvelope = state.fixture.snapshot;
+  const document = sourceEnvelope?.document ?? state.fixture.working.document;
+  useEffect(() => {
+    if (!loaded || !sourceEnvelope) return;
+    setDockEntering(true);
+    const timer = window.setTimeout(() => setDockEntering(false), MODE_SWITCH_MOTION_MS + 40);
+    return () => window.clearTimeout(timer);
+  }, [loaded, sourceEnvelope]);
   const isVertical = document.format === "vertical";
   const shownPageIndex = Math.min(pageIndex, Math.max(0, document.units.length - 1));
   const trailingUnpairedPage = !isVertical && pageDisplayMode === "spread" && document.units.length % 2 === 1 && shownPageIndex === document.units.length - 1;
@@ -73,12 +81,14 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   const atFirstPage = shownPageIndex === 0;
   const atLastPage = shownPageIndex >= document.units.length - 1;
   const editUrl = `/comics/${comicId}/chapters/${chapterId}?focus=${shownPageIndex}`;
-
-  const setSourceAndClose = (next: PreviewSource) => {
-    if (next === "snapshot" && !state.fixture.snapshot) return;
-    setSource(next);
+  const returnToCanvas = () => {
+    if (modeSwitching) return;
     setDownloadMenuOpen(false);
+    setDockEntering(false);
+    setModeSwitching(true);
+    window.setTimeout(() => router.push(`${editUrl}&storyboardBeat=agent`), modeSwitchMotionDelay());
   };
+
   const switchPageMode = () => {
     const next = pageDisplayMode === "single" ? "spread" : "single";
     setPageDisplayMode(next);
@@ -115,7 +125,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     setDownloading(true);
     try {
       if (configuredRuntimeAdapter() === "demo") throw new Error("演示模式暂不支持导出，请切换到服务端模式后重试。");
-      for (const index of downloadPageIndices) await apiDownloadPage(chapterId, document.units[index]?.id ?? "", source);
+      for (const index of downloadPageIndices) await apiDownloadPage(chapterId, document.units[index]?.id ?? "");
       setNotice(downloadPageIndices.length === 2 ? `第 ${downloadPageIndices.map((index) => index + 1).join("、")} 页已开始下载` : `第 ${shownPageIndex + 1} 页已开始下载`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "保存失败，请稍后重试");
@@ -129,7 +139,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     const objectUrl = URL.createObjectURL(bytes);
     const link = window.document.createElement("a");
     link.href = objectUrl;
-    link.download = `${chapterId}-${source}.lcd.json`;
+    link.download = `${chapterId}-saved.lcd.json`;
     window.document.body.append(link);
     link.click();
     link.remove();
@@ -139,6 +149,8 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   };
 
   if (loadError) return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>预览暂时无法载入</h1><p>{loadError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
+  if (!loaded) return <main className="runtime-unavailable"><section><span>LANTERN PREVIEW</span><h1>正在载入已保存版本</h1></section></main>;
+  if (!sourceEnvelope) return <main className="runtime-unavailable" role="status"><section><span>LANTERN PREVIEW</span><h1>还没有已保存版本</h1><p>请先返回工作台保存当前一话，再进入阅读预览。</p><button type="button" onClick={() => router.push(editUrl)}>返回工作台</button></section></main>;
 
   return (
     <main className={`preview-shell ${isVertical ? "format-vertical" : "format-page"}`}>
@@ -148,19 +160,15 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         {!isVertical ? <button type="button" className="preview-page-turn next" aria-label="下一页" onClick={goNext} /> : null}
       </section>
 
-      <nav className="preview-dock" aria-label="预览工具">
+      <nav className={`preview-dock ${dockEntering ? "mode-entering" : ""} ${modeSwitching ? "mode-exiting" : ""}`} aria-label="预览工具">
         <div className="preview-mode-toggle" aria-label="模式切换">
-          <button type="button" aria-label="回到创作模式" onClick={() => router.push(`${editUrl}&storyboardBeat=agent`)}><Icon name="ai" /></button>
+          <button type="button" aria-label="回到创作模式" disabled={modeSwitching} onClick={returnToCanvas}><Icon name="ai" /></button>
           <button type="button" className="active" aria-label="当前为预览模式"><Icon name="preview" /></button>
         </div>
         {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}
-        <div className="preview-source-toggle" aria-label="版本来源">
-          <button type="button" className={source === "snapshot" ? "active" : ""} disabled={!state.fixture.snapshot} aria-label="查看已保存版本" onClick={() => setSourceAndClose("snapshot")}><Icon name="versionSaved" /></button>
-          <button type="button" className={source === "working" ? "active" : ""} aria-label="查看当前工作稿" onClick={() => setSourceAndClose("working")}><Icon name="versionWorking" /></button>
-        </div>
         <div className="preview-save-tool">
           <button type="button" aria-label="下载选项" aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
-          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><span>下载到本地</span><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadPageIndices.length === 2 ? `下载当前双页 · ${downloadPageIndices.map((index) => index + 1).join("、")}` : `下载当前页 · ${shownPageIndex + 1}`}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
+          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadPageIndices.length === 2 ? "下载当前双页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
         </div>
       </nav>
       {notice ? <div className="preview-notice" role="status">{notice}</div> : null}

@@ -5,6 +5,9 @@
 
 .creation-dock { position: absolute; z-index: 68; left: 50%; bottom: 16px; display: flex; align-items: center; gap: 6px; transform: translateX(-50%); visibility: visible; padding: 6px; border: 1px solid rgba(255,255,255,.88); border-radius: 28px; background: rgba(255,255,255,.82); box-shadow: 0 18px 48px rgba(23,32,38,.12), 0 0 0 1px rgba(100,200,200,.08); backdrop-filter: blur(20px); transition: transform 240ms cubic-bezier(.2,.8,.2,1), opacity 170ms ease, visibility 0s linear, gap 220ms cubic-bezier(.2,.8,.2,1), padding 220ms ease, background 180ms ease, box-shadow 180ms ease; }
 .creation-dock.multi-hidden { transform: translate(-50%, calc(100% + 34px)); visibility: hidden; opacity: 0; pointer-events: none; transition-delay: 0s, 0s, 240ms, 0s, 0s, 0s, 0s; }
+@keyframes creationDockModeEnter { from { transform: translate(-50%, calc(100% + 34px)); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
+.creation-dock.mode-entering { animation: creationDockModeEnter 190ms cubic-bezier(.2,.8,.2,1) both; }
+.creation-dock.mode-exiting { transform: translate(-50%, calc(100% + 34px)); visibility: hidden; opacity: 0; pointer-events: none; transition-delay: 0s, 0s, 190ms, 0s, 0s, 0s, 0s; }
 .creation-dock > div { display: flex; align-items: center; gap: 3px; max-width: 260px; overflow: hidden; padding: 2px; border-radius: 21px; background: rgba(255,255,255,.5); transition: max-width 220ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease, padding 220ms ease, transform 220ms cubic-bezier(.2,.8,.2,1); }
 .creation-dock > div > i { width: 1px; height: 22px; margin: 0 2px; background: var(--line); }
 .creation-dock button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid transparent; border-radius: 14px; background: transparent; color: #3e4c54; font-weight: 900; cursor: pointer; }

@@ -34,11 +34,10 @@
 
 ## 1. 剩余执行优先级
 
-已完成：产品事实源与文档收口；阶段命名和低风险代码整理。
+已完成：产品事实源与文档收口；阶段命名和低风险代码整理；编辑、预览与导出渲染一致性基线。
 
 | 优先级 | 工作 | 为什么先做 | 完成标志 |
 |---|---|---|---|
-| 3 | 编辑、预览、导出渲染一致 | 新增无框、破框、跨页前必须保证同一 LCD 在三个出口一致 | 同一 fixture 的对象、层级、裁切和边框呈现一致 |
 | 4 | 人类结构编辑与合成能力 | 这是作品可控和未来 Agent 可控的共同基础 | 页面、画格、气泡、层级、阅读顺序具备 UI、Undo 和测试 |
 | 5 | 页漫与条漫格式专项 | 在共享对象能力稳定后补格式差异，避免各做一套编辑器 | 页漫可完成真实作品；条漫具备手机预览和切片闭环 |
 | 6 | Capability Registry 与领域工具收口 | 把已有能力变成 Agent 能被允许调用的执行事实源 | UI 和 Agent 引用同一 capability id 与执行器 |
@@ -58,40 +57,7 @@
 
 ## 5. 编辑器基线与差距
 
-### 5.1 已有可保留基础
-
-- LCD 已分开 `StoryboardBeat`、`PresentationUnit / PageSurface / Frame`、图层元素、资源、对白和运行时状态，协议入口见 [`packages/shared/src/lcd/`](../packages/shared/src/lcd/)。
-- `WorkspaceCommand` 使用有限写入词汇，不使用任意 JSON Patch；命令与 ChangeSet 定义见 [`packages/shared/src/workspace.ts`](../packages/shared/src/workspace.ts)，确定性执行见 [`packages/editor-core/src/index.ts`](../packages/editor-core/src/index.ts)。
-- WorkingRevision、SavedSnapshot、Candidate、ChangeSet、会话与任务已有持久化边界，服务读写集中在 [`packages/server/src/workbench-service.ts`](../packages/server/src/workbench-service.ts)。
-- 画布已有画格移动/缩放、格内图裁切、气泡移动/缩放/尾巴/样式/对白、单格画面编辑、参考资产和多选。
-- 预览、保存、导出读取 LCD，不以聊天记录或画布临时状态为作品事实。
-- `context-debug` 能重新计算真实上下文，可保留为后续 Agent 调试入口；请求边界见 [`apps/api/src/routes/workbench.ts`](../apps/api/src/routes/workbench.ts)。
-
-### 5.2 协议与人类入口差距
-
-| 能力 | LCD / Command | 当前入口 | 主要缺口 |
-|---|---|---|---|
-| 页面 / 展示单元 | 有 single、spread、vertical、four-panel 和增删改命令 | 可新增、命名、删除页面；滚动段可选择和修改比例 | 复制、重排、单双页合并/拆分 |
-| 画格 | 有形状、边框、遮罩、zIndex、add/remove/style/reorder | 移动、缩放、裁切、编辑分镜 | 新增、删除、复制、拆分、合并、无框、层级和阅读顺序 UI |
-| 气泡 / 对白 | 两者分离；有 update 命令 | 可改字、形状、位置、尺寸和尾巴 | 原子新增/删除、复制、顺序、跨格/页面放置 |
-| Frame 图层 | 有 art/text/effect、显示、锁定、overflow、zIndex | 无统一入口 | 图层增删、显隐、锁定、排序和元素跨层移动 |
-| Unit Overlay | 有 frame/unit anchor 和 breakout/cross-frame/cross-page | 无 | 渲染、选择、写入命令和编辑 UI |
-| 文字与效果 | 有 caption/narration/sfx 和效果类型 | 基本无 | 工作台渲染与编辑未闭环 |
-| 阅读顺序 | 有 `readingSequence` | 只显示编号 | 显式改序、文本顺序和格式校验 |
-| 纸面规则 | 有 trim/bleed 和左右页角色 | 无辅助入口 | 内框、安全区、装订缝、跨页预览和导出检查 |
-
-### 5.3 先解决三端渲染一致性
-
-当前 [`ComicRenderer`](../app/components/ComicRenderer.tsx) 主要覆盖格内图片、矩形画格和气泡，没有完整渲染普通文字、效果、非矩形 Frame 和 Unit Overlay；[`export-renderer`](../packages/server/src/export-renderer.ts) 与前端也未完全同源。
-
-新增结构编辑前应：
-
-- 建立共享的 LCD scene projection，统一层级顺序、overflow 和坐标转换。
-- 补齐 Frame shape、border none、文字、效果和 Unit Overlay 渲染。
-- 明确格内元素、frame-anchored overlay、unit-anchored overlay 的转换。
-- 对同一 fixture 增加编辑、预览和导出 golden 测试。
-
-验收标准是同一 WorkingRevision 在三个出口的对象数量、层级、裁切、可见性和边框一致。
+已完成：现有可视能力已收口到共享场景投影，工作台、预览与导出由同一层级、可见性、坐标和裁切语义约束；能力状态和后续缺口统一由文末漫画编辑能力矩阵维护。
 
 ## 6. 页漫与条漫能力范围
 
@@ -295,7 +261,7 @@ AGENT_EXECUTION_MODE=disabled | observe | tool_preview | enabled
 | 核心 | 对白与气泡 | 调整气泡位置、尺寸、尾巴和基础样式 | 通用 | `BalloonElement.transform / tailTarget / shape / style`；只提供少量预设 | 已接入 | 未登记 |
 | 核心 | 资产与一致性 | 上传、摆放、整理和复用人物、场景与风格参考 | 通用 | `AssetVersion / ReferencePlacement / context snapshot` | 已接入 | 不适用：作为生成上下文 |
 | 核心 | 版本与输出 | 保存、预览、应用、撤销和恢复一次创作结果 | 通用 | `ChangeSet / Candidate / Undo / Snapshot` | 已接入 | 不适用 |
-| 核心 | 版本与输出 | 页漫单页/双页预览、条漫连续预览、当前范围 PNG 和选中版本 LCD 下载 | 通用 | LCD 与固定资源版本的确定性渲染和导出 | 已接入 | 不适用 |
+| 核心 | 版本与输出 | 页漫单页/双页预览、条漫连续预览、最近保存快照的当前范围 PNG 和 LCD 下载 | 通用 | LCD 与固定资源版本的确定性渲染和导出 | 已接入 | 不适用 |
 | 增强 | 基础组织 | 复制和重排页面或滚动段 | 通用 | `reading.unitOrder` 与展示单元复制、ID 重映射 | 未接入 | 未登记 |
 | 增强 | 画格编排 | 根据分镜生成 2-3 个页面布局候选 | 通用 | 混合：模型规划布局意图，确定性布局器生成结构 Candidate | 部分接入：旧任务直接替换大范围文档 | 未登记 |
 | 增强 | 画格表现 | 使用无框、出血、整页主视觉和局部断框 | 通用 | `Frame.border / mask / geometry` 的简单预设；局部断框由出格对象或遮罩覆盖，不扩协议 | 未接入 | 未登记 |

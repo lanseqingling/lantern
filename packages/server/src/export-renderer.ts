@@ -1,13 +1,13 @@
 import sharp from "sharp";
-import type { ComicDocument, Frame, FrameElement, Geometry, PageSurface, PresentationUnit } from "../../shared/src";
-import { resolveLocalTransform } from "../../shared/src";
+import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "../../shared/src";
+import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene } from "../../shared/src";
 import { prisma } from "./db";
 import { getObject, putObject } from "./object-storage";
 
 export type ExportKind = "png" | "long_png" | "json";
 export type ExportArtifact = { objectKey: string; contentType: "image/png" | "application/json"; fileName: string; byteSize: number; checksum: string };
 const escapeXml = (value: string) => value.replace(/[<>&"']/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&apos;" })[char]!);
-const textLines = (value: string, maxChars = 12) => Array.from({ length: Math.ceil(Array.from(value).length / maxChars) }, (_, index) => Array.from(value).slice(index * maxChars, (index + 1) * maxChars).join("")).slice(0, 5);
+const textLines = (value: string, maxChars = 12) => Array.from({ length: Math.ceil(Array.from(value).length / maxChars) }, (_, index) => Array.from(value).slice(index * maxChars, (index + 1) * maxChars).join(""));
 
 async function assetDataByVersion(document: ComicDocument) {
   const versionIds = [...new Set(document.resources.filter((resource) => resource.kind === "image").map((resource) => resource.assetVersionId))];
@@ -23,63 +23,93 @@ async function assetDataByVersion(document: ComicDocument) {
 
 function frameShape(frame: Frame, fill: string, stroke: string, strokeWidth: number) {
   const g = frame.geometry;
-  if (frame.shape.kind === "ellipse") return `<ellipse cx="${g.x + g.width / 2}" cy="${g.y + g.height / 2}" rx="${g.width / 2}" ry="${g.height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
-  if (frame.shape.kind === "polygon") return `<polygon points="${frame.shape.points.map((point) => `${g.x + point.x * g.width},${g.y + point.y * g.height}`).join(" ")}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
-  return `<rect x="${g.x}" y="${g.y}" width="${g.width}" height="${g.height}" rx="${frame.shape.radius ?? 0}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
+  const rough = frame.border.style === "rough" && stroke !== "none" ? ` stroke-dasharray="7 3 2 3"` : "";
+  if (frame.shape.kind === "ellipse") return `<ellipse cx="${g.x + g.width / 2}" cy="${g.y + g.height / 2}" rx="${g.width / 2}" ry="${g.height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"${rough}/>`;
+  if (frame.shape.kind === "polygon") return `<polygon points="${frame.shape.points.map((point) => `${g.x + point.x * g.width},${g.y + point.y * g.height}`).join(" ")}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"${rough}/>`;
+  return `<rect x="${g.x}" y="${g.y}" width="${g.width}" height="${g.height}" rx="${frame.shape.radius ?? 0}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"${rough}/>`;
 }
 
-function renderAppearance(appearance: { assetVersionId: string } | undefined, geometry: Geometry, assets: Map<string, string>, clip: string) {
+function transformAttribute(geometry: Geometry) {
+  return geometry.rotate ? ` transform="rotate(${geometry.rotate} ${geometry.x + geometry.width / 2} ${geometry.y + geometry.height / 2})"` : "";
+}
+
+function renderAppearance(appearance: { assetVersionId: string } | undefined, geometry: Geometry, assets: Map<string, string>) {
   if (!appearance) return undefined;
   const data = assets.get(appearance.assetVersionId);
   if (!data) return undefined;
-  return `<image href="${data}" x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" preserveAspectRatio="none"${clip}/>`;
+  return `<image href="${data}" x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" preserveAspectRatio="none"/>`;
 }
 
-function renderElement(element: FrameElement, geometry: Geometry, assets: Map<string, string>, dialogues: Map<string, string>, clipId?: string) {
-  if (element.visible === false) return "";
-  const clip = clipId ? ` clip-path="url(#${clipId})"` : "";
+const textAnchor = (align: "left" | "center" | "right" | undefined) => align === "center" ? "middle" : align === "right" ? "end" : "start";
+const textX = (geometry: Geometry, align: "left" | "center" | "right" | undefined) => align === "center" ? geometry.x + geometry.width / 2 : align === "right" ? geometry.x + geometry.width : geometry.x;
+
+function renderTextContent(value: string, geometry: Geometry, style: TextElement["style"] | BalloonElement["style"], color: string, align: "left" | "center" | "right" | undefined = "center") {
+  const vertical = style.writingMode === "vertical";
+  const fontFamily = escapeXml(style.fontFamily);
+  const fontWeight = "fontWeight" in style && style.fontWeight ? ` font-weight="${style.fontWeight}"` : "";
+  if (vertical) {
+    const chars = Array.from(value);
+    return `<text x="${geometry.x + geometry.width / 2}" y="${geometry.y + style.fontSize}" text-anchor="middle" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight} fill="${escapeXml(color)}">${chars.map((char, index) => `<tspan x="${geometry.x + geometry.width / 2}" dy="${index ? style.fontSize * 1.05 : 0}">${escapeXml(char)}</tspan>`).join("")}</text>`;
+  }
+  const maxChars = Math.max(1, Math.floor(geometry.width / Math.max(1, style.fontSize * 0.72)));
+  const lines = textLines(value, maxChars);
+  const x = textX(geometry, align);
+  const startY = geometry.y + Math.max(style.fontSize, (geometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize);
+  return `<text x="${x}" y="${startY}" text-anchor="${textAnchor(align)}" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight} fill="${escapeXml(color)}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text>`;
+}
+
+function renderBalloonShell(element: BalloonElement, geometry: Geometry) {
+  const style = element.style;
+  const strokeWidths = projectBalloonStrokeWidths(element);
+  const tail = projectBalloonTail(element);
+  const tailFill = tail ? `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y} Z` : "";
+  const tailOutline = tail ? `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y}` : "";
+  const shape = element.shape === "caption_box"
+    ? `<rect x="1.5" y="1.5" width="97" height="97" rx="3" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" vector-effect="non-scaling-stroke"/>`
+    : `<ellipse cx="50" cy="50" rx="48" ry="46" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" vector-effect="non-scaling-stroke"/>`;
+  const tailShape = tail ? `<path d="${tailFill}" fill="${escapeXml(style.fill)}"/><path d="${tailOutline}" fill="none" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.tail}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><ellipse cx="50" cy="50" rx="48" ry="46" fill="${escapeXml(style.fill)}"/>` : "";
+  return `<svg x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 100 100" overflow="visible" preserveAspectRatio="none">${shape}${tailShape}</svg>`;
+}
+
+function renderElement(node: SceneElementNode, assets: Map<string, string>) {
+  const element = node.element;
+  const geometry = node.geometry;
+  const clip = node.clipFrame ? ` clip-path="url(#frame-clip-${escapeXml(node.clipFrame.id)})"` : "";
+  const transform = transformAttribute(geometry);
   if (element.kind === "image") {
     const data = assets.get(element.assetVersionId); if (!data) return "";
     const crop = element.crop;
     const width = geometry.width / crop.width; const height = geometry.height / crop.height;
-    return `<image href="${data}" x="${geometry.x - crop.x * width}" y="${geometry.y - crop.y * height}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${element.opacity ?? 1}"${clip}/>`;
+    const blend = element.blendMode && element.blendMode !== "normal" ? ` style="mix-blend-mode:${element.blendMode}"` : "";
+    return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x - crop.x * width}" y="${geometry.y - crop.y * height}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${element.opacity ?? 1}"${blend}${clip}${transform}/>`;
   }
   if (element.kind === "balloon") {
-    const value = dialogues.get(element.dialogueId) ?? ""; const style = element.style;
-    const appearance = renderAppearance(element.appearance, geometry, assets, "");
-    const shape = appearance ?? (element.shape === "caption_box" ? `<rect x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" rx="5"/>` : `<ellipse cx="${geometry.x + geometry.width / 2}" cy="${geometry.y + geometry.height / 2}" rx="${geometry.width / 2}" ry="${geometry.height / 2}"/>`);
-    const lines = textLines(value, Math.max(5, Math.floor(geometry.width / Math.max(12, style.fontSize))));
-    const shell = appearance ? shape : `<g fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${style.strokeWidth}">${shape}</g>`;
-    return `<g${clip}>${shell}<text x="${geometry.x + geometry.width / 2}" y="${geometry.y + Math.max(style.fontSize + 5, (geometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize)}" text-anchor="middle" font-family="sans-serif" font-size="${style.fontSize}" fill="${escapeXml(style.textColor)}">${lines.map((line, index) => `<tspan x="${geometry.x + geometry.width / 2}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text></g>`;
+    const shell = renderAppearance(element.appearance, geometry, assets) ?? renderBalloonShell(element, geometry);
+    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${shell}${renderTextContent(node.dialogueText ?? "", geometry, element.style, element.style.textColor, "center")}</g>`;
   }
-  if (element.kind === "text") return renderAppearance(element.appearance, geometry, assets, clip)
-    ?? `<text x="${geometry.x}" y="${geometry.y + element.style.fontSize}" font-family="sans-serif" font-size="${element.style.fontSize}" fill="${escapeXml(element.style.color)}"${clip}>${escapeXml(element.content)}</text>`;
+  if (element.kind === "text") return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, element.style.align)}</g>`;
+  if (element.assetVersionId) {
+    const data = assets.get(element.assetVersionId); if (!data) return "";
+    return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" preserveAspectRatio="none" opacity="${element.opacity ?? 1}"${clip}${transform}/>`;
+  }
   return "";
 }
 
-async function renderSurface(document: ComicDocument, unit: PresentationUnit, surface: PageSurface, assets: Map<string, string>) {
-  const dialogues = new Map(document.dialogues.map((dialogue) => [dialogue.id, dialogue.content]));
+export function renderSurfaceSvg(document: ComicDocument, unit: PresentationUnit, surface: PageSurface, assets = new Map<string, string>()) {
+  const scene = projectComicRenderScene(document, unit);
   const defs: string[] = []; const body: Array<{ z: number; svg: string }> = [];
-  for (const frame of unit.frames) {
+  for (const { frame, fillZIndex, borderZIndex } of scene.frames) {
     const clipId = `frame-clip-${escapeXml(frame.id)}`;
     defs.push(`<clipPath id="${clipId}">${frameShape(frame, "#fff", "none", 0)}</clipPath>`);
-    body.push({ z: frame.zIndex * 100, svg: frameShape(frame, "#fff", "none", 0) });
-    for (const layer of frame.layers) for (const element of layer.elements) {
-      const shouldClip = frame.mask.mode === "clip" && layer.overflow !== "visible" && (!("overflow" in element) || element.overflow !== "visible");
-      body.push({ z: frame.zIndex * 100 + layer.zIndex, svg: renderElement(element, resolveLocalTransform(frame.geometry, element.transform), assets, dialogues, shouldClip ? clipId : undefined) });
-    }
-    body.push({ z: frame.zIndex * 100 + 90, svg: frameShape(frame, "none", escapeXml(frame.border.color), frame.border.style === "none" ? 0 : frame.border.width) });
+    body.push({ z: fillZIndex, svg: frameShape(frame, "#fff", "none", 0) });
+    body.push({ z: borderZIndex, svg: frameShape(frame, "none", escapeXml(frame.border.color), frame.border.style === "none" ? 0 : frame.border.width) });
   }
-  for (const layer of unit.overlayLayers) {
-    const anchorFrameId = layer.anchor.type === "frame" ? layer.anchor.frameId : undefined;
-    const anchorFrame = anchorFrameId ? unit.frames.find((frame) => frame.id === anchorFrameId) : undefined;
-    for (const element of layer.elements) {
-      const geometry = anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform;
-      body.push({ z: 100000 + layer.zIndex, svg: renderElement(element, geometry, assets, dialogues) });
-    }
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${surface.geometry.width}" height="${surface.geometry.height}" viewBox="${surface.geometry.x} ${surface.geometry.y} ${surface.geometry.width} ${surface.geometry.height}"><defs>${defs.join("")}</defs><rect x="${surface.geometry.x}" y="${surface.geometry.y}" width="${surface.geometry.width}" height="${surface.geometry.height}" fill="${escapeXml(unit.canvas.background.color)}"/>${body.sort((a, b) => a.z - b.z).map((entry) => entry.svg).join("")}</svg>`;
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  scene.elements.forEach((node) => body.push({ z: node.zIndex, svg: renderElement(node, assets) }));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${surface.geometry.width}" height="${surface.geometry.height}" viewBox="${surface.geometry.x} ${surface.geometry.y} ${surface.geometry.width} ${surface.geometry.height}"><defs>${defs.join("")}</defs><rect x="${surface.geometry.x}" y="${surface.geometry.y}" width="${surface.geometry.width}" height="${surface.geometry.height}" fill="${escapeXml(unit.canvas.background.color)}"/>${body.sort((a, b) => a.z - b.z).map((entry) => entry.svg).join("")}</svg>`;
+}
+
+async function renderSurface(document: ComicDocument, unit: PresentationUnit, surface: PageSurface, assets: Map<string, string>) {
+  return sharp(Buffer.from(renderSurfaceSvg(document, unit, surface, assets))).png().toBuffer();
 }
 
 export async function renderPagePng(document: ComicDocument, unit: PresentationUnit, surface = unit.surfaces[0]) {

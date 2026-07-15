@@ -7,8 +7,9 @@ import {
   createStructuredExportPayload,
   renderChapterLongPng,
   renderChapterPngPages,
+  renderSurfaceSvg,
 } from "../packages/server/src/export-renderer";
-import type { StoryboardBeat } from "../packages/shared/src";
+import { projectBalloonStrokeWidths, projectComicRenderScene, type ComicDocument, type StoryboardBeat } from "../packages/shared/src";
 
 const storyboardBeats: StoryboardBeat[] = Array.from({ length: 8 }, (_, index) => ({
   id: `golden-storyboardBeat-${index + 1}`,
@@ -16,6 +17,77 @@ const storyboardBeats: StoryboardBeat[] = Array.from({ length: 8 }, (_, index) =
   title: `节拍 ${index + 1}`,
   description: `${index % 2 ? "近景" : "远景"}中角色继续行动，主体与留白形成清楚阅读动线。`,
 }));
+
+function renderFixture(): ComicDocument {
+  return {
+    protocolVersion: "lcd-0.4",
+    comicId: "render-comic",
+    chapterId: "render-chapter",
+    format: "page",
+    reading: { direction: "ltr", viewer: "paged", unitOrder: ["unit-1"] },
+    resources: [{ assetId: "asset-1", assetVersionId: "asset-1-v1", kind: "image", mediaType: "image/png" }],
+    dialogues: [{ id: "dialogue-1", content: "保持三端一致，不应在导出时静默丢失任何内容，尤其需要完整保留最后一句对白。" }],
+    units: [{
+      id: "unit-1",
+      kind: "single_page",
+      canvas: { width: 200, height: 300, background: { color: "#f6f1e8" } },
+      surfaces: [{ id: "surface-1", role: "single", geometry: { x: 0, y: 0, width: 200, height: 300 } }],
+      frames: [{
+        id: "frame-1",
+        geometry: { x: 20, y: 30, width: 160, height: 180 },
+        zIndex: 1,
+        storyRefs: [],
+        border: { color: "#123456", width: 3, style: "solid" },
+        shape: { kind: "polygon", points: [{ x: 0, y: 0 }, { x: 1, y: 0.08 }, { x: 0.92, y: 1 }, { x: 0.05, y: 0.9 }] },
+        mask: { mode: "clip" },
+        layers: [
+          { id: "art", name: "画面", kind: "art", zIndex: 10, visible: true, overflow: "inherit", elements: [{ id: "image-1", kind: "image", assetId: "asset-1", assetVersionId: "asset-1-v1", transform: { x: -0.1, y: 0, width: 1.2, height: 1 }, crop: { x: 0, y: 0, width: 1, height: 1 }, opacity: 0.8, blendMode: "multiply" }] },
+          { id: "text", name: "文字", kind: "text", zIndex: 20, visible: true, overflow: "visible", elements: [
+            { id: "text-1", kind: "text", transform: { x: 0.08, y: 0.66, width: 0.5, height: 0.2 }, content: "旁白", role: "narration", style: { fontFamily: "Lantern Sans", fontSize: 14, fontWeight: 700, color: "#334455", align: "left", writingMode: "horizontal" } },
+            { id: "balloon-1", kind: "balloon", dialogueId: "dialogue-1", transform: { x: 0.42, y: 0.08, width: 0.42, height: 0.28 }, tailTarget: { x: 0.8, y: 0.58 }, shape: "normal", style: { fontFamily: "Lantern Sans", fontSize: 12, textColor: "#172026", fill: "#fffdf8", stroke: "#234567", strokeWidth: 2 } },
+          ] },
+          { id: "hidden", name: "隐藏", kind: "effect", zIndex: 30, visible: false, overflow: "visible", elements: [{ id: "hidden-effect", kind: "effect", effectType: "custom", transform: { x: 0, y: 0, width: 1, height: 1 }, assetId: "asset-1", assetVersionId: "asset-1-v1" }] },
+        ],
+      }],
+      overlayLayers: [{ id: "overlay", name: "破框", zIndex: 1, visible: true, anchor: { type: "frame", frameId: "frame-1" }, purpose: "breakout", elements: [{ id: "overlay-text", kind: "text", transform: { x: 0.5, y: -0.05, width: 0.45, height: 0.2 }, content: "破框文字", role: "sfx", style: { fontFamily: "Lantern Sans", fontSize: 18, color: "#111111", align: "center", writingMode: "vertical" } }] }],
+      readingSequence: [{ frameId: "frame-1" }],
+      layoutPolicy: { frameOverlap: "allow", defaultOverflow: "clip" },
+    }],
+  };
+}
+
+test("shared render scene defines visibility, clipping, geometry and overlay order", () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  const scene = projectComicRenderScene(document, unit);
+  assert.deepEqual(scene.elements.map((node) => node.element.id), ["image-1", "text-1", "balloon-1", "overlay-text"]);
+  assert.equal(scene.elements[0].clipFrame?.id, "frame-1");
+  assert.equal(scene.elements[1].clipFrame, undefined);
+  assert.deepEqual(scene.elements.at(-1)?.geometry, { x: 100, y: 21, width: 72, height: 36 });
+  assert.ok((scene.elements.at(-1)?.zIndex ?? 0) > scene.frames[0].borderZIndex);
+  const balloon = scene.elements.find((node) => node.element.kind === "balloon")?.element;
+  assert.ok(balloon?.kind === "balloon");
+  assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "thought" }), { outline: 1.8, tail: 1.8 });
+  assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "caption_box" }), { outline: 1.8, tail: 1.8 });
+});
+
+test("export consumes the same render scene semantics", () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  const svg = renderSurfaceSvg(document, unit, unit.surfaces[0], new Map([["asset-1-v1", "data:image/png;base64,AA=="]]));
+  assert.match(svg, /<polygon/);
+  assert.match(svg, /fill="#f6f1e8"/);
+  assert.match(svg, /data-scene-id="image-1"[^>]+mix-blend-mode:multiply[^>]+clip-path=/);
+  assert.match(svg, /data-scene-id="balloon-1"/);
+  assert.match(svg, /stroke="#234567"/);
+  assert.match(svg, /stroke-width="2.5" vector-effect="non-scaling-stroke"/);
+  assert.match(svg, /stroke-width="1.4"[^>]+vector-effect="non-scaling-stroke"/);
+  assert.equal(svg.match(/vector-effect="non-scaling-stroke"/g)?.length, 2);
+  assert.match(svg, /保持三端一致/);
+  assert.match(svg, />白。<\/tspan>/);
+  assert.match(svg, /data-scene-id="overlay-text"/);
+  assert.doesNotMatch(svg, /hidden-effect/);
+});
 
 test("PNG, long PNG and structured JSON match the persistent runtime export golden", async () => {
   const golden = JSON.parse(await readFile(new URL("./fixtures/export-golden.json", import.meta.url), "utf8"));

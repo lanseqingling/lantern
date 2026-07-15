@@ -66,22 +66,6 @@ function PageSpreadIcon({ size = 16, ...props }: IconProps): ReactElement {
   </svg>;
 }
 
-function VersionSavedIcon({ size = 16, ...props }: IconProps): ReactElement {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" {...props}>
-    <path d="M7 4.5h10l2 2v11" opacity=".48" />
-    <path d="M4.5 7.5h11l2 2v10h-13z" />
-    <path d="m8 14 2.1 2.1 4.4-4.3" />
-  </svg>;
-}
-
-function VersionWorkingIcon({ size = 16, ...props }: IconProps): ReactElement {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" {...props}>
-    <path d="M7 4.5h10l2 2v8" opacity=".48" />
-    <path d="M4.5 7.5h11l2 2v10h-13z" />
-    <path d="m10 16.8 5.4-5.4 1.8 1.8-5.4 5.4-2.7.9z" />
-  </svg>;
-}
-
 const glyphs = {
   select: MousePointer2,
   pan: Hand,
@@ -121,8 +105,6 @@ const glyphs = {
   pages: FileText,
   pageSingle: PageSingleIcon,
   pageSpread: PageSpreadIcon,
-  versionSaved: VersionSavedIcon,
-  versionWorking: VersionWorkingIcon,
   pointer: SquareMousePointer,
   pin: Pin,
   message: MessageCircle,

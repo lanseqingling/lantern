@@ -14,7 +14,10 @@
 .preview-page-turn { position: absolute; z-index: 3; top: 0; bottom: 0; width: 50vw; border: 0; background: transparent; }
 .preview-page-turn.previous { left: 0; cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath d='M22.2 4.2Q24.8 2.8 24.8 5.2v19.6q0 2.4-2.6 1L5.8 16.7q-2.1-1.2 0-3.4z' fill='%2364c8c8'/%3E%3C/svg%3E") 15 15, w-resize; }
 .preview-page-turn.next { right: 0; cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath d='M7.8 4.2Q5.2 2.8 5.2 5.2v19.6q0 2.4 2.6 1l16.4-9.1q2.1-1.2 0-3.4z' fill='%2364c8c8'/%3E%3C/svg%3E") 15 15, e-resize; }
-.preview-dock { position: fixed; z-index: 50; right: 18px; top: 50%; display: flex; flex-direction: column; align-items: center; gap: 7px; transform: translateY(-50%); padding: 6px; border: 1px solid rgba(255,255,255,.88); border-radius: 22px; background: rgba(255,255,255,.84); box-shadow: 0 18px 48px rgba(23,32,38,.12), 0 0 0 1px rgba(100,200,200,.08); backdrop-filter: blur(20px); }
+.preview-dock { position: fixed; z-index: 50; right: 18px; top: 50%; display: flex; flex-direction: column; align-items: center; gap: 7px; transform: translateY(-50%); visibility: visible; padding: 6px; border: 1px solid rgba(255,255,255,.88); border-radius: 22px; background: rgba(255,255,255,.84); box-shadow: 0 18px 48px rgba(23,32,38,.12), 0 0 0 1px rgba(100,200,200,.08); backdrop-filter: blur(20px); transition: transform 190ms cubic-bezier(.2,.8,.2,1), opacity 150ms ease, visibility 0s linear; }
+@keyframes previewDockModeEnter { from { transform: translate(calc(100% + 34px), -50%); opacity: 0; } to { transform: translateY(-50%); opacity: 1; } }
+.preview-dock.mode-entering { animation: previewDockModeEnter 190ms cubic-bezier(.2,.8,.2,1) both; }
+.preview-dock.mode-exiting { transform: translate(calc(100% + 34px), -50%); visibility: hidden; opacity: 0; pointer-events: none; transition-delay: 0s, 0s, 190ms; }
 .preview-dock > div { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 2px; border-radius: 17px; background: rgba(255,255,255,.52); }
 .preview-dock button { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid transparent; border-radius: 13px; background: transparent; color: #3e4c54; cursor: pointer; }
 .preview-dock button:hover, .preview-dock button.active { border-color: rgba(100,200,200,.42); background: var(--cyan-soft); color: var(--cyan-deep); }
@@ -26,10 +29,8 @@
 .preview-mode-toggle button { position: relative; z-index: 1; }
 .preview-mode-toggle button:first-child { color: rgba(36,127,130,.58); }
 .preview-mode-toggle button:nth-child(2).active { border-color: transparent; background: transparent; color: #fff; box-shadow: none; }
-.preview-source-toggle { border: 1px solid rgba(100,200,200,.14); }
 .preview-save-menu { position: absolute; right: calc(100% + 10px); top: 50%; display: grid; gap: 4px; min-width: 150px; padding: 7px; border: 1px solid rgba(255,255,255,.92); border-radius: 14px; background: rgba(255,255,255,.96); box-shadow: var(--shadow); transform: translateY(-50%); }
-.preview-save-menu > span { padding: 3px 5px; color: var(--muted); font-size: 8px; font-weight: 900; letter-spacing: .06em; }
-.preview-save-menu button { display: block; width: 100%; height: auto; min-height: 32px; border: 0; border-radius: 9px; padding: 7px 8px; color: #405058; font-size: 9px; font-weight: 850; text-align: left; }
+.preview-save-menu button { display: block; width: 100%; height: auto; min-height: 32px; border: 0; border-radius: 9px; padding: 7px 8px; color: #405058; font-size: 10px; font-weight: 850; text-align: left; }
 .preview-save-menu button:hover { background: var(--cyan-soft); color: var(--cyan-deep); }
 .preview-notice { position: fixed; z-index: 60; left: 50%; top: 20px; max-width: min(420px, calc(100vw - 130px)); border-radius: 999px; background: rgba(23,32,38,.86); padding: 8px 13px; color: #fff; font-size: 10px; font-weight: 750; transform: translateX(-50%); backdrop-filter: blur(12px); }
 

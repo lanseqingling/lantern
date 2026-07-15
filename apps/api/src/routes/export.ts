@@ -17,12 +17,11 @@ export function registerExportRoutes(app: FastifyInstance) {
     return reply.header("Content-Type", version.contentType).header("Cache-Control", "private, max-age=300").send(bytes);
   });
 
-  app.get<{ Params: { chapterId: string; unitId: string }; Querystring: { source?: "snapshot" | "working" } }>("/v1/chapters/:chapterId/pages/:unitId/download", async (request, reply) => {
+  app.get<{ Params: { chapterId: string; unitId: string } }>("/v1/chapters/:chapterId/pages/:unitId/download", async (request, reply) => {
     const user = await currentUser(request);
     const workbench = await getWorkbench(user.id, request.params.chapterId);
-    const envelope = request.query.source === "snapshot" && workbench.snapshot ? workbench.snapshot : workbench.working;
-    const document = envelope.document;
-    if (!document) throw new AppError("not_found", "当前版本没有可下载的工作稿。", 404);
+    const document = workbench.snapshot?.document;
+    if (!document) throw new AppError("not_found", "当前一话还没有已保存版本。", 404);
     const unit = document.units.find((item) => item.id === request.params.unitId);
     if (!unit) throw new AppError("not_found", "当前版本中不存在该漫画页。", 404);
     const bytes = await renderPagePng(document, unit);

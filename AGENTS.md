@@ -42,7 +42,7 @@ React / Vinext Web
 | `app/` | Web 路由、工作台、作品与资产页面、阅读预览和浏览器 API 客户端。 |
 | `apps/api/` | Fastify 启动，以及按领域组织的解析、鉴权和响应边界。 |
 | `apps/worker/` | 模型生成、导出等异步任务。 |
-| `packages/shared/` | LCD、工作区命令、DTO 和 Zod 契约。 |
+| `packages/shared/` | LCD、工作区命令、渲染场景投影、DTO 和 Zod 契约。 |
 | `packages/editor-core/` | 不依赖 UI 或演示数据的 Capability、ChangeSet 和快照能力。 |
 | `packages/layout-engine/` | 页面编排与布局计算。 |
 | `packages/agent-runtime/` | 意图判断、上下文构建、Provider 适配和任务生命周期。 |
@@ -67,6 +67,7 @@ React / Vinext Web
 ## Change Checklist
 
 - 修改持久化对象、版本引用或 LCD 对象 ID 时，先阅读 `docs/lcd.md`，并同步检查 Prisma 迁移、服务层读写、上下文构建、保存快照、导出、复制和 ID 重映射。
+- 新增或修改 LCD 可视对象、样式、层级、可见性、坐标或裁切时，同步更新共享场景投影、工作台/预览渲染、导出渲染和一致性测试；已支持字段不得被任一出口静默忽略。
 - 新增或重构编辑能力时，在 `packages/editor-core` 维护唯一 Capability schema、元数据和执行器；原子命令与 ChangeSet schema 放在 `packages/shared`，API、UI 与 Agent 不复制参数契约、ID 或业务默认值。
 - 修改 Agent 上下文、选择、引用、任务或候选时，先阅读 `docs/agent.md`，并同步检查 context snapshot、`context-debug`、stale 校验和用户确认边界。跨画格或跨范围能力必须分阶段产生 Candidate，不得静默覆盖多处内容。
 - 新增 API 时，在 `apps/api/src/routes/` 收口解析、schema 和所有权校验，并在浏览器 API 客户端建立对应调用；复杂持久化编排进入 `packages/server`，`apps/api/src/index.ts` 只负责装配与启动。

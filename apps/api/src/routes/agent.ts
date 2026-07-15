@@ -1,19 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { CandidateKind, CandidateStatus, MessageKind, MessageRole, type Prisma } from "@prisma/client";
+import { CandidateKind, CandidateStatus } from "@prisma/client";
 import { z } from "zod";
 import type { WorkspaceOperation } from "../../../../packages/shared/src";
-import { buildAgentContext } from "../../../../packages/agent-runtime/src/context-builder";
-import { decideInteraction } from "../../../../packages/agent-runtime/src/orchestrator";
 import {
+  assertTaskCreationAllowed,
   createGenerationTask,
-  getActiveConversationTask,
   requestTaskCancellation,
   retryTask,
   type CreateTaskInput,
 } from "../../../../packages/agent-runtime/src/task-service";
 import { applyAssetCandidate } from "../../../../packages/server/src/candidate-service";
-import { getConfig } from "../../../../packages/server/src/config";
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
 import {
@@ -51,15 +48,6 @@ const taskRequestSchema = z.object({
   idempotencyKey: z.string().min(1).max(200),
 });
 
-const interactionRequestSchema = z.object({
-  message: z.string().min(1).max(20_000),
-  intent: z.string().max(80).optional(),
-  scope: z.string().max(80).optional(),
-  selection: selectionSchema.optional(),
-  explicitReferences: explicitReferencesSchema,
-  idempotencyKey: z.string().min(1).max(200).optional(),
-});
-
 type InteractionBody = {
   message: string;
   intent?: string;
@@ -71,73 +59,14 @@ type InteractionBody = {
 
 export function registerAgentRoutes(app: FastifyInstance) {
   app.post<{ Params: { conversationId: string }; Body: InteractionBody }>("/v1/conversations/:conversationId/interactions", async (request) => {
-    if (getConfig().AGENT_EXECUTION_MODE !== "enabled") {
-      throw new AppError("agent_execution_disabled", "AI 对话任务暂时不可用，现有作品和历史记录不受影响。", 503);
-    }
-    const user = await currentUser(request);
-    const body = interactionRequestSchema.parse(request.body) as InteractionBody;
-    const conversation = await prisma.agentConversation.findFirst({ where: { id: request.params.conversationId, ownerUserId: user.id, archivedAt: null } });
-    if (!conversation) throw new AppError("not_found", "对话不存在。", 404);
-    const activeTask = await getActiveConversationTask(user.id, conversation.id);
-    if (activeTask) throw new AppError("task_in_progress", "当前任务运行期间不能继续对话。请等待完成或先取消任务。", 409, { taskId: activeTask.id });
-    const message = body.message.trim();
-    if (!message) throw new AppError("validation", "消息不能为空。", 400);
-    const selection = body.selection ?? { type: "none" };
-    await prisma.message.create({
-      data: {
-        ownerUserId: user.id,
-        projectId: conversation.projectId,
-        conversationId: conversation.id,
-        role: MessageRole.USER,
-        kind: MessageKind.PLAIN,
-        content: message,
-        metadata: { intent: body.intent, scope: body.scope, selection },
-        references: body.explicitReferences?.length ? {
-          create: body.explicitReferences.map((ref) => ({ objectType: ref.objectType, objectId: ref.objectId, versionId: ref.versionId })),
-        } : undefined,
-      },
-    });
-    await prisma.agentConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
-    const context = await buildAgentContext({
-      ownerUserId: user.id,
-      projectId: conversation.projectId,
-      conversationId: conversation.id,
-      taskType: body.intent ?? "storyboard",
-      instruction: message,
-      scope: body.scope ?? "current_page",
-      selection,
-      explicitReferences: body.explicitReferences,
-    });
-    const decision = await decideInteraction({
-      message,
-      intent: body.intent,
-      scope: body.scope,
-      selection,
-      contextSummary: {
-        comic: context.comic,
-        chapter: context.chapter,
-        workingRevision: context.workingRevision,
-        relevantStoryboardBeatCount: context.storyboardBeats.length,
-        relevantAssets: context.assets.map((asset) => ({ kind: asset.kind, name: asset.name })),
-      },
-    });
-    await prisma.message.create({
-      data: {
-        ownerUserId: user.id,
-        projectId: conversation.projectId,
-        conversationId: conversation.id,
-        role: MessageRole.AGENT,
-        kind: decision.kind === "needs_input" ? MessageKind.QUESTION : decision.kind === "needs_confirmation" ? MessageKind.CONFIRMATION : MessageKind.PLAIN,
-        content: decision.message,
-        metadata: decision as unknown as Prisma.InputJsonValue,
-      },
-    });
-    return ok(request, { decision });
+    void request;
+    throw new AppError("agent_execution_disabled", "旧 AI 对话任务已冻结，现有会话和历史记录不受影响。", 503);
   });
 
   app.post<{ Body: Omit<CreateTaskInput, "ownerUserId"> }>("/v1/tasks", async (request) => {
     const user = await currentUser(request);
     const body = taskRequestSchema.parse(request.body) as Omit<CreateTaskInput, "ownerUserId">;
+    assertTaskCreationAllowed(body.taskType);
     return ok(request, publicTask(await createGenerationTask({ ...body, ownerUserId: user.id })));
   });
 

@@ -21,7 +21,7 @@
     "test": "npm run test:unit",
     "test:unit": "tsx --test tests/*.test.ts",
     "test:editor": "tsx --test tests/editor-domain.test.ts",
-    "test:agent": "tsx --test tests/agent-runtime.test.ts",
+    "test:agent": "tsx --test tests/agent-execution.test.ts",
     "test:api-client": "tsx --test tests/api-client.test.ts",
     "test:provider": "tsx --test tests/provider.test.ts",
     "test:export": "tsx --test tests/export.test.ts",
@@ -41,8 +41,7 @@
     "db:sample:rainy-station": "tsx samples/rainy-station/seed.ts",
     "db:reset:rainy-station": "tsx scripts/reset-to-rainy-station.ts",
     "db:studio": "prisma studio",
-    "provider:probe": "tsx scripts/probe-providers.ts",
-    "smoke:runtime": "OBJECT_STORAGE_LOCAL_DIR=.lantern-runtime/smoke-objects tsx scripts/smoke-runtime.ts"
+    "provider:probe": "tsx scripts/probe-providers.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.1.0",

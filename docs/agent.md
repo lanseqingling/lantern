@@ -2,7 +2,7 @@
 
 Lantern 的 Agent 是漫画编辑器中的创作协作者。它读取当前作品与操作焦点，提供建议、计划和候选，并解释将要影响的对象；它不拥有作品事实，也不能绕过用户确认和编辑器写入边界。
 
-本文维护 Agent 的稳定产品与运行边界。可执行输入输出以 [`packages/agent-runtime/src/schemas.ts`](../packages/agent-runtime/src/schemas.ts) 为准，任务与候选持久化以 [`prisma/schema.prisma`](../prisma/schema.prisma) 为准，作品写入仍遵守 [LCD](./lcd.md) 和 `packages/shared` 的命令 schema。
+本文维护 Agent 的稳定产品与运行边界、当前运行时收口目标和能力前提状态。可执行输入输出以 [`packages/agent-runtime/src/schemas.ts`](../packages/agent-runtime/src/schemas.ts) 为准，任务与候选持久化以 [`prisma/schema.prisma`](../prisma/schema.prisma) 为准，作品写入仍遵守 [LCD](./lcd.md) 和 `packages/shared` 的命令 schema。
 
 ## 1. 协作模式
 
@@ -14,6 +14,10 @@ Agent 的行为归入四种模式：
 4. **受控执行**：在允许的能力与范围内产生 Candidate；用户应用后才通过 ChangeSet 进入新 revision。
 
 局部、目标明确且可恢复的生成可以直接进入候选流程。修改已确认内容、多个对象、整页及以上范围、格式或结构时，必须先确认影响；复杂请求拆成有依赖的阶段，每一阶段基于最新 revision 重新检查上下文并单独确认。
+
+常规对话 Agent 的写入边界是用户明确指定的画布范围。默认只使用当前选择或当前展示单元；一次请求最多覆盖四个 `PresentationUnit`，具体 Capability 可以设置更小上限。范围内的多页或多滚动段可以统一规划和并发生成，结果按展示单元说明影响并形成可独立检查的候选；高风险结构变更仍分阶段应用。
+
+对话 Agent 不创建整话。整话生成未来由独立 Workflow 负责整篇 LCD 规划、并发生成、检查、重试和确认，不依赖当前对话 Agent 的会话与任务编排；它可以复用 LCD、固定资源版本、校验、渲染和保存等底层事实源。
 
 Agent 不得：
 
@@ -90,6 +94,8 @@ Agent 不得：
 
 只向 Provider 发送当前任务必需的文本和私有资源。供应商拒绝、超时、格式错误或校验失败必须转成可理解错误，保留旧内容，并且不能产生空白候选。
 
+图片生成与局部修图是允许的 AI-first 能力，但在轻量图片查看器/编辑器能够提供明确目标、选区或遮罩、前后对比和版本确认后再接入。生成与修图只能产生新的 `AssetVersion` 和局部替换 Candidate，不直接覆盖原图；确定性的移动、缩放和裁切继续由编辑器 Capability 完成。
+
 ## 5. 实现入口
 
 | 事实 | 来源 |
@@ -97,9 +103,98 @@ Agent 不得：
 | 上下文组装与调试快照 | [`context-builder.ts`](../packages/agent-runtime/src/context-builder.ts) |
 | 交互决策与安全收口 | [`orchestrator.ts`](../packages/agent-runtime/src/orchestrator.ts) |
 | Agent 与 Candidate 可执行 schema | [`schemas.ts`](../packages/agent-runtime/src/schemas.ts) |
-| 任务创建、幂等、取消与重试 | [`task-service.ts`](../packages/agent-runtime/src/task-service.ts) |
+| 旧 AI 创建拦截与确定性任务边界 | [`task-service.ts`](../packages/agent-runtime/src/task-service.ts) |
 | Worker 处理与候选持久化 | [`task-processor.ts`](../packages/agent-runtime/src/task-processor.ts) |
 | 任务、尝试、消息引用与候选字段 | [`prisma/schema.prisma`](../prisma/schema.prisma) |
 | 作品命令、ChangeSet 与 LCD 校验 | [`packages/shared`](../packages/shared/src) |
 
 未来新增能力必须先成为编辑器可验证的领域能力，明确输入 schema、作用范围、风险、预览和撤销策略，再决定 Agent 是否只能观察、可以预览或允许执行。Agent 不以专项模块或模型数量为目标；只有职责具备独立契约、独立评估和稳定业务边界时才拆分。
+
+## 6. 运行时收口
+
+当前 Agent Runtime 仍按 storyboard、page_layout、frame_image、asset_parse 和 dialogue 等任务类型组织，部分处理器会直接形成整组分镜或大范围页面替换；Orchestrator 主要从文本判断任务与范围，尚未从统一 Capability Registry 规划受控工具。这些旧执行路径保持冻结，不能作为后续 Agent 的主路径。
+
+目标执行路径是：
+
+```text
+用户输入 + 当前选择 + 显式引用
+  → Context Builder
+  → Intent / Scope Resolver
+  → Planner（只输出工具计划）
+  → Capability Registry 权限与 schema 校验
+  → Dry-run Executor + LCD Validator + Diff Summary
+  → Candidate / Staged Candidates
+  → 用户预览与应用
+  → WorkspaceChangeSet → 新 WorkingRevision
+```
+
+会话、消息与历史读取、候选管理、stale 检查和 revision 冲突保护继续保留；这些现有结构是否进入新 Agent 架构，应在重构时重新判断。确定性导出继续读取已保存版本，不依赖模型决策。
+
+新工具链完成前，旧 AI 对话和非确定性任务创建保持硬冻结，不提供环境变量或运行模式开关。交互入口与任务服务都会拒绝 storyboard、page_layout、frame_image、asset_parse 和 dialogue 等旧任务，不能构建上下文、投递 Worker 或创建新 Candidate；已有会话、历史记录和 Candidate 不受影响。确定性 export 任务与独立页面下载继续可用。
+
+进入受控执行前必须满足：
+
+- 页面、画格、气泡等首批结构动作具备同源 Capability、Undo 和测试。
+- 共享场景投影能够一致支持工作台、预览和导出所需的层级、可见性、坐标与裁切语义。
+- allowlist 默认只开放当前对象或当前展示单元；明确的画布级任务最多开放四个展示单元。
+- Agent 能解释实际读取的上下文、计划工具、影响对象和省略信息。
+- dry-run 能在不写数据库时返回校验结果、视觉预览和变更摘要。
+- 图片查看器/编辑器能够为图片生成和局部修图提供目标、选区或遮罩、前后对比和版本确认。
+- 旧执行路径不能与新执行器同时成为可写主路径。
+
+首批闭环至少覆盖以下代表性场景：
+
+| 场景 | 计划方式 | 用户结果 |
+|---|---|---|
+| 给当前格新增对白 | 新增气泡并绑定对白 | 只影响当前格，可调整、应用和撤销 |
+| 拆分画格 | 拆分结构并重新计算阅读顺序 | 先预览分隔与序号，一次应用 |
+| 角色破框 | 提升到 Frame 锚定的覆盖层并调整位置 | 不复制素材，移动画格时仍保持关联 |
+| 开场跨页大图 | 形成跨页结构并迁移关联内容 | 高风险分阶段确认，可中途停止 |
+| 增加条漫停顿 | 调整纵向空间并进行手机视区预览 | 保持连续阅读，不修改格内图片 |
+| 只重画一格 | 生成新 AssetVersion 并局部替换 | 原图保留，只更新指定元素引用 |
+
+## 7. 漫画编辑与 Agent 能力矩阵
+
+本表是对话 Agent 的能力前提和状态索引，不重新定义产品需求。用户能力与验收仍由产品需求、编辑器体验和 LCD 负责；本表只跟踪能力是否具备用户入口、实现路径，以及是否已登记为 Agent 可见 Capability。未来独立的整话生成 Workflow 不在本表范围内。
+
+新增、删除或调整漫画编辑能力，或改变用户入口、Capability 登记和 Agent 权限时，必须同步更新本表。当前状态以 [`packages/shared/src/lcd/`](../packages/shared/src/lcd/)、[`workspace-schema.ts`](../packages/shared/src/workspace-schema.ts)、[`capabilities.ts`](../packages/editor-core/src/capabilities.ts) 和实际入口为准。
+
+`核心`约覆盖常见页面创作的 50%-60%；`增强`将覆盖推进到约 70%-80%；`后置`不阻塞首批 Agent；`需判断`表示效果重要，但是否扩展协议仍需产品决定。
+
+- `结构`表示由 LCD 和确定性 Capability 持续编辑；`混合`表示结构化限定范围后，由模型或图像 SDK 产出可预览 Candidate；`图像`表示效果进入新的 AssetVersion 或透明效果资产，不为每种画内效果增加协议类型。
+- `已接入`、`部分接入`、`未接入`描述当前用户入口。`已登记（禁用）`表示 Capability 已存在但 Agent 尚不可调用；当前没有任何漫画编辑 Capability 对 Agent 开放执行。
+- 对话 Agent 不直接生成或覆盖整页 LCD。布局只生成少量结构候选，生成和精修只替换指定资源版本，所有结果均可比较、拒绝和撤销。
+- 确定性用户入口统一提供选择反馈、菜单、一次撤销和必要的删除确认；页漫与条漫共享 ChangeSet、Candidate、PageVariant 和 Snapshot，不建立格式专用版本机制。
+
+| 阶段 | 大类 | 创作能力 | 格式 | 协议与实现路径 | 当前用户入口 | Agent 工具 |
+|---|---|---|---|---|---|---|
+| 核心 | 基础组织 | 创建、编辑和删除漫画与章节 | 通用 | `Comic / Chapter / Project` 持久化操作 | 已接入 | 未登记 |
+| 核心 | 基础组织 | 新增、命名和删除页面或滚动段，并修改滚动段比例 | 通用 | `PresentationUnit`；现有页面 Capability 组合 | 已接入 | 4 项已登记（禁用） |
+| 核心 | 画格编排 | 新增、删除、复制、移动和缩放常规矩形画格 | 通用 | `Frame.geometry / readingSequence`；保持基础间距和一次原子变更 | 部分接入：仅移动、缩放 | `move_frame`、`resize_frame`（已登记，禁用） |
+| 核心 | 画格编排 | 使用少量布局预设快速形成页面骨架 | 通用 | 1-6 格常用模板形成一次原子结构变更 | 未接入 | 未登记 |
+| 核心 | 分镜 | 为每格创建和编辑画面描述 | 通用 | `StoryboardBeat / Frame.storyRefs` | 已接入 | 2 项已登记（禁用） |
+| 核心 | 格内图片 | 把上传图片或已有资产放入指定画格 | 通用 | `ResourceRef + ImageElement` 作为一次受控放置 | 未接入 | 未登记 |
+| 核心 | 格内图片 | 根据单格描述、人物、场景和风格引用生成成稿 | 通用 | 混合：固定引用进入上下文，模型生成新 `AssetVersion`，局部候选替换 | 部分接入：旧任务与引用选择分离 | 未登记 |
+| 核心 | 格内图片 | 对指定格进行重画、扩图或局部精修 | 通用 | 混合：修图模型或 SDK 只处理当前格与选区，生成新 `AssetVersion` | 部分接入：旧任务仅支持整格 | 未登记 |
+| 核心 | 格内图片 | 调整格内图片取景 | 通用 | `ImageElement.crop`；平移、缩放、裁切和重置 | 已接入 | `set_art_crop`、`set_element_transform`（已登记，禁用） |
+| 核心 | 对白与气泡 | 新增、编辑和删除普通对白气泡 | 通用 | `Dialogue + BalloonElement` 作为一个复合能力 | 部分接入：仅编辑现有对白 | 仅 `update_dialogue` 已登记（禁用） |
+| 核心 | 对白与气泡 | 调整气泡位置、尺寸、尾巴和基础样式 | 通用 | `BalloonElement.transform / tailTarget / shape / style`；只提供少量预设 | 已接入 | `update_balloon`（已登记，禁用） |
+| 核心 | 资产与一致性 | 上传、摆放、整理和复用人物、场景与风格参考 | 通用 | `AssetVersion / ReferencePlacement / context snapshot` | 已接入 | 不适用：作为生成上下文 |
+| 核心 | 版本与输出 | 保存、预览、应用、撤销和恢复一次创作结果 | 通用 | `ChangeSet / Candidate / Undo / Snapshot` | 已接入 | 不适用 |
+| 核心 | 版本与输出 | 页漫单页/双页预览、条漫连续预览、最近保存快照的当前范围 PNG 和 LCD 下载 | 通用 | LCD 与固定资源版本的确定性渲染和导出 | 已接入 | 不适用 |
+| 增强 | 基础组织 | 复制和重排页面或滚动段 | 通用 | `reading.unitOrder` 与展示单元复制、ID 重映射 | 未接入 | 未登记 |
+| 增强 | 画格编排 | 根据分镜生成 2-3 个页面布局候选 | 通用 | 混合：模型规划布局意图，确定性布局器生成结构 Candidate | 部分接入：旧任务直接替换大范围文档 | 未登记 |
+| 增强 | 画格表现 | 使用无框、线宽、圆角、基础形状、出血、整页主视觉和局部断框 | 通用 | `Frame.border / shape / mask / geometry` 的简单预设；局部断框由出格对象或遮罩覆盖，不扩协议 | 未接入 | 未登记 |
+| 增强 | 页面合成 | 让人物或物体出格、跨格显示，并调整基础层级和可见性 | 通用 | `UnitOverlay` 使用 Frame 锚点；“移出画格/收回画格”保持视觉位置且可逆，不开放完整图层软件 | 未接入 | 仅 `reorder_layer` 已登记（禁用） |
+| 增强 | 文字 | 使用旁白、说明字和无气泡对白 | 通用 | `TextElement` 位于格内或页面覆盖层 | 未接入 | 未登记 |
+| 增强 | 对白与气泡 | 自动润色、压缩或改写指定对白 | 通用 | 混合：文本模型返回局部文字候选，确认后复用确定性更新 | 未接入 | 未登记 |
+| 增强 | 对白与气泡 | 使用喊叫、低声和电子声等表现型气泡 | 通用 | `Dialogue / BalloonElement` 保留语义与可编辑参数，`appearance` 引用固定版本的图像外观；三端按同一规则渲染 | 部分接入：协议与基础形状可用，外观入口未接入 | `set_element_appearance`（已登记，禁用） |
+| 增强 | 阅读节奏 | 调整画格与气泡阅读顺序 | 通用 | `readingSequence / textOrder`；只提供编号与前移/后移 | 未接入 | 未登记 |
+| 增强 | 阅读节奏 | 增加留白、重复节奏和场景停顿 | 通用 | 调整画格几何与空白区域；条漫同步调整纵向空间 | 未接入 | 未登记 |
+| 增强 | 画内效果 | 添加速度线、集中线、冲击、光影和天气效果 | 通用 | 混合：确定性 SDK 生成速度线、集中线、网点等透明效果资产；修图模型处理复杂光影、天气和画面融合，均形成新 `AssetVersion` | 未接入 | 未登记 |
+| 增强 | 画内效果 | 添加具有漫画感的拟声字 | 通用 | `TextElement` 保留文字语义；普通样式直接渲染，复杂变形通过 `appearance` 引用固定图像版本，改字时重新生成外观资源 | 部分接入：协议与渲染可用，创建编辑入口未接入 | `set_element_appearance`（已登记，禁用） |
+| 后置 | 专业编排 | 画格拆分合并、复杂异形格和自由嵌套 | 通用 | 专业结构编辑，不作为普通创作者的前置能力 | 未接入 | 未登记 |
+| 后置 | 专业合成 | 完整图层面板、锁定、混合模式和跨层搬移 | 通用 | 专业图层编辑 | 未接入 | 未登记 |
+| 后置 | 页漫专项 | 纸面辅助线、出血/安全区、单双页合并拆分、装订缝、跨页预览和复杂跨页对象 | 页漫 | `spread / PageSurface / UnitOverlay` 的格式专项能力；跨页对象只保留一个事实来源 | 未接入 | 未登记 |
+| 后置 | 条漫专项 | 滚动段重排、段间距、跨段约束、平台规则切片和复杂跨段对象 | 条漫 | 保持连续阅读的格式专项结构与非破坏性输出 | 未接入 | 未登记 |
+| 需判断 | 条漫专项 | 跨滚动段的连续背景或特效 | 条漫 | 当前覆盖层限于单段；MVP 使用更长滚动段或切分同一资产，刚需明确后再扩章节级覆盖层 | 未接入 | 未登记 |

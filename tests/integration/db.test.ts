@@ -14,7 +14,6 @@ import {
 import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
 import { prisma } from "../../packages/server/src/db";
 import { applyPageVariant, commitChangeSet, deletePageVariant, revertCandidateApplication, saveCandidateAsPageVariant } from "../../packages/server/src/workbench-service";
-import { requestTaskCancellation, retryTask } from "../../packages/agent-runtime/src/task-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
 import type { StoryboardBeat } from "../../packages/shared/src";
 
@@ -33,7 +32,6 @@ test("database candidate apply and revert preserve version heads atomically", as
     task: `it-task-${suffix}`,
     candidate: `it-candidate-${suffix}`,
     sibling: `it-sibling-${suffix}`,
-    failedTask: `it-failed-task-${suffix}`,
   };
   const storyboardBeat: StoryboardBeat = {
     id: ids.storyboardBeat,
@@ -183,36 +181,6 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal((reverted.document as unknown as { dialogues: Array<{ id: string; content: string }> }).dialogues.find((item) => item.id === ids.dialogue)?.content, "旧对白");
     assert.equal((await prisma.storyboardBeat.findUniqueOrThrow({ where: { id: ids.storyboardBeat } })).currentVersionNumber, 1);
     assert.equal((await prisma.candidate.findUniqueOrThrow({ where: { id: ids.candidate } })).status, CandidateStatus.REVERTED);
-
-    await prisma.generationTask.create({ data: {
-      id: ids.failedTask,
-      ownerUserId: ids.user,
-      projectId: ids.project,
-      type: TaskType.DIALOGUE,
-      status: TaskStatus.FAILED,
-      idempotencyKey: `integration:failed:${suffix}`,
-      baseRevision: 3,
-      scope: "selected_comic_frame",
-      target: { type: "storyboard_beat", id: ids.storyboardBeat, pageId: document.units[0].id },
-      input: { instruction: "重试对白", explicitReferences: [] },
-      contextSnapshot: {},
-      provider: "integration",
-      model: "integration",
-      errorCode: "provider_failed",
-      errorMessage: "保留原始失败记录",
-      completedAt: new Date(),
-    } });
-    const testQueue = { enqueue: async () => undefined };
-    const retried = await retryTask(ids.user, ids.failedTask, `integration:retry:${suffix}`, testQueue);
-    assert.equal(retried.status, TaskStatus.QUEUED);
-    const idempotentRetry = await retryTask(ids.user, ids.failedTask, `integration:retry:${suffix}`, testQueue);
-    assert.equal(idempotentRetry.id, retried.id);
-    await prisma.generationTask.update({ where: { id: retried.id }, data: { status: TaskStatus.RUNNING, progress: 18 } });
-    const canceled = await requestTaskCancellation(ids.user, retried.id);
-    assert.equal(canceled.status, TaskStatus.CANCELED);
-    const originalFailure = await prisma.generationTask.findUniqueOrThrow({ where: { id: ids.failedTask } });
-    assert.equal(originalFailure.status, TaskStatus.FAILED);
-    assert.equal(originalFailure.errorMessage, "保留原始失败记录");
 
     const layoutCandidateId = `it-layout-candidate-${suffix}`;
     await prisma.candidate.create({ data: {

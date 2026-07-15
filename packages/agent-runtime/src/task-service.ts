@@ -41,6 +41,11 @@ export type TaskQueueAdapter = {
   enqueue(taskId: string): Promise<void>;
 };
 
+export function assertTaskCreationAllowed(taskType: CreateTaskInput["taskType"]) {
+  if (taskType === "export") return;
+  throw new AppError("agent_execution_disabled", "旧 AI 任务创建已冻结；会话历史、候选和确定性导出不受影响。", 503);
+}
+
 const bullMqTaskQueue: TaskQueueAdapter = {
   async enqueue(taskId) {
     await getGenerationQueue().add("generation", { taskId }, {
@@ -53,6 +58,8 @@ const bullMqTaskQueue: TaskQueueAdapter = {
 };
 
 export async function createGenerationTask(input: CreateTaskInput, taskQueue: TaskQueueAdapter = bullMqTaskQueue) {
+  assertTaskCreationAllowed(input.taskType);
+
   const existing = await prisma.generationTask.findFirst({
     where: { ownerUserId: input.ownerUserId, idempotencyKey: input.idempotencyKey },
   });

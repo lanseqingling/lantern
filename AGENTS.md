@@ -52,7 +52,7 @@ React / Vinext Web
 | `prisma/` | 数据模型、迁移和基础数据。 |
 | `samples/`、`public/samples/` | 隔离的示例漫画与静态样例素材。 |
 | `scripts/` | 本地启动、迁移、模型探测和 smoke 脚本。 |
-| `docs/` | 产品、编辑器、LCD、Agent 的正式文档和临时迭代路线。 |
+| `docs/` | 产品、编辑器、LCD 和 Agent 的正式文档。 |
 
 ## Invariants
 
@@ -60,7 +60,7 @@ React / Vinext Web
 - 预览和导出只读取 LCD 与固定资源版本，不读取画布摆放、对话或临时 UI 状态。前端通过领域 Capability 提交作品变化，不能把组件状态或整个画布 store 当成作品。
 - `WorkingRevision` 是可变工作稿，`SavedSnapshot` 是用户显式保存后的不可变阅读和导出基线。确定性编辑通过 `WorkspaceChangeSet` 形成可撤销 revision；生成、结构、多对象和其他高风险结果先形成 Candidate。
 - `WorkspaceCommand` 是编辑器内部的原子写入语言，不直接作为 Agent 工具。UI 与 Agent 通过同一 Capability 输入 schema 和执行器进入 ChangeSet；新 Capability 默认不向 Agent 开放。
-- 任务、候选、消息与作品内容生命周期分离，任何任务都不能静默覆盖工作稿。旧 Agent 对话执行入口默认冻结，仅在设置 `AGENT_EXECUTION_MODE=enabled` 后执行任务。
+- 任务、候选、消息与作品内容生命周期分离，任何任务都不能静默覆盖工作稿。旧 AI 对话与非确定性任务创建已硬冻结，不提供配置开关；会话历史、候选管理和确定性导出继续可用。
 - 生产工作台只使用 `server` adapter；`demo` 必须显式开启，服务失败不能静默回退到演示作品。
 - `.lantern-runtime/` 只保存本地对象和临时运行数据，不能作为示例素材或提交内容。
 
@@ -68,8 +68,8 @@ React / Vinext Web
 
 - 修改持久化对象、版本引用或 LCD 对象 ID 时，先阅读 `docs/lcd.md`，并同步检查 Prisma 迁移、服务层读写、上下文构建、保存快照、导出、复制和 ID 重映射。
 - 新增或修改 LCD 可视对象、样式、层级、可见性、坐标或裁切时，同步更新共享场景投影、工作台/预览渲染、导出渲染和一致性测试；已支持字段不得被任一出口静默忽略。
-- 新增或重构编辑能力时，在 `packages/editor-core` 维护唯一 Capability schema、元数据和执行器；组件只提交 Capability 输入，多对象编辑先组合能力计划，再合并为一次原子 ChangeSet。原子命令与 ChangeSet schema 放在 `packages/shared`，API、UI 与 Agent 不复制参数契约、ID 或业务默认值。
-- 修改 Agent 上下文、选择、引用、任务或候选时，先阅读 `docs/agent.md`，并同步检查 context snapshot、`context-debug`、stale 校验和用户确认边界。跨画格或跨范围能力必须分阶段产生 Candidate，不得静默覆盖多处内容。
+- 新增或重构编辑能力时，在 `packages/editor-core` 维护唯一 Capability schema、元数据和执行器；组件只提交 Capability 输入，多对象编辑先组合能力计划，再合并为一次原子 ChangeSet。原子命令与 ChangeSet schema 放在 `packages/shared`，API、UI 与 Agent 不复制参数契约、ID 或业务默认值，并同步更新 `docs/agent.md` 的能力矩阵；当前用户可用范围变化时同步更新根 README 的能力快照。
+- 修改 Agent 上下文、选择、引用、任务或候选时，先阅读 `docs/agent.md`，并同步检查 context snapshot、`context-debug`、stale 校验和用户确认边界。跨画格或跨范围生成必须形成 Candidate；高风险结构变更分阶段确认，不得静默覆盖多处内容。
 - 新增 API 时，在 `apps/api/src/routes/` 收口解析、schema 和所有权校验，并在浏览器 API 客户端建立对应调用；复杂持久化编排进入 `packages/server`，`apps/api/src/index.ts` 只负责装配与启动。
 - 新增示例漫画时，只写入 `samples/` 或 `public/samples/`，并提供显式 seed/reset 入口，不污染普通用户数据或运行时对象存储。
 - 完成变更后运行与影响面相符的 `pnpm typecheck`、专项测试和 `pnpm build`。

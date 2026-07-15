@@ -3,13 +3,9 @@ import test from "node:test";
 import Fastify from "fastify";
 import { registerAgentRoutes } from "../apps/api/src/routes/agent";
 import { installErrorHandler } from "../apps/api/src/http";
-import { resetConfigForTests } from "../packages/server/src/config";
+import { assertTaskCreationAllowed, type CreateTaskInput } from "../packages/agent-runtime/src/task-service";
 
 test("the frozen Agent interaction entry rejects work before touching conversation state", async () => {
-  const previousMode = process.env.AGENT_EXECUTION_MODE;
-  process.env.AGENT_EXECUTION_MODE = "disabled";
-  resetConfigForTests();
-
   const app = Fastify({ logger: false });
   installErrorHandler(app);
   registerAgentRoutes(app);
@@ -25,8 +21,24 @@ test("the frozen Agent interaction entry rejects work before touching conversati
     assert.equal(response.json().error.code, "agent_execution_disabled");
   } finally {
     await app.close();
-    if (previousMode === undefined) delete process.env.AGENT_EXECUTION_MODE;
-    else process.env.AGENT_EXECUTION_MODE = previousMode;
-    resetConfigForTests();
   }
+});
+
+test("legacy AI task creation is rejected while deterministic export remains available", () => {
+  const legacyTaskTypes: CreateTaskInput["taskType"][] = [
+    "storyboard",
+    "page_layout",
+    "frame_image_generate",
+    "frame_image_refine",
+    "asset_parse",
+    "dialogue",
+  ];
+
+  for (const taskType of legacyTaskTypes) {
+    assert.throws(
+      () => assertTaskCreationAllowed(taskType),
+      (error: unknown) => error instanceof Error && "code" in error && error.code === "agent_execution_disabled",
+    );
+  }
+  assert.doesNotThrow(() => assertTaskCreationAllowed("export"));
 });

@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/packages/ui/src";
+import type { IconName } from "@/packages/ui/src";
 
-type SelectIconName = "page" | "vertical" | "fourPanel";
+type DiagramSelectIconName = "page" | "vertical" | "fourPanel";
+type SelectIconName = DiagramSelectIconName | IconName;
 
 type CustomSelectOption = {
   value: string;
@@ -13,13 +15,23 @@ type CustomSelectOption = {
   disabled?: boolean;
 };
 
-function SelectIcon({ name }: { name: SelectIconName }) {
+function DiagramSelectIcon({ name }: { name: DiagramSelectIconName }) {
   const pieceCount = name === "vertical" ? 3 : 4;
   return (
     <span className={`custom-select-icon custom-select-icon-${name}`} aria-hidden="true">
       {Array.from({ length: pieceCount }).map((_, index) => <i key={index} />)}
     </span>
   );
+}
+
+function isDiagramSelectIcon(name: SelectIconName): name is DiagramSelectIconName {
+  return name === "page" || name === "vertical" || name === "fourPanel";
+}
+
+function SelectOptionIcon({ name }: { name: SelectIconName }) {
+  return isDiagramSelectIcon(name)
+    ? <DiagramSelectIcon name={name} />
+    : <span className="custom-select-leading-icon" aria-hidden="true"><Icon name={name} /></span>;
 }
 
 export function CustomSelect({
@@ -66,10 +78,10 @@ export function CustomSelect({
         onClick={() => setOpen((current) => !current)}
       >
         <span className="custom-select-trigger-label">
-          {selected?.icon ? <SelectIcon name={selected.icon} /> : null}
+          {selected?.icon ? <SelectOptionIcon name={selected.icon} /> : null}
           <span>{selected?.label ?? value}</span>
         </span>
-        <Icon name="chevronDown" />
+        <span className="custom-select-chevron"><Icon name="chevronDown" /></span>
       </button>
       {open ? (
         <div className="custom-select-menu" role="listbox" aria-label={ariaLabel}>
@@ -80,7 +92,7 @@ export function CustomSelect({
               aria-selected={option.value === value}
               aria-disabled={option.disabled}
               disabled={option.disabled}
-              className={`${option.value === value ? "active" : ""} ${option.disabled ? "disabled" : ""}`}
+              className={`${option.value === value ? "active" : ""} ${option.disabled ? "disabled" : ""} ${option.icon ? "with-icon" : ""}`}
               key={option.value}
               onClick={() => {
                 if (option.disabled) return;
@@ -88,7 +100,7 @@ export function CustomSelect({
                 setOpen(false);
               }}
             >
-              {option.icon ? <SelectIcon name={option.icon} /> : null}
+              {option.icon ? <SelectOptionIcon name={option.icon} /> : null}
               <span className="custom-select-option-copy">
                 <span>{option.label}</span>
                 {option.detail ? <small>{option.detail}</small> : null}

@@ -1,22 +1,19 @@
 
 @media (min-width: 1540px) {
+  .workbench { --focus-layout-shift-x: -41px; }
   .creation-drawer { width: 270px; }
-  .canvas-stage.left-open { --stage-shift-x: 0px; }
-  .canvas-stage.agent-open { --stage-shift-x: 0px; }
-  .canvas-stage.left-open.agent-open { --stage-shift-x: 0px; }
   .comic-stage-wrap { width: 460px; }
   .reference-card { width: var(--reference-base-width, 168px); }
   .object-toolbar { left: calc(50% - 278px); }
 }
 
 @media (max-width: 1360px) {
+  .workbench { --focus-layout-shift-x: -42px; }
   .project-chip { left: 14px; width: 232px; }
   .creation-drawer { left: 14px; width: 232px; }
-  .canvas-stage.left-open { --stage-shift-x: 0px; }
   .agent-workspace { right: 20px; width: 310px; }
   .canvas-stage.agent-open .vertical-scroll-navigator { right: 368px; }
-  .canvas-stage.agent-open { --stage-shift-x: 0px; }
-  .canvas-stage.left-open.agent-open { --stage-shift-x: 0px; }
+  .canvas-stage.agent-open .object-inspector { right: 402px; }
   .comic-stage-wrap { width: min(370px, 56vw); }
   .reference-card { width: var(--reference-base-width, 124px); }
   .reference-body strong { max-width: 70px; }
@@ -25,11 +22,9 @@
 }
 
 @media (max-width: 1120px) {
-  .canvas-stage.left-open { --stage-shift-x: 0px; }
+  .workbench { --focus-layout-shift-x: 0px; }
   .creation-drawer { transform: translateX(-110%); opacity: 0; pointer-events: none; }
   .drawer-reopen.left { display: grid; }
-  .canvas-stage.agent-open { --stage-shift-x: 0px; }
-  .canvas-stage.left-open.agent-open { --stage-shift-x: 0px; }
   .reference-card { display: none; }
 }
 
@@ -46,7 +41,6 @@
   .canvas-global-actions { top: 10px; right: 10px; }
   .agent-workspace { top: 68px; right: 10px; bottom: 10px; width: min(92vw, 374px); }
   .canvas-stage.agent-open .vertical-scroll-navigator { right: calc(min(92vw, 374px) + 48px); }
-  .canvas-stage.agent-open, .canvas-stage.left-open.agent-open { --stage-shift-x: 0px; }
   .agent-workspace.open { box-shadow: -20px 0 80px rgba(23,32,38,.2); }
   .comic-stage-wrap { width: min(430px, 80vw); }
   .object-inspector { right: 8px; }

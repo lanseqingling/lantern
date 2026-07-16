@@ -11,7 +11,9 @@
   border-radius: 15px;
   background: rgba(250, 253, 251, .96);
   box-shadow: 0 12px 34px rgba(22, 49, 48, .16);
+  margin-left: var(--stage-shift-x, 0px);
   transform: translateX(-50%);
+  transition: margin-left 220ms cubic-bezier(.2,.8,.2,1);
 }
 .candidate-compare-toolbar button {
   min-height: 34px;

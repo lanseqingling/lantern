@@ -117,7 +117,7 @@ const glyphs = {
   copy: Copy,
 } satisfies Record<string, IconGlyph>;
 
-type IconName = keyof typeof glyphs;
+export type IconName = keyof typeof glyphs;
 
 export function Icon({ name }: { name: IconName }): ReactNode {
   const Glyph = glyphs[name];

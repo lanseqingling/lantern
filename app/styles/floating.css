@@ -68,7 +68,7 @@
 .candidate-terminal-state { display: inline-flex; margin-top: 8px; border-radius: 999px; background: rgba(100,200,200,.12); color: var(--cyan-deep); padding: 6px 9px; font-size: 7px; font-weight: 900; }
 
 .object-inspector { position: absolute; z-index: 40; right: 12px; bottom: 90px; width: 220px; max-height: 52vh; overflow: auto; padding: 11px; border: 1px solid rgba(255,255,255,.88); border-radius: 22px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); backdrop-filter: blur(20px); }
-.canvas-stage.agent-open .object-inspector { right: 402px; }
+.canvas-stage.agent-open .object-inspector { right: 414px; }
 .inspector-head { display: flex; align-items: center; justify-content: space-between; }
 .inspector-head span { display: flex; align-items: center; gap: 6px; color: var(--cyan-deep); font-size: 10px; font-weight: 900; }
 .inspector-head span i { width: 8px; height: 8px; border-radius: 3px; background: var(--cyan); }

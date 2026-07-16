@@ -23,7 +23,7 @@ const thanksPattern = /^(谢谢|感谢|明白了|知道了|好的|好)[！!。,.
 const capabilityPattern = /^(你能做什么|怎么用|可以帮我什么|你是谁)[？?。\s]*$/;
 
 export function enforceSafetyDecision(input: InteractionInput, decision: InteractionDecision): InteractionDecision {
-  const assetIntent = input.intent === "人物" || input.intent === "场景" || input.intent === "character" || input.intent === "scene" || assetPattern.test(input.message);
+  const assetIntent = input.intent === "资产" || assetPattern.test(input.message);
   if ((assetPattern.test(input.message) && decision.kind !== "needs_confirmation") || (assetIntent && (decision.kind === "needs_input" || decision.kind === "ready_to_run"))) {
     return {
       kind: "ready_to_run",

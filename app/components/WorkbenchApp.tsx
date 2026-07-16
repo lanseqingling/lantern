@@ -98,6 +98,7 @@ type LeftView = "assets" | "storyboard" | "pages";
 type PageDisplayMode = "single" | "spread";
 type PageEditorMode = "edit" | "delete";
 type ContextDebugSection = "input" | "world" | "assets" | "storyboard" | "page_layout" | "activity" | "raw";
+type AgentWorkspaceMode = "创作" | "资产";
 type ComposerReference = {
   id: string;
   objectType: string;
@@ -119,7 +120,10 @@ const verticalWheelThreshold = 180;
 const verticalWheelResetMs = 220;
 const verticalWheelLockMs = 320;
 const verticalNavigatorHideMs = 700;
-const intentOptions = ["分镜", "编排", "精修", "人物", "场景", "修改"].map((value) => ({ value, label: value }));
+const intentOptions = [
+  { value: "创作", label: "创作", detail: "故事、分镜、编排与精修", icon: "ai" as const },
+  { value: "资产", label: "资产", detail: "角色、场景、道具与参考图", icon: "asset" as const },
+] satisfies Array<{ value: AgentWorkspaceMode; label: string; detail: string; icon: "ai" | "asset" }>;
 const canvasAssetSaveTypeOptions: Array<{ value: CanvasAssetSaveKind; label: string }> = [
   { value: "character", label: "角色" },
   { value: "scene", label: "场景" },
@@ -219,7 +223,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [runtimeIds, setRuntimeIds] = useState<RuntimeIds | null>(null);
   const [workbenchMeta, setWorkbenchMeta] = useState({ comicTitle: "放学以后", chapterTitle: "第 1 话" });
   const [selection, setSelection] = useState<Selection>(noSelection);
-  const [intent, setIntent] = useState("分镜");
+  const [intent, setIntent] = useState<AgentWorkspaceMode>("创作");
   const [scope, setScope] = useState("当前一话");
   const [composer, setComposer] = useState("");
   const [explicitReferences, setExplicitReferences] = useState<ComposerReference[]>([]);
@@ -352,7 +356,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const copy = assetCreateIntent === "character" ? "创建一个角色" : assetCreateIntent === "scene" ? "创建一个场景" : assetCreateIntent === "prop" ? "创建一个道具" : assetCreateIntent === "reference" ? "我想添加一张参考图" : "创建一个新资产";
     const timer = window.setTimeout(() => {
       setComposer(copy);
-      setIntent(assetCreateIntent === "scene" ? "场景" : assetCreateIntent === "character" ? "人物" : "资产");
+      setIntent("资产");
       setScope("当前漫画资产");
       setAgentOpen(true);
       setLeftView("assets");
@@ -991,7 +995,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setToast(`已重做：${entry.label}`);
   };
 
-  const finishTask = (task: ActiveTask, option?: string) => {
+  const finishTask = (task: ActiveTask, instruction?: string) => {
     if (task.name === "failure") {
       setActiveTask({ ...task, status: "failed", progress: 58 });
       addMessage({ role: "agent", kind: "failed", text: "图片 Provider 暂时不可用。旧工作稿没有改变，可以直接重试。", taskName: "failure" });
@@ -1015,11 +1019,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         metadata: { pageId: selection.pageId ?? "page-1", elementId: targetImageId, storyboardBeatId: selectedStoryboardBeatId ?? "fixture-rain-beat-4", previewUrl: "/samples/rainy-station/frame-04.png" },
       }];
     } else if (task.name === "asset_parse") {
-      const isScene = (option ?? "").includes("场景") || intent === "场景";
+      const isScene = (instruction ?? "").includes("场景");
       candidates = [{ id: uid("candidate-asset"), kind: "asset", title: isScene ? "新场景候选" : "新角色候选", changeSummary: "已生成可编辑的资产描述和参考图；确认后才进入资产库与画布参考层。", targetLabel: "资产与画布参考层", baseRevision, status: "available", metadata: { imageSrc: isScene ? "/samples/rainy-station/scene-rain-bus-stop.png" : "/samples/rainy-station/character-lincheng.png", name: isScene ? "新场景" : "新角色" } }];
-    } else if (option?.includes("条漫")) {
+    } else if (instruction?.includes("条漫")) {
       candidates = [{ id: uid("candidate-vertical"), kind: "page_layout", title: "条漫慢节奏", changeSummary: "切换为条漫滚动段，并在回头前加入纵向停顿。", targetLabel: "整话格式", baseRevision, status: "available", document: previewFixtures.vertical }];
-    } else if (option?.includes("固定四格")) {
+    } else if (instruction?.includes("固定四格")) {
       candidates = [{ id: uid("candidate-four"), kind: "page_layout", title: "固定四格 2×2", changeSummary: "切换为固定四格单元，不覆盖当前页漫布局。", targetLabel: "整话格式", baseRevision, status: "available", document: previewFixtures.four_panel }];
     } else if (task.name === "page_layout") {
       candidates = [createStoryboardLayoutCandidate(baseRevision, "cinematic")];
@@ -1073,7 +1077,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setActiveTask(task);
     addMessage({ role: "agent", kind: "task", text: `${label}正在进行。旧内容会一直保留到你应用候选。`, scope: taskScope, taskName: name, taskId: task.id });
     window.setTimeout(() => setActiveTask((current) => current?.id === task.id ? { ...current, progress: 62 } : current), 360);
-    window.setTimeout(() => finishTask(task, option), 920);
+    window.setTimeout(() => finishTask(task, instruction), 920);
   };
 
   const sendMessage = () => {
@@ -2390,7 +2394,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }
 
   return (
-    <WorkbenchShell data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
+    <WorkbenchShell className={`mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <header className="project-chip" data-testid="project-chip">
         <button className="project-main" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label="打开项目菜单">
@@ -2571,7 +2575,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         {isVerticalCanvas && canvasMode === "focus" ? <aside ref={verticalNavigatorRef} className="vertical-scroll-navigator" aria-hidden="true"><div className="vertical-scroll-map" style={verticalNavigatorPaperStyle}>{canvasDocument.units.map((unit) => <span key={unit.id} style={{ flexGrow: unit.canvas.height }} />)}<i /></div></aside> : null}
         {marquee && marqueeStyle ? <div className="canvas-marquee" style={marqueeStyle} aria-hidden="true" /> : null}
 
-        {canvasMode === "focus" && !multiSelection && !inspectorOpen && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象工具条" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("精修"); setAgentOpen(true); }}><Icon name="ai" /></button><button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : "开启或关闭移动画格"} disabled={selection.type !== "comic_frame" && selection.type !== "speech_balloon" || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button><button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label="裁切当前画格的格内图片" disabled={selection.type !== "comic_frame" && selection.type !== "image" || objectInteractionMode === "move"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button><button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button><button type="button" disabled aria-label="更多对象操作（即将支持）"><Icon name="moreVertical" /></button></ObjectToolbar> : null}
+        {canvasMode === "focus" && !multiSelection && !inspectorOpen && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象工具条" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("创作"); setAgentOpen(true); }}><Icon name="ai" /></button><button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : "开启或关闭移动画格"} disabled={selection.type !== "comic_frame" && selection.type !== "speech_balloon" || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button><button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label="裁切当前画格的格内图片" disabled={selection.type !== "comic_frame" && selection.type !== "image" || objectInteractionMode === "move"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button><button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button><button type="button" disabled aria-label="更多对象操作（即将支持）"><Icon name="moreVertical" /></button></ObjectToolbar> : null}
         {canvasCandidates.map((candidate, index) => {
           const expanded = previewCandidateId === candidate.id;
           const x = Number(candidate.metadata?.canvasX ?? 300 + (index % 2) * 210);
@@ -2585,7 +2589,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
             {candidate.status === "available" ? <div className="canvas-candidate-actions">
               {!expanded ? <button type="button" onClick={() => setPreviewCandidateId(candidate.id)}>预览</button> : <>
                 <button type="button" className="primary" onClick={() => candidate.kind === "asset" ? void applyAssetCandidate(candidate) : applyCandidate(candidate)}>{candidate.kind === "asset" ? "保存到资产" : "应用到工作稿"}</button>
-                <button type="button" onClick={() => { setComposer(`继续完善「${candidate.title}」：`); setIntent(candidate.kind === "asset" ? (candidate.metadata?.assetKind === "scene" ? "场景" : "人物") : "修改"); setAgentOpen(true); }}>继续完善</button>
+                <button type="button" onClick={() => { setComposer(`继续完善「${candidate.title}」：`); setIntent(candidate.kind === "asset" ? "资产" : "创作"); setAgentOpen(true); }}>继续完善</button>
               </>}
               <button type="button" className="danger" onClick={() => discardCandidate(candidate.id)}>丢弃</button>
             </div> : candidate.status === "applied" && candidate.kind !== "asset" ? <button type="button" className="revert-candidate" onClick={() => revertCandidate(candidate)}>撤回本次应用</button> : candidate.status === "applied" ? <span className="candidate-terminal-state">已保存到资产库</span> : null}
@@ -2631,14 +2635,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         <div className="composer-box">
           <div className="reference-tags">{composerReferenceItems.map((item) => { if (item.type === "attachment") { const attachment = item.value; return <button type="button" className="composer-image-reference" key={item.key} onClick={() => removeComposerAttachment(attachment.id)}><img src={attachment.imageUrl} alt={`${attachment.name} 待发送`} /><span>{attachment.name}</span><Icon name="x" /></button>; } const reference = item.value; const removeReference = () => { setExplicitReferences((items) => items.filter((current) => current.id !== reference.id)); setComposerReferenceOrder((items) => items.filter((key) => key !== item.key)); }; return reference.kind === "comic_frame" ? <button type="button" className="composer-frame-reference" key={item.key} onClick={removeReference}>{reference.imageUrl ? <img src={reference.imageUrl} alt={`${reference.label} 缩略图`} /> : <span className="frame-reference-placeholder"><Icon name="layout" /></span>}<span>{reference.label}</span><Icon name="x" /></button> : reference.kind === "speech_balloon" ? <button type="button" className="composer-dialogue-reference" key={item.key} onClick={removeReference}><Icon name="reference" /><span>对白 {String(reference.balloonNumber ?? 1).padStart(2, "0")}</span><Icon name="x" /></button> : <button type="button" key={item.key} onClick={removeReference}><Icon name="reference" /> {reference.label} <Icon name="x" /></button>; })}</div>
           <textarea data-testid="agent-input" value={composer} disabled={activeTask?.status === "running"} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? "当前任务运行中；完成或取消后可继续对话" : "描述你想让 AI 生成、修改或确认的内容…"} />
-          <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" disabled={activeTask?.status === "running"} aria-label="添加对话引用或 Agent 选项" onClick={() => chatUploadRef.current?.click()}><span aria-hidden="true">＋</span></button><CustomSelect ariaLabel="当前创作意图" className="composer-mode-picker" value={intent} options={intentOptions} onChange={setIntent} /><button type="button" className="at-button" disabled={activeTask?.status === "running"} aria-label="引用当前对象" onClick={() => addSelectionReference()}><Icon name="reference" /></button><button type="button" className={`send ${activeTask?.status === "running" ? "stop" : ""}`} aria-label={activeTask?.status === "running" ? "停止任务" : "发送"} onClick={activeTask?.status === "running" ? () => void stopActiveTask() : sendMessage}><Icon name={activeTask?.status === "running" ? "x" : "send"} /></button></div>
+          <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" disabled={activeTask?.status === "running"} aria-label="添加对话引用或 Agent 选项" onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><CustomSelect ariaLabel="当前 Agent 工作模式" className="composer-mode-picker" value={intent} options={intentOptions} onChange={(value) => setIntent(value as AgentWorkspaceMode)} /><button type="button" className="at-button" disabled={activeTask?.status === "running"} aria-label="引用当前对象" onClick={() => addSelectionReference()}><Icon name="reference" /><span>引用</span></button><button type="button" className={`send ${activeTask?.status === "running" ? "stop" : ""}`} aria-label={activeTask?.status === "running" ? "停止任务" : "发送"} onClick={activeTask?.status === "running" ? () => void stopActiveTask() : sendMessage}><Icon name={activeTask?.status === "running" ? "x" : "send"} /></button></div>
         </div>
       </AgentWorkspace>
       {!agentOpen ? <button className="drawer-reopen right" type="button" onClick={() => setAgentOpen(true)} aria-label="展开 Agent 工作区"><Icon name="ai" /></button> : null}
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <CreationDock className={[multiSelection ? "multi-hidden" : "", dockEntering ? "mode-entering" : "", modeSwitching ? "mode-exiting" : ""].filter(Boolean).join(" ")} aria-label="创作工具">
-        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布参考层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" aria-label="画格和页面编排" onClick={() => { setIntent("编排"); setComposer("重新编排当前漫画页，突出最后一个画格"); }}><Icon name="layout" /></button><button type="button" aria-label="文字和气泡" onClick={() => openBalloonEditor(page?.elements.find((element): element is SpeechBalloonElement => element.type === "speech_balloon"), page)}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 修改当前焦点" onClick={() => { setComposer("只精修当前画格的格内成稿图，让动作更自然，不改其他画格"); setIntent("精修"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
+        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布参考层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" aria-label="画格和页面编排" onClick={() => { setIntent("创作"); setComposer("重新编排当前漫画页，突出最后一个画格"); }}><Icon name="layout" /></button><button type="button" aria-label="文字和气泡" onClick={() => openBalloonEditor(page?.elements.find((element): element is SpeechBalloonElement => element.type === "speech_balloon"), page)}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 修改当前焦点" onClick={() => { setComposer("只精修当前画格的格内成稿图，让动作更自然，不改其他画格"); setIntent("创作"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
       </CreationDock>
       <nav className={`multi-selection-dock ${multiSelection ? "active" : ""}`} aria-label="多选工具">
         <button type="button" aria-label="将选中对象引用到对话" disabled={!multiComicActive && !multiCanvasActive} onClick={addMultiSelectionToDialogue}><Icon name="ai" /></button>

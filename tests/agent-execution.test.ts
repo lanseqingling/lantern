@@ -3,6 +3,7 @@ import test from "node:test";
 import Fastify from "fastify";
 import { registerAgentRoutes } from "../apps/api/src/routes/agent";
 import { installErrorHandler } from "../apps/api/src/http";
+import { enforceSafetyDecision } from "../packages/agent-runtime/src/orchestrator";
 import { assetDraftSchema } from "../packages/agent-runtime/src/schemas";
 import { assertTaskCreationAllowed, type CreateTaskInput } from "../packages/agent-runtime/src/task-service";
 
@@ -56,4 +57,26 @@ test("asset drafts use type, name and description as the complete semantic contr
     description: "角色描述",
     attributes: { outfit: "浅色风衣" },
   }));
+});
+
+test("the asset work focus routes generation to an asset candidate without encoding a subtype", () => {
+  const decision = enforceSafetyDecision({
+    message: "根据这些参考整理一个可复用设定",
+    intent: "资产",
+    scope: "当前漫画资产",
+    selection: { type: "none" },
+    contextSummary: {},
+  }, {
+    kind: "ready_to_run",
+    message: "我会先生成候选。",
+    scope: "current_page",
+    taskType: "storyboard",
+  });
+
+  assert.deepEqual(decision, {
+    kind: "ready_to_run",
+    message: "我会先按当前描述生成可编辑的资产候选；细节可以在资产画布中继续完善。",
+    scope: "reference_only",
+    taskType: "asset_parse",
+  });
 });

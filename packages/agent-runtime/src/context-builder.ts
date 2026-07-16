@@ -1,3 +1,4 @@
+import { AssetKind, AssetLibraryStatus } from "@prisma/client";
 import { prisma } from "../../server/src/db";
 import { AppError } from "../../server/src/errors";
 import { agentContextSnapshotSchema, workspaceRefSchema } from "./schemas";
@@ -52,6 +53,26 @@ export async function buildAgentContext(request: ContextRequest) {
     },
   });
   if (!project) throw new AppError("not_found", "创作空间不存在。", 404);
+  const comicStyleAssets = await prisma.asset.findMany({
+    where: {
+      ownerUserId: request.ownerUserId,
+      kind: AssetKind.STYLE,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      variantOfAssetId: null,
+      archivedAt: null,
+      project: { chapter: { comicId: project.chapter.comic.id, archivedAt: null } },
+    },
+    include: {
+      versions: { orderBy: { version: "desc" }, take: 1 },
+      images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }], take: 12 },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: 1,
+  });
+  const regularAssets = project.assets.filter((asset) => asset.kind !== AssetKind.STYLE);
+  const contextAssets = comicStyleAssets.length
+    ? [...regularAssets.slice(0, 23), ...comicStyleAssets]
+    : regularAssets.slice(0, 24);
   const working = await prisma.workingRevision.findFirst({
     where: { projectId: project.id },
     orderBy: { revision: "desc" },
@@ -194,11 +215,11 @@ export async function buildAgentContext(request: ContextRequest) {
       dialogueElementCount: frameChildren.filter((element) => element.type === "speech_balloon" || element.type === "text").length,
     } : undefined,
     currentStoryboardBeat,
-    assets: project.assets.map((asset) => ({
+    assets: contextAssets.map((asset) => ({
       id: asset.id,
       kind: asset.kind.toLowerCase(),
       name: asset.name,
-      description: asset.description,
+      description: asset.kind === AssetKind.STYLE ? project.chapter.comic.styleSummary : asset.description,
       versionId: asset.images[0]?.assetVersionId ?? asset.versions[0]?.id,
       images: asset.images.map((image, index) => ({ versionId: image.assetVersionId, isPrimary: index === 0 })),
     })),

@@ -40,6 +40,89 @@ async function requireOwnedLibraryAsset(ownerUserId: string, assetId: string) {
   return asset;
 }
 
+async function findComicVisualStyleAsset(ownerUserId: string, comicId: string) {
+  return prisma.asset.findFirst({
+    where: {
+      ownerUserId,
+      kind: AssetKind.STYLE,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      variantOfAssetId: null,
+      archivedAt: null,
+      project: { chapter: { comicId, archivedAt: null } },
+    },
+    include: { images: { include: galleryImageInclude, orderBy: galleryOrder } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+}
+
+function comicVisualStylePayload(asset: AssetWithGallery | null) {
+  return { assetId: asset?.id, images: asset ? serializedImages(asset) : [] };
+}
+
+export async function getComicVisualStyle(ownerUserId: string, comicId: string) {
+  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null }, select: { id: true } });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comic.id));
+}
+
+export async function appendComicVisualStyleImage(ownerUserId: string, comicId: string, uploaded: UploadedImage) {
+  const comic = await prisma.comic.findFirst({
+    where: { id: comicId, ownerUserId, archivedAt: null },
+    select: {
+      id: true,
+      chapters: {
+        where: { archivedAt: null, project: { isNot: null } },
+        orderBy: { number: "asc" },
+        take: 1,
+        select: { project: { select: { id: true } } },
+      },
+    },
+  });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  const existing = await findComicVisualStyleAsset(ownerUserId, comic.id);
+  if (existing) {
+    await appendOwnedAssetImageData(existing, uploaded);
+    return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comic.id));
+  }
+  const projectId = comic.chapters[0]?.project?.id;
+  if (!projectId) throw new AppError("invalid_state", "请先创建一个漫画章节，再上传视觉风格参考图。", 422);
+
+  await prisma.$transaction(async (tx) => {
+    const asset = await tx.asset.create({
+      data: {
+        ownerUserId,
+        projectId,
+        kind: AssetKind.STYLE,
+        libraryStatus: AssetLibraryStatus.LIBRARY,
+        name: "视觉风格",
+        description: "",
+        versions: {
+          create: {
+            version: 1,
+            objectKey: uploaded.stored.objectKey,
+            contentType: uploaded.contentType,
+            byteSize: uploaded.stored.byteSize,
+            width: uploaded.stored.width,
+            height: uploaded.stored.height,
+            checksum: uploaded.stored.checksum,
+            source: "upload",
+          },
+        },
+      },
+      include: { versions: true },
+    });
+    await tx.assetImage.create({
+      data: {
+        assetId: asset.id,
+        assetVersionId: asset.versions[0].id,
+        label: uploaded.filename.replace(/\.[^.]+$/, "").trim() || "风格参考 1",
+        sortIndex: 0,
+      },
+    });
+  });
+  return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comic.id));
+}
+
 async function normalizeImageOrder(tx: Prisma.TransactionClient, assetId: string, primaryImageId?: string) {
   const images = await tx.assetImage.findMany({
     where: { assetId },
@@ -52,8 +135,8 @@ async function normalizeImageOrder(tx: Prisma.TransactionClient, assetId: string
   await Promise.all(ordered.map((image, index) => tx.assetImage.update({ where: { id: image.id }, data: { sortIndex: index * 10 } })));
 }
 
-export async function appendAssetImage(ownerUserId: string, assetId: string, uploaded: UploadedImage) {
-  const asset = await requireOwnedLibraryAsset(ownerUserId, assetId);
+async function appendOwnedAssetImageData(asset: { id: string; currentVersionNumber: number }, uploaded: UploadedImage) {
+  const assetId = asset.id;
   await prisma.$transaction(async (tx) => {
     const latest = await tx.assetVersion.findFirst({ where: { assetId }, orderBy: { version: "desc" }, select: { version: true } });
     const imageCount = await tx.assetImage.count({ where: { assetId } });
@@ -81,6 +164,10 @@ export async function appendAssetImage(ownerUserId: string, assetId: string, upl
     });
     await tx.asset.update({ where: { id: assetId }, data: { currentVersionNumber: nextVersion } });
   });
+}
+
+export async function appendAssetImage(ownerUserId: string, assetId: string, uploaded: UploadedImage) {
+  await appendOwnedAssetImageData(await requireOwnedLibraryAsset(ownerUserId, assetId), uploaded);
   return getAssetFamilyDetail(ownerUserId, assetId);
 }
 
@@ -138,7 +225,7 @@ export async function listComicAssetCards(ownerUserId: string, comicId: string) 
       ownerUserId,
       archivedAt: null,
       variantOfAssetId: null,
-      kind: { not: AssetKind.GENERATED_IMAGE },
+      kind: { notIn: [AssetKind.GENERATED_IMAGE, AssetKind.STYLE] },
       libraryStatus: AssetLibraryStatus.LIBRARY,
       project: { chapter: { comicId: comic.id, archivedAt: null } },
     },

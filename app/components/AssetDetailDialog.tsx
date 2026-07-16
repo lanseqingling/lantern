@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/packages/ui/src";
+import { AssetImageViewer } from "@/app/components/AssetImageViewer";
 import type { ComicAssetDetail, ComicAssetListItem } from "@/app/lib/api-client";
 
 function kindLabel(kind: ComicAssetListItem["kind"]) {
@@ -298,31 +299,12 @@ export function AssetDetailDialog({
             <div className="asset-detail-section"><small>详细描述</small><p>{activeEntry.description || "暂无描述"}</p></div>
             {imageError ? <em className="asset-image-error" role="alert">{imageError}</em> : null}
           </section>}
-          <section className="asset-image-viewer" aria-label="资产图片查看器">
-            <div className="asset-image-stage" onPointerDown={() => setImageMenu(null)}>
-              {activeImage ? <><img src={activeImage.contentUrl} alt={`${activeEntry.name}·${activeImage.label}`} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); const stage = event.currentTarget.parentElement?.getBoundingClientRect(); const rawX = event.clientX - (stage?.left ?? 0); const rawY = event.clientY - (stage?.top ?? 0); setImageMenu({ x: Math.max(12, Math.min(rawX, (stage?.width ?? rawX + 166) - 166)), y: Math.max(12, Math.min(rawY, (stage?.height ?? rawY + 122) - 122)), imageId: activeImage.id }); }} />{activeImage.isPrimary ? <span className="asset-image-primary-badge">主图</span> : null}</> : <div className="asset-image-empty"><Icon name="asset" /><strong>还没有资产图片</strong><p>文字资料仍然可以作为创作参考。</p></div>}
-              {imageMenu && activeImage?.id === imageMenu.imageId ? <div className="asset-image-menu" role="menu" style={{ left: imageMenu.x, top: imageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+          <AssetImageViewer name={activeEntry.name} images={activeEntry.images} activeIndex={activeImageIndex} onActiveIndexChange={setActiveImageIndex} onStagePointerDown={() => setImageMenu(null)} onImageContextMenu={(event, image) => { event.preventDefault(); event.stopPropagation(); const stage = event.currentTarget.parentElement?.getBoundingClientRect(); const rawX = event.clientX - (stage?.left ?? 0); const rawY = event.clientY - (stage?.top ?? 0); setImageMenu({ x: Math.max(12, Math.min(rawX, (stage?.width ?? rawX + 166) - 166)), y: Math.max(12, Math.min(rawY, (stage?.height ?? rawY + 122) - 122)), imageId: image.id }); }} stageOverlay={imageMenu && activeImage?.id === imageMenu.imageId ? <div className="asset-image-menu" role="menu" style={{ left: imageMenu.x, top: imageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
                 <button type="button" role="menuitem" disabled={activeImage.isPrimary || imageMutating} onClick={() => void setPrimaryImage(activeImage.id)}><Icon name="pin" />{activeImage.isPrimary ? "当前主图" : "设置为主图"}</button>
                 <button type="button" role="menuitem" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingRenameImageId(activeImage.id); setImageNameDraft(activeImage.label); setImageNameError(""); }}><Icon name="edit" />修改名称</button>
                 <button type="button" role="menuitem" disabled title="AI 图片精修能力将在后续开放"><Icon name="ai" />创作</button>
                 <button type="button" role="menuitem" className="danger" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingDeleteImageId(activeImage.id); }}><Icon name="trash" />删除</button>
-              </div> : null}
-            </div>
-            <footer className="asset-image-controls">
-              <div className="asset-preview-mode" aria-label="图片预览模式">
-                <button type="button" className="active" disabled aria-label="当前为单图预览"><Icon name="pageSingle" /><span>单图</span></button>
-                <button type="button" disabled title="多图同时预览将在后续开放" aria-label="多图预览，暂未开放"><Icon name="pageSpread" /><span>多图</span></button>
-              </div>
-              <div className="asset-image-navigator">
-                <button type="button" aria-label="上一张图片" disabled={activeImageIndex <= 0} onClick={() => setActiveImageIndex((index) => Math.max(0, index - 1))}><Icon name="collapse" /></button>
-                <div className="asset-image-thumbnails" aria-label="资产图片列表">
-                  {activeEntry.images.map((image, index) => <button type="button" key={image.id} className={index === activeImageIndex ? "active" : ""} aria-label={`查看${image.label}`} aria-pressed={index === activeImageIndex} onClick={() => setActiveImageIndex(index)}><img src={image.contentUrl} alt="" />{image.isPrimary ? <em>主图</em> : null}<span>{image.label}</span></button>)}
-                  {!activeEntry.images.length ? <span className="asset-image-empty-thumb"><Icon name="asset" /></span> : null}
-                </div>
-                <button type="button" aria-label="下一张图片" disabled={activeImageIndex >= activeEntry.images.length - 1} onClick={() => setActiveImageIndex((index) => Math.min(activeEntry.images.length - 1, index + 1))}><Icon name="expand" /></button>
-              </div>
-            </footer>
-          </section>
+              </div> : null} />
         </div>
       </> : null}
       {pendingRenameImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) { setPendingRenameImageId(null); setImageNameError(""); } }}><form className="asset-image-confirm asset-image-rename" role="dialog" aria-modal="true" aria-labelledby="asset-image-rename-title" onSubmit={(event) => { event.preventDefault(); void renameImage(); }}><span><Icon name="edit" /></span><h3 id="asset-image-rename-title">修改图片名称</h3><p>名称用于区分同一资产中的不同图片。</p><label><small>图片名称</small><input autoFocus value={imageNameDraft} maxLength={80} disabled={imageMutating} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setImageNameDraft(event.target.value)} /></label>{imageNameError ? <em role="alert">{imageNameError}</em> : null}<footer><button type="button" disabled={imageMutating} onClick={() => { setPendingRenameImageId(null); setImageNameError(""); }}>取消</button><button type="submit" className="primary" disabled={imageMutating}>{imageMutating ? "保存中…" : "保存"}</button></footer></form></div> : null}

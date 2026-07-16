@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@/packages/ui/src";
 import { AssetDetailDialog } from "@/app/components/AssetDetailDialog";
 import { ComicBriefDialog } from "@/app/components/ComicBriefDialog";
-import { apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem } from "@/app/lib/api-client";
+import { apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
 
 type AssetFilter = "all" | "character" | "scene" | "prop" | "reference";
 type BriefId = "story" | "world" | "style";
@@ -44,6 +44,7 @@ export default function ComicAssetsPage() {
   const filter = filterState.query === requestedFilter ? filterState.value : initialFilter;
   const [assets, setAssets] = useState<ComicAssetListItem[]>([]);
   const [comic, setComic] = useState<ComicListItem | null>(null);
+  const [visualStyle, setVisualStyle] = useState<ComicVisualStyle>({ images: [] });
   const [editingBrief, setEditingBrief] = useState<BriefId | null>(null);
   const [briefReturnFocus, setBriefReturnFocus] = useState<HTMLButtonElement | null>(null);
   const selectedId = query.get("asset");
@@ -57,8 +58,8 @@ export default function ComicAssetsPage() {
 
   useEffect(() => {
     let canceled = false;
-    void Promise.all([apiGetComic(comicId), apiListComicAssets(comicId)])
-      .then(([nextComic, items]) => { if (!canceled) { setComic(nextComic); setAssets(items); setError(""); } })
+    void Promise.all([apiGetComic(comicId), apiListComicAssets(comicId), apiGetComicVisualStyle(comicId)])
+      .then(([nextComic, items, nextVisualStyle]) => { if (!canceled) { setComic(nextComic); setAssets(items); setVisualStyle(nextVisualStyle); setError(""); } })
       .catch((reason) => { if (!canceled) setError(reason instanceof Error ? reason.message : "资产暂时无法读取。"); })
       .finally(() => { if (!canceled) setLoading(false); });
     return () => { canceled = true; };
@@ -120,9 +121,9 @@ export default function ComicAssetsPage() {
   };
 
   const briefs = comic ? [
+    { id: "style" as const, icon: "ai" as const, eyebrow: "VISUAL STYLE", title: "视觉风格", description: "统一管理线条、色彩、光影、构图规则和参考图片。", value: comic.styleSummary, placeholder: "描述线条、色彩、媒介质感、镜头语言和希望避免的风格。", maxLength: 4000 },
     { id: "story" as const, icon: "storyboard" as const, eyebrow: "STORY CORE", title: "故事核心", description: "这部漫画最重要的故事承诺与核心冲突。", value: comic.summary, placeholder: "用一两段话说明主角、目标、冲突与故事吸引力。", maxLength: 2000, required: true },
     { id: "world" as const, icon: "context" as const, eyebrow: "WORLD", title: "世界设定", description: "跨章节保持一致的时代背景、规则与长期冲突。", value: comic.worldSummary, placeholder: "补充世界规则、时代背景、地域、组织或超自然机制。", maxLength: 4000 },
-    { id: "style" as const, icon: "ai" as const, eyebrow: "VISUAL STYLE", title: "视觉风格", description: "统一线条、色彩、光影、构图与画面气质。", value: comic.styleSummary, placeholder: "描述线条、色彩、媒介质感、镜头语言和希望避免的风格。", maxLength: 4000 },
   ] : [];
   const activeBrief = briefs.find((brief) => brief.id === editingBrief);
 
@@ -138,6 +139,23 @@ export default function ComicAssetsPage() {
     setComic((current) => current ? { ...current, summary: updated.summary, worldSummary: updated.worldSummary, styleSummary: updated.styleSummary } : current);
     closeBrief();
     setNotice(`已更新「${activeBrief.title}」`);
+  };
+
+  const uploadVisualStyleReference = async (file: File) => {
+    setVisualStyle(await apiUploadComicVisualStyleImage(comicId, file));
+    setNotice("视觉风格参考图已上传");
+  };
+
+  const renameVisualStyleReference = async (imageId: string, label: string) => {
+    if (!visualStyle.assetId) throw new Error("视觉风格图片不存在。");
+    const detail = await apiRenameAssetImage(visualStyle.assetId, imageId, label);
+    setVisualStyle({ assetId: detail.root.id, images: detail.root.images });
+  };
+
+  const deleteVisualStyleReference = async (imageId: string) => {
+    if (!visualStyle.assetId) throw new Error("视觉风格图片不存在。");
+    const detail = await apiDeleteAssetImage(visualStyle.assetId, imageId);
+    setVisualStyle({ assetId: detail.root.id, images: detail.root.images });
   };
 
   const saveAssetEntry = async (entryId: string, patch: { name?: string; description?: string }) => {
@@ -205,7 +223,7 @@ export default function ComicAssetsPage() {
       </div>
     </section>
     {selectedId ? <AssetDetailDialog key={selectedId} detail={currentDetailResult?.detail ?? null} loading={detailLoading} error={currentDetailResult?.error ?? ""} onClose={closeAssetDetail} onRetry={() => setDetailRequestKey((key) => key + 1)} onSaveEntry={saveAssetEntry} onUploadImage={uploadAssetImage} onSetPrimaryImage={setPrimaryImage} onRenameImage={renameImage} onDeleteImage={deleteImage} returnFocus={detailReturnFocus} /> : null}
-    {activeBrief ? <ComicBriefDialog title={activeBrief.title} eyebrow={activeBrief.eyebrow} description={activeBrief.description} value={activeBrief.value} placeholder={activeBrief.placeholder} maxLength={activeBrief.maxLength} required={activeBrief.required} onSave={saveBrief} onClose={closeBrief} /> : null}
+    {activeBrief ? <ComicBriefDialog title={activeBrief.title} eyebrow={activeBrief.eyebrow} description={activeBrief.description} value={activeBrief.value} placeholder={activeBrief.placeholder} maxLength={activeBrief.maxLength} required={activeBrief.required} referenceImages={activeBrief.id === "style" ? visualStyle.images : undefined} onUploadReference={activeBrief.id === "style" ? uploadVisualStyleReference : undefined} onRenameReference={activeBrief.id === "style" ? renameVisualStyleReference : undefined} onDeleteReference={activeBrief.id === "style" ? deleteVisualStyleReference : undefined} onSave={saveBrief} onClose={closeBrief} /> : null}
     {error || notice ? <div className="asset-studio-toast" role="status">{error || notice}</div> : null}
   </main>;
 }

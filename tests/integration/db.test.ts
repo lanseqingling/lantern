@@ -13,7 +13,7 @@ import {
 } from "@prisma/client";
 import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
 import { prisma } from "../../packages/server/src/db";
-import { deleteAssetImage, getAssetFamilyDetail, listComicAssetCards, renameAssetImage, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
+import { deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
 import { duplicateComic } from "../../packages/server/src/comic-service";
 import { applyPageVariant, commitChangeSet, deletePageVariant, revertCandidateApplication, saveCandidateAsPageVariant } from "../../packages/server/src/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
@@ -38,6 +38,9 @@ test("database candidate apply and revert preserve version heads atomically", as
     assetVariant: `it-asset-variant-${suffix}`,
     assetVariantV1: `it-asset-variant-v1-${suffix}`,
     assetVariantImage: `it-asset-variant-image-${suffix}`,
+    visualStyleAsset: `it-visual-style-${suffix}`,
+    visualStyleV1: `it-visual-style-v1-${suffix}`,
+    visualStyleImage: `it-visual-style-image-${suffix}`,
     task: `it-task-${suffix}`,
     candidate: `it-candidate-${suffix}`,
     sibling: `it-sibling-${suffix}`,
@@ -91,10 +94,23 @@ test("database candidate apply and revert preserve version heads atomically", as
       versions: { create: { id: ids.assetVariantV1, version: 1, source: "integration_test", objectKey: `integration/${ids.assetVariantV1}` } },
     } });
     await prisma.assetImage.create({ data: { id: ids.assetVariantImage, assetId: ids.assetVariant, assetVersionId: ids.assetVariantV1, label: "主图", sortIndex: 0 } });
+    await prisma.asset.create({ data: {
+      id: ids.visualStyleAsset,
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      kind: AssetKind.STYLE,
+      name: "视觉风格",
+      description: "克制的蓝绿色水彩与电影感夜景。",
+      versions: { create: { id: ids.visualStyleV1, version: 1, source: "integration_test", objectKey: `integration/${ids.visualStyleV1}` } },
+    } });
+    await prisma.assetImage.create({ data: { id: ids.visualStyleImage, assetId: ids.visualStyleAsset, assetVersionId: ids.visualStyleV1, label: "雨夜色彩参考", sortIndex: 0 } });
 
     const assetCards = await listComicAssetCards(ids.user, ids.comic);
     assert.deepEqual(assetCards.map((asset) => asset.id), [ids.asset]);
     assert.equal(assetCards[0]?.variantCount, 1);
+    const visualStyle = await getComicVisualStyle(ids.user, ids.comic);
+    assert.equal(visualStyle.assetId, ids.visualStyleAsset);
+    assert.deepEqual(visualStyle.images.map((image) => image.versionId), [ids.visualStyleV1]);
     const assetDetail = await getAssetFamilyDetail(ids.user, ids.assetVariant);
     assert.equal(assetDetail.root.id, ids.asset);
     assert.deepEqual(assetDetail.variants.map((variant) => variant.id), [ids.assetVariant]);
@@ -144,6 +160,9 @@ test("database candidate apply and revert preserve version heads atomically", as
     });
     assert.equal(context.explicitReferences[0].versionId, ids.assetV1);
     assert.deepEqual(context.assets.find((asset) => asset.id === ids.asset)?.images.map((image) => image.versionId), [ids.assetV2, ids.assetV1]);
+    const styleContext = context.assets.find((asset) => asset.id === ids.visualStyleAsset);
+    assert.equal(styleContext?.description, "克制的蓝绿色水彩与电影感夜景。");
+    assert.deepEqual(styleContext?.images.map((image) => image.versionId), [ids.visualStyleV1]);
     assert.equal(context.comic.worldSummary, "雨夜城市会通过末班车留下失踪者线索。");
     assert.equal(context.comic.styleSummary, "克制的蓝绿色水彩与电影感夜景。");
     assert.deepEqual(context.comic.settings, [{ id: ids.comicSetting, title: "禁忌规则", content: "午夜后不得直呼失踪者姓名。" }]);

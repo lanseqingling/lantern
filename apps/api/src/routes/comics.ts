@@ -6,7 +6,7 @@ import { createChapterWorkspace, duplicateComic } from "../../../../packages/ser
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
 import { getObject } from "../../../../packages/server/src/object-storage";
-import { listComicAssetCards } from "../../../../packages/server/src/asset-library-service";
+import { appendComicVisualStyleImage, getComicVisualStyle, listComicAssetCards } from "../../../../packages/server/src/asset-library-service";
 import { currentUser, ok } from "../http";
 
 const comicCreateSchema = z.object({
@@ -106,6 +106,18 @@ export function registerComicRoutes(app: FastifyInstance) {
   app.get<{ Params: { comicId: string } }>("/v1/comics/:comicId/assets", async (request) => {
     const user = await currentUser(request);
     return ok(request, await listComicAssetCards(user.id, request.params.comicId));
+  });
+
+  app.get<{ Params: { comicId: string } }>("/v1/comics/:comicId/visual-style", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await getComicVisualStyle(user.id, request.params.comicId));
+  });
+
+  app.post<{ Params: { comicId: string } }>("/v1/comics/:comicId/visual-style/images", async (request) => {
+    const user = await currentUser(request);
+    await getComicVisualStyle(user.id, request.params.comicId);
+    const uploaded = await readUploadedImage(request, `visual-style/${request.params.comicId}`);
+    return ok(request, await appendComicVisualStyleImage(user.id, request.params.comicId, uploaded));
   });
 
   app.post("/v1/comics", async (request) => {

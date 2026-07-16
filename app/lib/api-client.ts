@@ -95,6 +95,11 @@ export type ComicAssetDetail = {
   variants: ComicAssetDetailEntry[];
 };
 
+export type ComicVisualStyle = {
+  assetId?: string;
+  images: ComicAssetImage[];
+};
+
 function withAbsoluteComicUrls(comic: ComicListItem) {
   return {
     ...comic,
@@ -121,6 +126,21 @@ export async function apiListComicAssets(comicId: string) {
 
 export async function apiGetAssetDetail(assetId: string) {
   return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/assets/${encodeURIComponent(assetId)}`));
+}
+
+export async function apiGetComicVisualStyle(comicId: string) {
+  const style = await api<ComicVisualStyle>(`/v1/comics/${encodeURIComponent(comicId)}/visual-style`);
+  return { ...style, images: style.images.map((image) => ({ ...image, contentUrl: absoluteAssetUrl(image.contentUrl) })) };
+}
+
+export async function apiUploadComicVisualStyleImage(comicId: string, file: File) {
+  validateUploadFile(file);
+  const form = new FormData();
+  form.set("file", file);
+  const response = await fetch(`${uploadApiBase()}/v1/comics/${encodeURIComponent(comicId)}/visual-style/images`, { method: "POST", body: form, credentials: "include" });
+  const body = await readApiResponse<ComicVisualStyle>(response, "视觉风格参考图上传失败");
+  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "视觉风格参考图上传失败");
+  return { ...body.data, images: body.data.images.map((image) => ({ ...image, contentUrl: absoluteAssetUrl(image.contentUrl) })) };
 }
 
 function withAbsoluteAssetDetail(detail: ComicAssetDetail) {

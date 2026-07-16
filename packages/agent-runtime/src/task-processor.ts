@@ -12,7 +12,6 @@ import { normalizeStoryboardBeats, validateComicDocument, type ArtElement, type 
 import { compileChapterLayoutPlan, type ChapterLayoutPlan } from "../../layout-engine/src";
 import { prisma } from "../../server/src/db";
 import { AppError } from "../../server/src/errors";
-import { getConfig } from "../../server/src/config";
 import { getObject, putImage } from "../../server/src/object-storage";
 import { exportChapter, type ExportKind } from "../../server/src/export-renderer";
 import { DeepSeekProvider } from "./providers/deepseek";
@@ -252,6 +251,8 @@ async function processFrameImage(task: Awaited<ReturnType<typeof loadTask>>) {
 
   const prompt = [
     context.comic.styleSummary,
+    context.comic.worldSummary,
+    ...context.comic.settings.map((setting) => `${setting.title}：${setting.content}`),
     "单格漫画画面，不要绘制对话气泡和文字。",
     `关联分镜条目：${JSON.stringify(context.currentStoryboardBeat ?? context.storyboardBeats.find((storyboardBeat) => storyboardBeat.id === primaryBeat?.storyboardBeatId) ?? {})}`,
     `用户要求：${taskInstruction(task)}`,
@@ -266,30 +267,33 @@ async function processFrameImage(task: Awaited<ReturnType<typeof loadTask>>) {
     size: "1024*1024",
   });
   const stored = await putImage(result.bytes, `generated/${task.projectId}`);
-  const asset = await prisma.asset.create({
-    data: {
-      ownerUserId: task.ownerUserId,
-      projectId: task.projectId,
-      kind: AssetKind.GENERATED_IMAGE,
-      name: `生成图 · ${selection.label ?? existingImage?.name ?? frame.name ?? "当前格"}`,
-      description: taskInstruction(task).slice(0, 300),
-      attributes: { provider: "qwen", model: getConfig().IMAGE_MODEL_NAME },
-      archivedAt: new Date(),
-      versions: {
-        create: {
-          version: 1,
-          objectKey: stored.objectKey,
-          contentType: stored.contentType,
-          byteSize: stored.byteSize,
-          width: stored.width ?? 1024,
-          height: stored.height ?? 1024,
-          checksum: stored.checksum,
-          source: task.type === TaskType.FRAME_IMAGE_REFINE ? "ai_refine" : "ai_generate",
-          sourceTaskId: task.id,
+  const asset = await prisma.$transaction(async (tx) => {
+    const created = await tx.asset.create({
+      data: {
+        ownerUserId: task.ownerUserId,
+        projectId: task.projectId,
+        kind: AssetKind.GENERATED_IMAGE,
+        name: `生成图 · ${selection.label ?? existingImage?.name ?? frame.name ?? "当前格"}`,
+        description: taskInstruction(task).slice(0, 300),
+        archivedAt: new Date(),
+        versions: {
+          create: {
+            version: 1,
+            objectKey: stored.objectKey,
+            contentType: stored.contentType,
+            byteSize: stored.byteSize,
+            width: stored.width ?? 1024,
+            height: stored.height ?? 1024,
+            checksum: stored.checksum,
+            source: task.type === TaskType.FRAME_IMAGE_REFINE ? "ai_refine" : "ai_generate",
+            sourceTaskId: task.id,
+          },
         },
       },
-    },
-    include: { versions: true },
+      include: { versions: true },
+    });
+    await tx.assetImage.create({ data: { assetId: created.id, assetVersionId: created.versions[0].id, label: "主图", sortIndex: 0 } });
+    return created;
   });
   const version = asset.versions[0];
   const target = task.target as { canvasX?: number; canvasY?: number };
@@ -345,7 +349,7 @@ async function processDialogue(task: Awaited<ReturnType<typeof loadTask>>) {
     schema: dialogueOutputSchema,
     maxTokens: 1600,
     system: "你是漫画对白编辑。对白必须简短、符合角色语气和阅读顺序；只改对白，不触发图片重生成。",
-    user: JSON.stringify({ instruction: taskInstruction(task), storyboardBeats: context.storyboardBeats, recentConversation: context.recentConversation }),
+    user: JSON.stringify({ instruction: taskInstruction(task), comic: context.comic, storyboardBeats: context.storyboardBeats, recentConversation: context.recentConversation }),
   });
   const known = new Set(context.storyboardBeats.map((storyboardBeat) => storyboardBeat.id));
   const acceptedLines = output.lines.filter((line) => known.has(line.storyboardBeatId));
@@ -382,28 +386,32 @@ async function processAssetParse(task: Awaited<ReturnType<typeof loadTask>>) {
     schema: assetDraftSchema,
     maxTokens: 1200,
     system: `你是漫画角色与场景资产整理助手。根据用户已经给出的信息直接形成可编辑资产草案，不追问，也不要虚构上传图中不可见的信息。
-只输出这一种 JSON：{"kind":"character","name":"资产名称","description":"一段完整视觉描述","attributes":{"identity":"稳定身份与外貌","outfit":"服装与时期","personality":"性格与神态","ageStage":"年龄阶段"}}。
-kind 只能是 character、scene、style、prop 之一；attributes 的每个值必须是字符串。参考图只能由用户手动上传或明确加入，绝不能在这里创建。角色使用 character 和 identity/outfit/personality/ageStage；场景使用 scene 和 spatialLayout/lighting/time/mood。不要增加外层包装。`,
-    user: JSON.stringify({ instruction: taskInstruction(task), existingAssets: context.assets, selection: context.selection }),
+只输出这一种 JSON：{"kind":"character","name":"资产名称","description":"一段完整、可直接用于后续创作的视觉描述"}。
+kind 只能是 character、scene、style、prop 之一。description 必须完整包含后续生成需要保持一致的身份、外观、服装、状态、空间、光线或风格信息；参考图只能由用户手动上传或明确加入，绝不能在这里创建。不要增加外层包装。`,
+    user: JSON.stringify({ instruction: taskInstruction(task), comic: context.comic, existingAssets: context.assets, selection: context.selection }),
   });
   const visualPrompt = draft.kind === "character"
-    ? `漫画角色设定参考图，单人全身与半身结合，干净中性背景，不要文字。角色：${draft.name}。${draft.description}。特征：${JSON.stringify(draft.attributes)}`
+    ? `漫画角色设定参考图，单人全身与半身结合，干净中性背景，不要文字。角色：${draft.name}。${draft.description}`
     : draft.kind === "scene"
-      ? `漫画场景设定参考图，无人物，清楚表现空间关系和主要光线，不要文字。场景：${draft.name}。${draft.description}。特征：${JSON.stringify(draft.attributes)}`
+      ? `漫画场景设定参考图，无人物，清楚表现空间关系和主要光线，不要文字。场景：${draft.name}。${draft.description}`
       : `漫画创作参考图，不要文字。${draft.name}。${draft.description}`;
   const generated = await new QwenImageProvider().generate({ prompt: visualPrompt, referenceUrls: [], size: "1024*1024" });
   const stored = await putImage(generated.bytes, `asset-candidates/${task.projectId}`);
-  const stagingAsset = await prisma.asset.create({
-    data: {
-      ownerUserId: task.ownerUserId,
-      projectId: task.projectId,
-      kind: AssetKind.GENERATED_IMAGE,
-      name: `${draft.name} · 未确认参考图`,
-      description: draft.description,
-      archivedAt: new Date(),
-      versions: { create: { version: 1, objectKey: stored.objectKey, contentType: stored.contentType, byteSize: stored.byteSize, width: stored.width, height: stored.height, checksum: stored.checksum, source: "asset_candidate", sourceTaskId: task.id } },
-    },
-    include: { versions: true },
+  const stagingAsset = await prisma.$transaction(async (tx) => {
+    const created = await tx.asset.create({
+      data: {
+        ownerUserId: task.ownerUserId,
+        projectId: task.projectId,
+        kind: AssetKind.GENERATED_IMAGE,
+        name: `${draft.name} · 未确认参考图`,
+        description: draft.description,
+        archivedAt: new Date(),
+        versions: { create: { version: 1, objectKey: stored.objectKey, contentType: stored.contentType, byteSize: stored.byteSize, width: stored.width, height: stored.height, checksum: stored.checksum, source: "asset_candidate", sourceTaskId: task.id } },
+      },
+      include: { versions: true },
+    });
+    await tx.assetImage.create({ data: { assetId: created.id, assetVersionId: created.versions[0].id, label: "主图", sortIndex: 0 } });
+    return created;
   });
   const stagingVersion = stagingAsset.versions[0];
   return persistCandidate({

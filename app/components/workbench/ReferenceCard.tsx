@@ -30,6 +30,7 @@ export function ReferenceCard({
   assetSaved,
   onDelete,
   onLayer,
+  onCycleImage,
 }: {
   reference: ReferencePlacement;
   selected: boolean;
@@ -46,6 +47,7 @@ export function ReferenceCard({
   assetSaved: boolean;
   onDelete: () => void;
   onLayer: (action: "up" | "down" | "top" | "bottom") => void;
+  onCycleImage: () => void;
 }) {
   const zoom = reference.zoom ?? 1;
   const isUploadedReference = reference.kind === "reference_image" || reference.localAssetSource === "upload";
@@ -231,6 +233,7 @@ export function ReferenceCard({
     >
       <div className={`reference-image ${reference.kind}`}>
         <img src={reference.imageSrc} alt={`${reference.name}参考图`} draggable={false} loading="lazy" decoding="async" />
+        {(reference.images?.length ?? 0) > 1 ? <button type="button" className="reference-image-cycle" aria-label={`切换${reference.name}的资产图片`} title="切换资产图片" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onCycleImage(); }}><Icon name="replace" /></button> : null}
         <div className="reference-body">
           <em aria-label={kindName} title={kindName}>{kindGlyph}</em>
           <strong>{reference.name}</strong>

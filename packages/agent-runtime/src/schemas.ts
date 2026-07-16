@@ -40,6 +40,11 @@ export const agentContextSnapshotSchema = z.object({
     format: z.enum(["page", "vertical", "four_panel"]),
     readingDirection: z.string().min(1),
     styleSummary: z.string(),
+    settings: z.array(z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      content: z.string(),
+    })).max(24).default([]),
   }),
   chapter: z.object({ id: z.string().min(1), title: z.string().min(1), summary: z.string() }),
   projectId: z.string().min(1),
@@ -63,8 +68,8 @@ export const agentContextSnapshotSchema = z.object({
     kind: z.string().min(1),
     name: z.string().min(1),
     description: z.string(),
-    attributes: z.unknown(),
     versionId: z.string().min(1).optional(),
+    images: z.array(z.object({ versionId: z.string().min(1), isPrimary: z.boolean() })).max(12).default([]),
   })).max(24),
   explicitReferences: z.array(workspaceRefSchema),
   /** Text content resolved from explicitly referenced speech balloons. */
@@ -151,109 +156,10 @@ export const dialogueOutputSchema = z.object({
 // flow, never through an Agent asset-generation task.
 const assetKinds = ["character", "scene", "style", "prop"] as const;
 
-function normalizeAssetKind(value: unknown) {
-  if (typeof value !== "string") return value;
-  const aliases: Record<string, (typeof assetKinds)[number]> = {
-    "角色": "character",
-    "人物": "character",
-    "character_asset": "character",
-    "场景": "scene",
-    "环境": "scene",
-    "scene_asset": "scene",
-    "画风": "style",
-    "风格": "style",
-    "道具": "prop",
-  };
-  return aliases[value.trim().toLowerCase()] ?? value.trim().toLowerCase();
-}
-
-function stringifyAttribute(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map(stringifyAttribute).filter(Boolean).join("、");
-  if (value && typeof value === "object") {
-    return Object.entries(value as Record<string, unknown>)
-      .map(([key, entry]) => `${key}：${stringifyAttribute(entry)}`)
-      .filter((entry) => !entry.endsWith("："))
-      .join("；");
-  }
-  return "";
-}
-
-function normalizeAttributeKey(key: string) {
-  const aliases: Record<string, string> = {
-    "外貌": "identity",
-    "身份特征": "identity",
-    "稳定身份特征": "identity",
-    "appearance": "identity",
-    "traits": "identity",
-    "features": "identity",
-    "服装": "outfit",
-    "服装与时期": "outfit",
-    "clothing": "outfit",
-    "性格": "personality",
-    "性格与神态": "personality",
-    "年龄": "ageStage",
-    "年龄阶段": "ageStage",
-    "age": "ageStage",
-    "空间": "spatialLayout",
-    "空间关系": "spatialLayout",
-    "page_layout": "spatialLayout",
-    "光线": "lighting",
-    "时间": "time",
-    "时间状态": "time",
-    "氛围": "mood",
-    "atmosphere": "mood",
-    "linework": "linework",
-    "线条": "linework",
-    "tones": "tones",
-    "网点": "tones",
-    "状态": "state",
-    "叙事作用": "narrativeRole",
-    "用途": "narrativeRole",
-  };
-  return aliases[key.trim()] ?? key.trim();
-}
-
-function normalizeAssetDraft(value: unknown) {
-  if (!value || typeof value !== "object") return value;
-  const root = value as Record<string, unknown>;
-  const wrapped = root.asset ?? root.draft ?? root.assetDraft;
-  const draft = wrapped && typeof wrapped === "object" ? wrapped as Record<string, unknown> : root;
-  const basics = draft.basicInfo && typeof draft.basicInfo === "object"
-    ? draft.basicInfo as Record<string, unknown>
-    : {};
-  const attributes = draft.attributes ?? draft.details ?? draft.appearance ?? {};
-  return {
-    kind: normalizeAssetKind(draft.kind ?? draft.type ?? draft.assetType ?? root.kind ?? root.type),
-    name: draft.name ?? draft.assetName ?? basics.name ?? draft["名称"],
-    description: draft.description ?? draft.summary ?? basics.description ?? draft["描述"],
-    attributes,
-  };
-}
-
-const assetAttributeKeys = {
-  character: ["identity", "outfit", "personality", "ageStage"],
-  scene: ["spatialLayout", "lighting", "time", "mood"],
-  style: ["identity", "linework", "tones", "mood"],
-  prop: ["identity", "state", "narrativeRole"],
-} as const satisfies Record<(typeof assetKinds)[number], readonly string[]>;
-
-export const assetDraftSchema = z.preprocess(normalizeAssetDraft, z.object({
-  kind: z.preprocess(normalizeAssetKind, z.enum(assetKinds)),
+export const assetDraftSchema = z.strictObject({
+  kind: z.enum(assetKinds),
   name: z.string().trim().min(1),
-  description: z.string().trim().min(1),
-  attributes: z.record(z.string(), z.unknown()).default({}).transform((attributes) => Object.fromEntries(
-    Object.entries(attributes)
-      .map(([key, value]) => [normalizeAttributeKey(key), stringifyAttribute(value)] as const)
-      .filter(([, value]) => value.length > 0),
-  )),
-})).transform((draft) => {
-  const allowed = new Set<string>(assetAttributeKeys[draft.kind]);
-  return {
-    ...draft,
-    attributes: Object.fromEntries(Object.entries(draft.attributes).filter(([key]) => allowed.has(key))),
-  };
+  description: z.string().trim().min(1).max(4000),
 });
 
 const frameImageCandidatePayloadSchema = z.object({
@@ -282,7 +188,7 @@ export const candidatePayloadEnvelopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("page_layout"), payload: z.object({ format: z.enum(["page", "vertical", "four_panel"]), readingOrder: z.array(z.string().min(1)) }) }),
   z.object({ kind: z.literal("frame_image"), payload: frameImageCandidatePayloadSchema }),
   z.object({ kind: z.literal("frame_image_patch"), payload: frameImageCandidatePayloadSchema }),
-  z.object({ kind: z.literal("asset"), payload: assetDraftSchema.and(z.object({ sourceAssetVersionIds: z.array(z.string().min(1)).min(1) })) }),
+  z.object({ kind: z.literal("asset"), payload: assetDraftSchema.extend({ sourceAssetVersionIds: z.array(z.string().min(1)).min(1) }) }),
   z.object({ kind: z.literal("dialogue"), payload: dialogueCandidatePayloadSchema }),
 ]);
 

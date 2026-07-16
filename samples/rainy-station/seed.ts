@@ -88,6 +88,8 @@ async function clearPreviousSample() {
       prisma.message.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.agentConversation.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.canvasReferencePlacement.deleteMany({ where: { projectId: { in: projectIds } } }),
+      prisma.assetImage.deleteMany({ where: { asset: { projectId: { in: projectIds } } } }),
+      prisma.asset.updateMany({ where: { projectId: { in: projectIds } }, data: { variantOfAssetId: null } }),
       prisma.assetVersion.deleteMany({ where: { asset: { projectId: { in: projectIds } } } }),
       prisma.asset.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: { in: projectIds } } } }),
@@ -98,6 +100,7 @@ async function clearPreviousSample() {
     ]);
   }
   await prisma.chapter.deleteMany({ where: { comicId: ids.comic } });
+  await prisma.comicSetting.deleteMany({ where: { comicId: ids.comic } });
   await prisma.comic.deleteMany({ where: { id: ids.comic } });
 }
 
@@ -248,16 +251,17 @@ export async function seedRainyStation() {
     await prisma.storyboardBeat.create({ data: { id: storyboardBeat.id, ownerUserId: owner.id, projectId: ids.project, versions: { create: { id: storyboardBeat.versionId, version: 1, title: storyboardBeat.title, description: storyboardBeat.description, sourceTaskId: ids.storyboardTask } } } });
   }
 
-  const createAsset = async (asset: { id: string; versionId: string; kind: AssetKind; name: string; description: string; attributes: Prisma.InputJsonValue; fileName: MockImageFile; sourceTaskId?: string }) => {
+  const createAsset = async (asset: { id: string; versionId: string; kind: AssetKind; name: string; description: string; fileName: MockImageFile; sourceTaskId?: string }) => {
     const image = stored.get(asset.fileName)!;
-    await prisma.asset.create({ data: { id: asset.id, ownerUserId: owner.id, projectId: ids.project, kind: asset.kind, name: asset.name, description: asset.description, attributes: asset.attributes, versions: { create: { id: asset.versionId, version: 1, objectKey: image.objectKey, contentType: image.contentType, byteSize: image.byteSize, width: image.width, height: image.height, checksum: image.checksum, source: "codex-imagegen", sourceTaskId: asset.sourceTaskId } } } });
+    await prisma.asset.create({ data: { id: asset.id, ownerUserId: owner.id, projectId: ids.project, kind: asset.kind, name: asset.name, description: asset.description, versions: { create: { id: asset.versionId, version: 1, objectKey: image.objectKey, contentType: image.contentType, byteSize: image.byteSize, width: image.width, height: image.height, checksum: image.checksum, source: "codex-imagegen", sourceTaskId: asset.sourceTaskId } } } });
+    await prisma.assetImage.create({ data: { assetId: asset.id, assetVersionId: asset.versionId, label: "主图", sortIndex: 0 } });
   };
-  await createAsset({ id: "rain-asset-lincheng", versionId: "rain-asset-lincheng-v1", kind: AssetKind.CHARACTER, name: "林澄", description: "22 岁，肩长湿黑发，浅色风衣与帆布肩包；疲惫但观察敏锐。", attributes: { identity: "肩长直黑发、浅色长风衣、深色针织上衣、帆布肩包", age: "22", temperament: "冷静、敏锐、克制", currentState: "深夜下班后，衣发被雨打湿" }, fileName: "character-lincheng.png", sourceTaskId: ids.imageTask });
-  await createAsset({ id: "rain-asset-bus-stop", versionId: "rain-asset-bus-stop-v1", kind: AssetKind.SCENE, name: "梧桐路末班车站", description: "窄雨棚、玻璃侧板、长椅与弯入远处的湿亮道路。", attributes: { spatialLayout: "候车亭在道路左侧，站牌靠近路缘，弯道从右侧远处进入", time: "23:47", weather: "持续大雨", mood: "空旷、轻微异常" }, fileName: "scene-rain-bus-stop.png", sourceTaskId: ids.imageTask });
-  await createAsset({ id: "rain-asset-ticket", versionId: "rain-asset-ticket-v1", kind: AssetKind.PROP, name: "父亲的旧车票", description: "被雨浸湿的旧式纸车票，背面留有父亲的警告。", attributes: { state: "湿润、边角磨损、墨迹正在晕开", narrativeRole: "警告林澄不要登车" }, fileName: "prop-ticket.png", sourceTaskId: ids.imageTask });
+  await createAsset({ id: "rain-asset-lincheng", versionId: "rain-asset-lincheng-v1", kind: AssetKind.CHARACTER, name: "林澄", description: "22 岁，肩长直黑发，穿浅色长风衣与深色针织上衣，随身背帆布肩包。她冷静、敏锐而克制，深夜下班后衣发被雨打湿，疲惫但仍保持观察。", fileName: "character-lincheng.png", sourceTaskId: ids.imageTask });
+  await createAsset({ id: "rain-asset-bus-stop", versionId: "rain-asset-bus-stop-v1", kind: AssetKind.SCENE, name: "梧桐路末班车站", description: "23:47 的持续大雨中，候车亭位于道路左侧，窄雨棚、玻璃侧板、长椅与靠近路缘的站牌组成主体；湿亮道路从右侧远处弯入，空间空旷并带有轻微异常感。", fileName: "scene-rain-bus-stop.png", sourceTaskId: ids.imageTask });
+  await createAsset({ id: "rain-asset-ticket", versionId: "rain-asset-ticket-v1", kind: AssetKind.PROP, name: "父亲的旧车票", description: "被雨浸湿的旧式纸车票，边角磨损，墨迹正在晕开；背面留有父亲写给林澄的登车警告。", fileName: "prop-ticket.png", sourceTaskId: ids.imageTask });
   for (const [index] of storyboardBeats.entries()) {
     const suffix = String(index + 1).padStart(2, "0");
-    await createAsset({ id: `rain-asset-frame-${suffix}`, versionId: `rain-asset-frame-${suffix}-v1`, kind: AssetKind.GENERATED_IMAGE, name: `雨夜车站 · 格内成稿图 ${suffix}`, description: storyboardBeats[index].title, attributes: { page: index < 4 ? 1 : 2, readingOrder: index + 1, style: "日式轻线条黑白漫画" }, fileName: `frame-${suffix}.png` as MockImageFile, sourceTaskId: ids.imageTask });
+    await createAsset({ id: `rain-asset-frame-${suffix}`, versionId: `rain-asset-frame-${suffix}-v1`, kind: AssetKind.GENERATED_IMAGE, name: `雨夜车站 · 格内成稿图 ${suffix}`, description: storyboardBeats[index].title, fileName: `frame-${suffix}.png` as MockImageFile, sourceTaskId: ids.imageTask });
   }
   await prisma.canvasReferencePlacement.createMany({ data: [
     { id: "rain-reference-lincheng", ownerUserId: owner.id, projectId: ids.project, assetId: "rain-asset-lincheng", assetVersionId: "rain-asset-lincheng-v1", x: 250, y: 80, zoom: .86, zIndex: 12, pinned: true },

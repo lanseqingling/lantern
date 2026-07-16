@@ -1,12 +1,26 @@
 import type { FastifyInstance } from "fastify";
-import { AssetKind, AssetLibraryStatus, type Prisma } from "@prisma/client";
+import { AssetKind, AssetLibraryStatus } from "@prisma/client";
+import { z } from "zod";
 import { createUploadedAsset, readUploadedImage } from "../../../../packages/server/src/asset-service";
+import { appendAssetImage, deleteAssetImage, getAssetFamilyDetail, renameAssetImage, setPrimaryAssetImage } from "../../../../packages/server/src/asset-library-service";
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
 import { getOwnedProject } from "../../../../packages/server/src/workbench-service";
 import { currentUser, ok } from "../http";
 
+const assetUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(4000).optional(),
+}).refine((value) => value.name !== undefined || value.description !== undefined);
+
+const assetImageUpdateSchema = z.object({ label: z.string().trim().min(1).max(80) });
+
 export function registerAssetRoutes(app: FastifyInstance) {
+  app.get<{ Params: { assetId: string } }>("/v1/assets/:assetId", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await getAssetFamilyDetail(user.id, request.params.assetId));
+  });
+
   app.post<{ Params: { projectId: string }; Querystring: { place?: string } }>("/v1/projects/:projectId/assets", async (request) => {
     const user = await currentUser(request);
     await getOwnedProject(user.id, request.params.projectId);
@@ -19,15 +33,42 @@ export function registerAssetRoutes(app: FastifyInstance) {
     }));
   });
 
+  app.post<{ Params: { assetId: string } }>("/v1/assets/:assetId/images", async (request) => {
+    const user = await currentUser(request);
+    const asset = await prisma.asset.findFirst({ where: { id: request.params.assetId, ownerUserId: user.id, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY }, select: { id: true } });
+    if (!asset) throw new AppError("not_found", "资产不存在。", 404);
+    const uploaded = await readUploadedImage(request, `uploads/assets/${asset.id}`);
+    return ok(request, await appendAssetImage(user.id, asset.id, uploaded));
+  });
+
+  app.post<{ Params: { assetId: string; imageId: string } }>("/v1/assets/:assetId/images/:imageId/primary", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await setPrimaryAssetImage(user.id, request.params.assetId, request.params.imageId));
+  });
+
+  app.patch<{ Params: { assetId: string; imageId: string }; Body: { label: string } }>("/v1/assets/:assetId/images/:imageId", async (request) => {
+    const user = await currentUser(request);
+    const body = assetImageUpdateSchema.parse(request.body ?? {});
+    return ok(request, await renameAssetImage(user.id, request.params.assetId, request.params.imageId, body.label));
+  });
+
+  app.delete<{ Params: { assetId: string; imageId: string } }>("/v1/assets/:assetId/images/:imageId", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await deleteAssetImage(user.id, request.params.assetId, request.params.imageId));
+  });
+
   app.post<{ Params: { projectId: string; assetId: string }; Body: { x?: number; y?: number } }>("/v1/projects/:projectId/assets/:assetId/place", async (request) => {
     const user = await currentUser(request);
     const targetProject = await prisma.project.findFirst({ where: { id: request.params.projectId, ownerUserId: user.id }, include: { chapter: { select: { comicId: true } } } });
     if (!targetProject) throw new AppError("not_found", "创作空间不存在。", 404);
     const asset = await prisma.asset.findFirst({
       where: { id: request.params.assetId, ownerUserId: user.id, archivedAt: null, project: { chapter: { comicId: targetProject.chapter.comicId, archivedAt: null } } },
-      include: { versions: { where: { objectKey: { not: null } }, orderBy: { version: "desc" }, take: 1 } },
+      include: {
+        images: { include: { assetVersion: true }, orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }], take: 1 },
+        versions: { where: { objectKey: { not: null } }, orderBy: { version: "desc" }, take: 1 },
+      },
     });
-    const version = asset?.versions[0];
+    const version = asset?.images[0]?.assetVersion ?? asset?.versions[0];
     if (!asset || !version) throw new AppError("invalid_asset", "这个资产还没有可放到画布的确认图片。", 422);
     await prisma.canvasAssetListItem.upsert({
       where: { projectId_assetId: { projectId: targetProject.id, assetId: asset.id } },
@@ -56,16 +97,16 @@ export function registerAssetRoutes(app: FastifyInstance) {
     return ok(request, item);
   });
 
-  app.patch<{ Params: { assetId: string }; Body: { name?: string; description?: string; attributes?: Record<string, string> } }>("/v1/assets/:assetId", async (request) => {
+  app.patch<{ Params: { assetId: string }; Body: { name?: string; description?: string } }>("/v1/assets/:assetId", async (request) => {
     const user = await currentUser(request);
+    const body = assetUpdateSchema.parse(request.body ?? {});
     const asset = await prisma.asset.findFirst({ where: { id: request.params.assetId, ownerUserId: user.id, archivedAt: null } });
     if (!asset) throw new AppError("not_found", "资产不存在。", 404);
     const updated = await prisma.asset.update({
       where: { id: asset.id },
       data: {
-        ...(request.body?.name !== undefined ? { name: request.body.name.trim().slice(0, 120) || asset.name } : {}),
-        ...(request.body?.description !== undefined ? { description: request.body.description.trim().slice(0, 2000) } : {}),
-        ...(request.body?.attributes !== undefined ? { attributes: request.body.attributes as Prisma.InputJsonValue } : {}),
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.description !== undefined ? { description: body.description } : {}),
       },
     });
     return ok(request, updated);
@@ -103,7 +144,7 @@ export function registerAssetRoutes(app: FastifyInstance) {
     return ok(request, { itemId: item.id, assetId: asset.id, libraryStatus: asset.libraryStatus.toLowerCase(), kind: asset.kind.toLowerCase() });
   });
 
-  app.patch<{ Params: { placementId: string }; Body: { x?: number; y?: number; zoom?: number; zIndex?: number; collapsed?: boolean; pinned?: boolean } }>("/v1/placements/:placementId", async (request) => {
+  app.patch<{ Params: { placementId: string }; Body: { x?: number; y?: number; zoom?: number; zIndex?: number; collapsed?: boolean; pinned?: boolean; assetVersionId?: string } }>("/v1/placements/:placementId", async (request) => {
     const user = await currentUser(request);
     const placement = await prisma.canvasReferencePlacement.findFirst({ where: { id: request.params.placementId, ownerUserId: user.id } });
     if (!placement) throw new AppError("not_found", "参考卡不存在。", 404);
@@ -112,7 +153,11 @@ export function registerAssetRoutes(app: FastifyInstance) {
     if (patch.x !== undefined && !Number.isFinite(patch.x)) throw new AppError("validation", "参考图位置无效。", 400);
     if (patch.y !== undefined && !Number.isFinite(patch.y)) throw new AppError("validation", "参考图位置无效。", 400);
     if (patch.zIndex !== undefined && (!Number.isInteger(patch.zIndex) || patch.zIndex < 0 || patch.zIndex > 10000)) throw new AppError("validation", "参考图层级无效。", 400);
-    const updated = await prisma.canvasReferencePlacement.update({ where: { id: placement.id }, data: { x: patch.x, y: patch.y, zoom: patch.zoom, zIndex: patch.zIndex, collapsed: patch.collapsed, pinned: patch.pinned } });
+    if (patch.assetVersionId !== undefined) {
+      const image = await prisma.assetImage.findFirst({ where: { assetId: placement.assetId, assetVersionId: patch.assetVersionId }, select: { id: true } });
+      if (!image) throw new AppError("validation", "这张图片不属于当前资产。", 400);
+    }
+    const updated = await prisma.canvasReferencePlacement.update({ where: { id: placement.id }, data: { x: patch.x, y: patch.y, zoom: patch.zoom, zIndex: patch.zIndex, collapsed: patch.collapsed, pinned: patch.pinned, assetVersionId: patch.assetVersionId } });
     return ok(request, updated);
   });
 

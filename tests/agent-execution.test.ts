@@ -3,6 +3,7 @@ import test from "node:test";
 import Fastify from "fastify";
 import { registerAgentRoutes } from "../apps/api/src/routes/agent";
 import { installErrorHandler } from "../apps/api/src/http";
+import { assetDraftSchema } from "../packages/agent-runtime/src/schemas";
 import { assertTaskCreationAllowed, type CreateTaskInput } from "../packages/agent-runtime/src/task-service";
 
 test("the frozen Agent interaction entry rejects work before touching conversation state", async () => {
@@ -41,4 +42,18 @@ test("legacy AI task creation is rejected while deterministic export remains ava
     );
   }
   assert.doesNotThrow(() => assertTaskCreationAllowed("export"));
+});
+
+test("asset drafts use type, name and description as the complete semantic contract", () => {
+  assert.deepEqual(assetDraftSchema.parse({ kind: "character", name: "林澄", description: "肩长黑发，穿浅色风衣，神态克制。" }), {
+    kind: "character",
+    name: "林澄",
+    description: "肩长黑发，穿浅色风衣，神态克制。",
+  });
+  assert.throws(() => assetDraftSchema.parse({
+    kind: "character",
+    name: "林澄",
+    description: "角色描述",
+    attributes: { outfit: "浅色风衣" },
+  }));
 });

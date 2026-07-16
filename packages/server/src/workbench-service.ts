@@ -84,10 +84,20 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
     where: { chapterId, ownerUserId, chapter: { archivedAt: null, comic: { archivedAt: null } } },
     include: {
       chapter: { include: { comic: true } },
-      placements: { include: { asset: true, assetVersion: true }, orderBy: { createdAt: "asc" } },
+      placements: {
+        include: {
+          asset: {
+            include: {
+              images: { include: { assetVersion: true }, orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }] },
+            },
+          },
+          assetVersion: true,
+        },
+        orderBy: { createdAt: "asc" },
+      },
       canvasAssetItems: {
         where: { hiddenAt: null },
-        include: { asset: { include: { versions: { orderBy: { version: "desc" }, take: 12 } } } },
+        include: { asset: { include: { versions: { orderBy: { version: "desc" }, take: 12 }, images: { include: { assetVersion: true }, orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }] } } } },
         orderBy: [{ pinned: "desc" }, { sortIndex: "asc" }, { createdAt: "asc" }],
       },
       assets: {
@@ -168,6 +178,13 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
       imageSrc: createSignedAssetPath(placement.assetVersionId),
       assetId: placement.assetId,
       assetVersionId: placement.assetVersionId,
+      images: placement.asset.images.filter((image) => Boolean(image.assetVersion.objectKey)).map((image, index) => ({
+        id: image.id,
+        versionId: image.assetVersionId,
+        label: image.label || "图片",
+        imageSrc: createSignedAssetPath(image.assetVersionId),
+        isPrimary: index === 0,
+      })),
       libraryStatus: placement.asset.libraryStatus.toLowerCase(),
       x: placement.x,
       y: placement.y,
@@ -176,30 +193,39 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
       collapsed: placement.collapsed,
       pinned: placement.pinned,
     })),
-    assets: project.canvasAssetItems.map((item) => ({
-      id: item.asset.id,
-      kind: item.displayKind.toLowerCase(),
-      name: item.displayName,
-      description: item.asset.description,
-      attributes: item.asset.attributes,
-      canvasListItemId: item.id,
-      libraryStatus: item.asset.libraryStatus.toLowerCase(),
-      pinned: item.pinned,
-      sortIndex: item.sortIndex,
-      versions: item.asset.versions.map((version) => ({
-        id: version.id,
-        version: version.version,
-        contentUrl: version.objectKey ? createSignedAssetPath(version.id) : undefined,
-        width: version.width,
-        height: version.height,
-        createdAt: version.createdAt.toISOString(),
-      })),
-      currentVersion: item.asset.versions[0] ? {
-        id: item.asset.versions[0].id,
-        version: item.asset.versions[0].version,
-        contentUrl: item.asset.versions[0].objectKey ? createSignedAssetPath(item.asset.versions[0].id) : undefined,
-      } : undefined,
-    })),
+    assets: project.canvasAssetItems.map((item) => {
+      const currentVersion = item.asset.images[0]?.assetVersion ?? item.asset.versions[0];
+      return {
+        id: item.asset.id,
+        kind: item.displayKind.toLowerCase(),
+        name: item.displayName,
+        description: item.asset.description,
+        canvasListItemId: item.id,
+        libraryStatus: item.asset.libraryStatus.toLowerCase(),
+        pinned: item.pinned,
+        sortIndex: item.sortIndex,
+        versions: item.asset.versions.map((version) => ({
+          id: version.id,
+          version: version.version,
+          contentUrl: version.objectKey ? createSignedAssetPath(version.id) : undefined,
+          width: version.width,
+          height: version.height,
+          createdAt: version.createdAt.toISOString(),
+        })),
+        images: item.asset.images.filter((image) => Boolean(image.assetVersion.objectKey)).map((image, index) => ({
+          id: image.id,
+          versionId: image.assetVersionId,
+          label: image.label || "图片",
+          contentUrl: createSignedAssetPath(image.assetVersionId),
+          isPrimary: index === 0,
+        })),
+        currentVersion: currentVersion ? {
+          id: currentVersion.id,
+          version: currentVersion.version,
+          contentUrl: currentVersion.objectKey ? createSignedAssetPath(currentVersion.id) : undefined,
+        } : undefined,
+      };
+    }),
     conversation,
     messages: messages.map((message) => ({
       id: message.id,

@@ -13,7 +13,7 @@ export async function applyAssetCandidate(userId: string, candidateId: string, e
       await tx.candidate.update({ where: { id: candidate.id }, data: { status: CandidateStatus.STALE } });
       throw new AppError("conflict", "资产候选已过期。", 409);
     }
-    const draft = candidate.payload as { kind: string; name: string; description: string; attributes?: Record<string, string>; sourceAssetVersionIds?: string[] };
+    const draft = candidate.payload as { kind: string; name: string; description: string; sourceAssetVersionIds?: string[] };
     const kind = ({ character: AssetKind.CHARACTER, scene: AssetKind.SCENE, style: AssetKind.STYLE, prop: AssetKind.PROP } as Record<string, AssetKind>)[draft.kind] ?? AssetKind.PROP;
     const sourceVersion = draft.sourceAssetVersionIds?.[0]
       ? await tx.assetVersion.findFirst({ where: { id: draft.sourceAssetVersionIds[0], asset: { ownerUserId: userId, projectId: candidate.projectId } } })
@@ -29,7 +29,6 @@ export async function applyAssetCandidate(userId: string, candidateId: string, e
             kind,
             name: draft.name,
             description: draft.description,
-            attributes: draft.attributes ?? {},
           },
           include: { versions: true },
         })
@@ -40,11 +39,17 @@ export async function applyAssetCandidate(userId: string, candidateId: string, e
             kind,
             name: draft.name,
             description: draft.description,
-            attributes: draft.attributes ?? {},
             versions: { create: { version: 1, source: "text_candidate", sourceTaskId: candidate.taskId } },
           },
           include: { versions: true },
         });
+    if (sourceVersion?.objectKey) {
+      await tx.assetImage.upsert({
+        where: { assetVersionId: sourceVersion.id },
+        create: { assetId: asset.id, assetVersionId: sourceVersion.id, label: "主图", sortIndex: 0 },
+        update: {},
+      });
+    }
     const heads = { ...(working.assetVersionHeads as Record<string, string>), [asset.id]: asset.versions[0].id };
     const next = await tx.workingRevision.create({
       data: {

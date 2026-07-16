@@ -18,12 +18,27 @@ export async function buildAgentContext(request: ContextRequest) {
   const project = await prisma.project.findFirst({
     where: { id: request.projectId, ownerUserId: request.ownerUserId },
     include: {
-      chapter: { include: { comic: true } },
+      chapter: {
+        include: {
+          comic: {
+            include: {
+              settings: {
+                where: { ownerUserId: request.ownerUserId, archivedAt: null, contextEnabled: true },
+                orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }],
+                take: 25,
+              },
+            },
+          },
+        },
+      },
       assets: {
         where: { archivedAt: null },
         orderBy: { updatedAt: "desc" },
         take: 24,
-        include: { versions: { orderBy: { version: "desc" }, take: 1 } },
+        include: {
+          versions: { orderBy: { version: "desc" }, take: 1 },
+          images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }], take: 12 },
+        },
       },
       conversations: {
         where: {
@@ -130,6 +145,16 @@ export async function buildAgentContext(request: ContextRequest) {
       shape: matched.element.content.shape,
     }];
   });
+  const comicSettings = project.chapter.comic.settings.slice(0, 24).map((setting) => ({
+    id: setting.id,
+    title: setting.title,
+    content: setting.content.slice(0, 4000),
+  }));
+  const omittedContext = [
+    ...(storyboardBeats.length > localStoryboardBeats.length ? [{ type: "storyboard_beat", reason: `仅发送与当前任务最相关的 ${localStoryboardBeats.length} 个分镜条目` }] : []),
+    ...(project.chapter.comic.settings.length > comicSettings.length ? [{ type: "comic_setting", reason: `仅发送排序最前的 ${comicSettings.length} 张漫画设定卡` }] : []),
+    ...(project.chapter.comic.settings.some((setting) => setting.content.length > 4000) ? [{ type: "comic_setting_content", reason: "过长的漫画设定卡正文按 4000 字符截取" }] : []),
+  ];
 
   return agentContextSnapshotSchema.parse({
     task: { type: request.taskType, instruction: request.instruction, scope: request.scope },
@@ -141,6 +166,7 @@ export async function buildAgentContext(request: ContextRequest) {
       format: project.chapter.comic.format.toLowerCase(),
       readingDirection: project.chapter.comic.readingDirection,
       styleSummary: project.chapter.comic.styleSummary,
+      settings: comicSettings,
     },
     chapter: {
       id: project.chapter.id,
@@ -173,8 +199,8 @@ export async function buildAgentContext(request: ContextRequest) {
       kind: asset.kind.toLowerCase(),
       name: asset.name,
       description: asset.description,
-      attributes: asset.attributes,
-      versionId: asset.versions[0]?.id,
+      versionId: asset.images[0]?.assetVersionId ?? asset.versions[0]?.id,
+      images: asset.images.map((image, index) => ({ versionId: image.assetVersionId, isPrimary: index === 0 })),
     })),
     explicitReferences,
     explicitDialogueReferences,
@@ -182,7 +208,7 @@ export async function buildAgentContext(request: ContextRequest) {
       role: message.role.toLowerCase(),
       content: message.content,
     })),
-    omittedContext: storyboardBeats.length > localStoryboardBeats.length ? [{ type: "storyboard_beat", reason: `仅发送与当前任务最相关的 ${localStoryboardBeats.length} 个分镜条目` }] : [],
+    omittedContext,
   });
 }
 
@@ -280,7 +306,7 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
   });
   const assetsByKind = (kind: string) => modelInput.assets
     .filter((asset) => asset.kind === kind)
-    .map((asset) => ({ id: asset.id, versionId: asset.versionId, name: asset.name, description: asset.description, attributes: asset.attributes }));
+    .map((asset) => ({ id: asset.id, versionId: asset.versionId, images: asset.images, name: asset.name, description: asset.description }));
 
   return {
     debugContractVersion: "context-debug-0.4",
@@ -310,6 +336,7 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
       },
       world: {
         summary: modelInput.comic.worldSummary,
+        settings: modelInput.comic.settings,
         note: modelInput.comic.worldSummary ? "漫画级世界观背景，会与故事梗概和章节内容一起进入模型上下文。" : "尚未填写世界观背景。可在漫画设置中补充。",
       },
       assets: {
@@ -319,7 +346,7 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
         props: assetsByKind("prop"),
         otherReferences: modelInput.assets
           .filter((asset) => !["character", "scene", "style", "prop"].includes(asset.kind))
-          .map((asset) => ({ id: asset.id, versionId: asset.versionId, kind: asset.kind, name: asset.name, description: asset.description })),
+          .map((asset) => ({ id: asset.id, versionId: asset.versionId, images: asset.images, kind: asset.kind, name: asset.name, description: asset.description })),
       },
       storyboard: {
         modelStoryboardBeatWindow: modelInput.storyboardBeats,

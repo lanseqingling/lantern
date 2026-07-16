@@ -13,6 +13,8 @@ import {
 } from "@prisma/client";
 import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
 import { prisma } from "../../packages/server/src/db";
+import { deleteAssetImage, getAssetFamilyDetail, listComicAssetCards, renameAssetImage, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
+import { duplicateComic } from "../../packages/server/src/comic-service";
 import { applyPageVariant, commitChangeSet, deletePageVariant, revertCandidateApplication, saveCandidateAsPageVariant } from "../../packages/server/src/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
 import type { StoryboardBeat } from "../../packages/shared/src";
@@ -22,6 +24,7 @@ test("database candidate apply and revert preserve version heads atomically", as
   const ids = {
     user: `it-user-${suffix}`,
     comic: `it-comic-${suffix}`,
+    comicSetting: `it-comic-setting-${suffix}`,
     chapter: `it-chapter-${suffix}`,
     project: `it-project-${suffix}`,
     storyboardBeat: `it-storyboardBeat-${suffix}`,
@@ -29,6 +32,12 @@ test("database candidate apply and revert preserve version heads atomically", as
     dialogue: `it-dialogue-${suffix}`,
     asset: `it-asset-${suffix}`,
     assetV1: `it-asset-v1-${suffix}`,
+    assetImage: `it-asset-image-${suffix}`,
+    assetV2: `it-asset-v2-${suffix}`,
+    assetImage2: `it-asset-image-2-${suffix}`,
+    assetVariant: `it-asset-variant-${suffix}`,
+    assetVariantV1: `it-asset-variant-v1-${suffix}`,
+    assetVariantImage: `it-asset-variant-image-${suffix}`,
     task: `it-task-${suffix}`,
     candidate: `it-candidate-${suffix}`,
     sibling: `it-sibling-${suffix}`,
@@ -43,10 +52,12 @@ test("database candidate apply and revert preserve version heads atomically", as
   document.comicId = ids.comic;
   document.chapterId = ids.chapter;
   document.dialogues.push({ id: ids.dialogue, storyboardBeatId: ids.storyboardBeat, storyboardBeatVersionId: ids.storyboardBeatV1, content: "旧对白" });
+  let copiedComicId: string | undefined;
 
   try {
     await prisma.user.create({ data: { id: ids.user, email: `${suffix}@integration.lantern.local`, displayName: "persistent runtime Integration" } });
-    await prisma.comic.create({ data: { id: ids.comic, ownerUserId: ids.user, title: "集成测试漫画", worldSummary: "雨夜城市会通过末班车留下失踪者线索。", format: ComicFormat.PAGE } });
+    await prisma.comic.create({ data: { id: ids.comic, ownerUserId: ids.user, title: "集成测试漫画", worldSummary: "雨夜城市会通过末班车留下失踪者线索。", styleSummary: "克制的蓝绿色水彩与电影感夜景。", format: ComicFormat.PAGE } });
+    await prisma.comicSetting.create({ data: { id: ids.comicSetting, ownerUserId: ids.user, comicId: ids.comic, title: "禁忌规则", content: "午夜后不得直呼失踪者姓名。", sortIndex: 20 } });
     await prisma.chapter.create({ data: { id: ids.chapter, ownerUserId: ids.user, comicId: ids.comic, number: 1, title: "第一话" } });
     await prisma.project.create({ data: { id: ids.project, ownerUserId: ids.user, chapterId: ids.chapter } });
     await prisma.storyboardBeat.create({ data: { id: ids.storyboardBeat, ownerUserId: ids.user, projectId: ids.project, currentVersionNumber: 1 } });
@@ -64,8 +75,56 @@ test("database candidate apply and revert preserve version heads atomically", as
       kind: AssetKind.CHARACTER,
       name: "测试角色",
       description: "必须在布局和对白修改后继续保留",
-      versions: { create: { id: ids.assetV1, version: 1, source: "integration_test" } },
+      versions: { create: { id: ids.assetV1, version: 1, source: "integration_test", objectKey: `integration/${ids.assetV1}` } },
     } });
+    await prisma.assetImage.create({ data: { id: ids.assetImage, assetId: ids.asset, assetVersionId: ids.assetV1, label: "主图", sortIndex: 0 } });
+    await prisma.asset.create({ data: {
+      id: ids.assetVariant,
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      kind: AssetKind.CHARACTER,
+      name: "测试角色·回忆时期",
+      description: "同一角色的回忆形态",
+      variantOfAssetId: ids.asset,
+      variantLabel: "回忆时期",
+      variantSortIndex: 10,
+      versions: { create: { id: ids.assetVariantV1, version: 1, source: "integration_test", objectKey: `integration/${ids.assetVariantV1}` } },
+    } });
+    await prisma.assetImage.create({ data: { id: ids.assetVariantImage, assetId: ids.assetVariant, assetVersionId: ids.assetVariantV1, label: "主图", sortIndex: 0 } });
+
+    const assetCards = await listComicAssetCards(ids.user, ids.comic);
+    assert.deepEqual(assetCards.map((asset) => asset.id), [ids.asset]);
+    assert.equal(assetCards[0]?.variantCount, 1);
+    const assetDetail = await getAssetFamilyDetail(ids.user, ids.assetVariant);
+    assert.equal(assetDetail.root.id, ids.asset);
+    assert.deepEqual(assetDetail.variants.map((variant) => variant.id), [ids.assetVariant]);
+    await assert.rejects(() => getAssetFamilyDetail(`foreign-${suffix}`, ids.asset), /资产不存在/);
+
+    const copied = await duplicateComic(ids.user, ids.comic);
+    copiedComicId = copied.comicId;
+    const copiedSettings = await prisma.comicSetting.findMany({ where: { comicId: copied.comicId } });
+    assert.equal(copiedSettings.length, 1);
+    assert.notEqual(copiedSettings[0]?.id, ids.comicSetting);
+    assert.equal(copiedSettings[0]?.title, "禁忌规则");
+    assert.equal(copiedSettings[0]?.content, "午夜后不得直呼失踪者姓名。");
+    const copiedAssets = await prisma.asset.findMany({
+      where: { project: { chapter: { comicId: copied.comicId } } },
+      include: { images: true },
+      orderBy: { variantSortIndex: "asc" },
+    });
+    const copiedRoot = copiedAssets.find((asset) => !asset.variantOfAssetId);
+    const copiedVariant = copiedAssets.find((asset) => Boolean(asset.variantOfAssetId));
+    assert.ok(copiedRoot && copiedVariant);
+    assert.equal(copiedVariant.variantOfAssetId, copiedRoot.id);
+    assert.equal(copiedRoot.images.length, 1);
+    assert.equal(copiedVariant.images.length, 1);
+    await prisma.assetVersion.create({ data: { id: ids.assetV2, assetId: ids.asset, version: 2, source: "integration_test", objectKey: `integration/${ids.assetV2}` } });
+    await prisma.assetImage.create({ data: { id: ids.assetImage2, assetId: ids.asset, assetVersionId: ids.assetV2, label: "表情参考", sortIndex: 10 } });
+    const reorderedAsset = await setPrimaryAssetImage(ids.user, ids.asset, ids.assetImage2);
+    assert.equal(reorderedAsset.root.images[0]?.id, ids.assetImage2);
+    assert.equal(reorderedAsset.root.images[0]?.isPrimary, true);
+    const renamedAsset = await renameAssetImage(ids.user, ids.asset, ids.assetImage2, "雨天表情参考");
+    assert.equal(renamedAsset.root.images[0]?.label, "雨天表情参考");
     await prisma.workingRevision.create({ data: {
       projectId: ids.project,
       revision: 1,
@@ -84,7 +143,10 @@ test("database candidate apply and revert preserve version heads atomically", as
       explicitReferences: [{ objectType: "character", objectId: ids.asset, versionId: ids.assetV1 }],
     });
     assert.equal(context.explicitReferences[0].versionId, ids.assetV1);
+    assert.deepEqual(context.assets.find((asset) => asset.id === ids.asset)?.images.map((image) => image.versionId), [ids.assetV2, ids.assetV1]);
     assert.equal(context.comic.worldSummary, "雨夜城市会通过末班车留下失踪者线索。");
+    assert.equal(context.comic.styleSummary, "克制的蓝绿色水彩与电影感夜景。");
+    assert.deepEqual(context.comic.settings, [{ id: ids.comicSetting, title: "禁忌规则", content: "午夜后不得直呼失踪者姓名。" }]);
     const comicFrame = document.units[0].frames[0];
     assert.ok(comicFrame);
     const frameContext = await buildAgentContext({
@@ -108,10 +170,13 @@ test("database candidate apply and revert preserve version heads atomically", as
       explicitReferences: [{ objectType: "character", objectId: ids.asset, versionId: ids.assetV1 }],
     });
     assert.equal(debug.debugContractVersion, "context-debug-0.4");
-    assert.equal(debug.contextIndex.assets.characters[0]?.id, ids.asset);
+    assert.ok(debug.contextIndex.assets.characters.some((asset) => asset.id === ids.asset));
     assert.equal(debug.contextIndex.world.summary, "雨夜城市会通过末班车留下失踪者线索。");
+    assert.deepEqual(debug.contextIndex.world.settings, context.comic.settings);
     assert.equal(debug.contextIndex.storyboard.modelStoryboardBeatWindow[0]?.id, ids.storyboardBeat);
     assert.equal(debug.contextIndex.layout.pages[0]?.id, document.units[0].id);
+    const detailAfterDelete = await deleteAssetImage(ids.user, ids.asset, ids.assetImage2);
+    assert.deepEqual(detailAfterDelete.root.images.map((image) => image.id), [ids.assetImage]);
     await assert.rejects(() => buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,
@@ -198,17 +263,36 @@ test("database candidate apply and revert preserve version heads atomically", as
     await deletePageVariant(ids.user, variant.id);
     assert.ok((await prisma.pageVariant.findUniqueOrThrow({ where: { id: variant.id } })).archivedAt);
   } finally {
+    if (copiedComicId) {
+      const copiedProjects = await prisma.project.findMany({ where: { chapter: { comicId: copiedComicId } }, select: { id: true } });
+      const copiedProjectIds = copiedProjects.map((project) => project.id);
+      await prisma.agentConversation.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
+      await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: { in: copiedProjectIds } } } });
+      await prisma.storyboardBeat.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
+      await prisma.assetImage.deleteMany({ where: { asset: { projectId: { in: copiedProjectIds } } } });
+      await prisma.assetVersion.deleteMany({ where: { asset: { projectId: { in: copiedProjectIds } } } });
+      await prisma.asset.updateMany({ where: { projectId: { in: copiedProjectIds } }, data: { variantOfAssetId: null } });
+      await prisma.asset.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
+      await prisma.workingRevision.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
+      await prisma.project.deleteMany({ where: { id: { in: copiedProjectIds } } });
+      await prisma.chapter.deleteMany({ where: { comicId: copiedComicId } });
+      await prisma.comicSetting.deleteMany({ where: { comicId: copiedComicId } });
+      await prisma.comic.deleteMany({ where: { id: copiedComicId } });
+    }
     await prisma.candidate.deleteMany({ where: { projectId: ids.project } });
     await prisma.pageVariant.deleteMany({ where: { projectId: ids.project } });
     await prisma.generationAttempt.deleteMany({ where: { task: { projectId: ids.project } } });
     await prisma.generationTask.deleteMany({ where: { projectId: ids.project } });
     await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: ids.project } } });
     await prisma.storyboardBeat.deleteMany({ where: { projectId: ids.project } });
+    await prisma.assetImage.deleteMany({ where: { asset: { projectId: ids.project } } });
     await prisma.assetVersion.deleteMany({ where: { asset: { projectId: ids.project } } });
+    await prisma.asset.updateMany({ where: { projectId: ids.project }, data: { variantOfAssetId: null } });
     await prisma.asset.deleteMany({ where: { projectId: ids.project } });
     await prisma.workingRevision.deleteMany({ where: { projectId: ids.project } });
     await prisma.project.deleteMany({ where: { id: ids.project } });
     await prisma.chapter.deleteMany({ where: { id: ids.chapter } });
+    await prisma.comicSetting.deleteMany({ where: { comicId: ids.comic } });
     await prisma.comic.deleteMany({ where: { id: ids.comic } });
     await prisma.user.deleteMany({ where: { id: ids.user } });
     await prisma.$disconnect();

@@ -18,6 +18,8 @@ async function resetToRainyStation() {
     prisma.message.deleteMany(),
     prisma.agentConversation.deleteMany(),
     prisma.canvasReferencePlacement.deleteMany(),
+    prisma.assetImage.deleteMany(),
+    prisma.asset.updateMany({ data: { variantOfAssetId: null } }),
     prisma.assetVersion.deleteMany(),
     prisma.asset.deleteMany(),
     prisma.storyboardBeatVersion.deleteMany(),
@@ -26,6 +28,7 @@ async function resetToRainyStation() {
     prisma.workingRevision.deleteMany(),
     prisma.project.deleteMany(),
     prisma.chapter.deleteMany(),
+    prisma.comicSetting.deleteMany(),
     prisma.comic.deleteMany(),
     prisma.user.deleteMany(),
   ]);

@@ -94,6 +94,7 @@ model User {
   updatedAt   DateTime @updatedAt
 
   comics        Comic[]
+  comicSettings ComicSetting[]
   chapters      Chapter[]
   projects      Project[]
   assets        Asset[]
@@ -126,8 +127,30 @@ model Comic {
 
   owner    User      @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   chapters Chapter[]
+  settings ComicSetting[]
 
   @@index([ownerUserId, archivedAt])
+}
+
+/// A creator-defined, comic-level text card. The title and body deliberately
+/// have no fixed category so future creator-designed cards stay generic while
+/// still being available to Agent context construction.
+model ComicSetting {
+  id             String    @id @default(cuid())
+  ownerUserId    String
+  comicId        String
+  title          String
+  content        String    @default("")
+  contextEnabled Boolean   @default(true)
+  sortIndex      Int       @default(0)
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  owner User  @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  comic Comic @relation(fields: [comicId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, comicId, archivedAt, contextEnabled, sortIndex])
 }
 
 model Chapter {
@@ -252,9 +275,11 @@ model Asset {
   kind                 AssetKind
   name                 String
   description          String    @default("")
-  attributes           Json      @default("{}")
   libraryStatus        AssetLibraryStatus @default(LIBRARY)
   currentVersionNumber Int       @default(1)
+  variantOfAssetId     String?
+  variantLabel         String?
+  variantSortIndex     Int       @default(0)
   archivedAt           DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
@@ -262,10 +287,14 @@ model Asset {
   owner      User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   project    Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
   versions   AssetVersion[]
+  images     AssetImage[]
+  variantOf  Asset?                      @relation("AssetVariants", fields: [variantOfAssetId], references: [id], onDelete: Restrict)
+  variants   Asset[]                     @relation("AssetVariants")
   placements CanvasReferencePlacement[]
   canvasListItems CanvasAssetListItem[]
 
   @@index([ownerUserId, projectId, kind, archivedAt])
+  @@index([variantOfAssetId, variantSortIndex, createdAt])
 }
 
 /// A project-local view of an image that can be used on the canvas. The source
@@ -307,10 +336,28 @@ model AssetVersion {
   createdAt    DateTime @default(now())
 
   asset      Asset                      @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  imageSlot  AssetImage?
   placements CanvasReferencePlacement[]
 
   @@unique([assetId, version])
   @@index([assetId, createdAt])
+}
+
+/// A stable gallery position for an Asset. The slot points at the immutable
+/// AssetVersion currently shown there, so replacing an image preserves history.
+model AssetImage {
+  id             String   @id @default(cuid())
+  assetId        String
+  assetVersionId String   @unique
+  label          String   @default("")
+  sortIndex      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  asset        Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetVersion AssetVersion @relation(fields: [assetVersionId], references: [id], onDelete: Restrict)
+
+  @@index([assetId, sortIndex, createdAt])
 }
 
 model AgentConversation {

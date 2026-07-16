@@ -48,6 +48,8 @@ export async function readUploadedImage(request: FastifyRequest, namespace: stri
   return { stored, contentType, fields: file.fields as Record<string, { value?: string }>, filename: file.filename };
 }
 
+export type UploadedImage = Awaited<ReturnType<typeof readUploadedImage>>;
+
 export async function createUploadedAsset(input: {
   ownerUserId: string;
   projectId: string;
@@ -66,7 +68,6 @@ export async function createUploadedAsset(input: {
         libraryStatus: placeOnCanvas ? AssetLibraryStatus.CANVAS_ONLY : AssetLibraryStatus.LIBRARY,
         name: uploaded.fields.name?.value?.trim() || uploaded.filename.replace(/\.[^.]+$/, "") || "上传参考",
         description: uploaded.fields.description?.value?.trim() || "用户上传参考图",
-        attributes: { originalFilename: uploaded.filename },
         versions: {
           create: {
             version: 1,
@@ -81,6 +82,9 @@ export async function createUploadedAsset(input: {
         },
       },
       include: { versions: true },
+    });
+    await tx.assetImage.create({
+      data: { assetId: created.id, assetVersionId: created.versions[0].id, label: "主图", sortIndex: 0 },
     });
     if (placeOnCanvas) {
       await tx.canvasAssetListItem.create({ data: { ownerUserId, projectId, assetId: created.id, displayName: created.name, displayKind: created.kind } });

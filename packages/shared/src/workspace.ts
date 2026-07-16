@@ -73,6 +73,7 @@ export type ReferencePlacement = {
   localAssetSource?: "upload" | "generated";
   assetId?: string;
   assetVersionId?: string;
+  images?: Array<{ id: string; versionId: string; label: string; imageSrc: string; isPrimary: boolean }>;
   libraryStatus?: "canvas_only" | "library";
   x: number;
   y: number;
@@ -89,7 +90,7 @@ export type AssetSummary = {
   description: string;
   versionId?: string;
   contentUrl?: string;
-  attributes?: Record<string, string>;
+  images?: Array<{ id: string; versionId: string; label: string; contentUrl?: string; isPrimary: boolean }>;
   versions?: Array<{ id: string; version: number; contentUrl?: string; width?: number; height?: number; createdAt?: string }>;
   canvasListItemId?: string;
   libraryStatus?: "canvas_only" | "library";

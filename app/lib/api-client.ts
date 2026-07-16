@@ -48,6 +48,7 @@ export type ComicListItem = {
   title: string;
   summary: string;
   worldSummary: string;
+  styleSummary: string;
   format: "page" | "vertical" | "four_panel";
   canvasPageMode: "single" | "spread";
   coverUrl?: string;
@@ -61,10 +62,37 @@ export type ComicAssetListItem = {
   kind: "character" | "scene" | "style" | "prop" | "reference_image" | "sketch" | "generated_image";
   name: string;
   description: string;
-  attributes?: Record<string, string>;
   versionId?: string;
   contentUrl?: string;
+  variantCount: number;
   updatedAt: string;
+};
+
+export type ComicAssetImage = {
+  id: string;
+  label: string;
+  sortIndex: number;
+  isPrimary: boolean;
+  versionId: string;
+  contentUrl: string;
+  width?: number;
+  height?: number;
+};
+
+export type ComicAssetDetailEntry = {
+  id: string;
+  label: string;
+  name: string;
+  description: string;
+  images: ComicAssetImage[];
+  updatedAt: string;
+};
+
+export type ComicAssetDetail = {
+  id: string;
+  kind: ComicAssetListItem["kind"];
+  root: ComicAssetDetailEntry;
+  variants: ComicAssetDetailEntry[];
 };
 
 function withAbsoluteComicUrls(comic: ComicListItem) {
@@ -91,12 +119,46 @@ export async function apiListComicAssets(comicId: string) {
   return assets.map((asset) => ({ ...asset, contentUrl: asset.contentUrl ? absoluteAssetUrl(asset.contentUrl) : undefined }));
 }
 
-export function apiCreateComic(input: { title: string; summary?: string; worldSummary?: string; format?: "page" | "vertical" | "four_panel"; canvasPageMode?: "single" | "spread" }) {
+export async function apiGetAssetDetail(assetId: string) {
+  return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/assets/${encodeURIComponent(assetId)}`));
+}
+
+function withAbsoluteAssetDetail(detail: ComicAssetDetail) {
+  const withAbsoluteImages = (entry: ComicAssetDetailEntry) => ({
+    ...entry,
+    images: entry.images.map((image) => ({ ...image, contentUrl: absoluteAssetUrl(image.contentUrl) })),
+  });
+  return { ...detail, root: withAbsoluteImages(detail.root), variants: detail.variants.map(withAbsoluteImages) };
+}
+
+export async function apiUploadAssetImage(assetId: string, file: File) {
+  validateUploadFile(file);
+  const form = new FormData();
+  form.set("file", file);
+  const response = await fetch(`${uploadApiBase()}/v1/assets/${encodeURIComponent(assetId)}/images`, { method: "POST", body: form, credentials: "include" });
+  const body = await readApiResponse<ComicAssetDetail>(response, "图片上传失败");
+  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "图片上传失败");
+  return withAbsoluteAssetDetail(body.data);
+}
+
+export async function apiSetPrimaryAssetImage(assetId: string, imageId: string) {
+  return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/assets/${encodeURIComponent(assetId)}/images/${encodeURIComponent(imageId)}/primary`, { method: "POST", body: "{}" }));
+}
+
+export async function apiRenameAssetImage(assetId: string, imageId: string, label: string) {
+  return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/assets/${encodeURIComponent(assetId)}/images/${encodeURIComponent(imageId)}`, { method: "PATCH", body: JSON.stringify({ label }) }));
+}
+
+export async function apiDeleteAssetImage(assetId: string, imageId: string) {
+  return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/assets/${encodeURIComponent(assetId)}/images/${encodeURIComponent(imageId)}`, { method: "DELETE", body: "{}" }));
+}
+
+export function apiCreateComic(input: { title: string; summary?: string; worldSummary?: string; styleSummary?: string; format?: "page" | "vertical" | "four_panel"; canvasPageMode?: "single" | "spread" }) {
   return api<{ comic: { id: string; title: string } }>("/v1/comics", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function apiUpdateComic(comicId: string, input: { title?: string; summary?: string; worldSummary?: string; canvasPageMode?: "single" | "spread" }) {
-  return api<{ id: string; title: string; summary: string; worldSummary: string; canvasPageMode: "SINGLE" | "SPREAD" }>(`/v1/comics/${encodeURIComponent(comicId)}`, { method: "PATCH", body: JSON.stringify(input) });
+export function apiUpdateComic(comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; canvasPageMode?: "single" | "spread" }) {
+  return api<{ id: string; title: string; summary: string; worldSummary: string; styleSummary: string; canvasPageMode: "SINGLE" | "SPREAD" }>(`/v1/comics/${encodeURIComponent(comicId)}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function apiDeleteComic(comicId: string) {
@@ -200,8 +262,8 @@ type WorkbenchResponse = {
     name: string;
     description: string;
     currentVersion?: { id: string; contentUrl?: string };
-    attributes?: Record<string, string>;
     versions?: Array<{ id: string; version: number; contentUrl?: string; width?: number; height?: number; createdAt?: string }>;
+    images?: Array<{ id: string; versionId: string; label: string; contentUrl?: string; isPrimary: boolean }>;
     canvasListItemId?: string;
     libraryStatus?: "canvas_only" | "library";
     pinned?: boolean;
@@ -241,7 +303,7 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
       outputRefs?: Array<{ objectType?: string; objectId?: string; versionId?: string }>;
       commands?: Array<{ type?: string; document?: WorkbenchFixture["working"]["document"] }>;
       operations?: Array<{ type?: string; document?: WorkbenchFixture["working"]["document"] }>;
-      payload?: { kind?: string; name?: string; description?: string; attributes?: Record<string, string> };
+      payload?: { kind?: string; name?: string; description?: string };
     };
     const outputAsset = runtimeCandidate.outputRefs?.find((ref) => ref.objectType === "asset");
     const previewCommands = runtimeCandidate.commands ?? runtimeCandidate.operations;
@@ -310,7 +372,7 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
         working: { ...data.working, resolvedResources: normalizeResolvedResources(data.working.resolvedResources) },
         snapshot: data.snapshot ? { ...data.snapshot, resolvedResources: normalizeResolvedResources(data.snapshot.resolvedResources) } : undefined,
         storyboardBeats: data.storyboardBeats,
-        references: data.references.map((reference) => ({ ...reference, imageSrc: absoluteAssetUrl(reference.imageSrc) })),
+        references: data.references.map((reference) => ({ ...reference, imageSrc: absoluteAssetUrl(reference.imageSrc), images: reference.images?.map((image) => ({ ...image, imageSrc: absoluteAssetUrl(image.imageSrc) })) })),
       },
       candidates,
       pageVariants: (data.pageVariants ?? []).map((variant) => ({ ...variant, status: variant.lastAppliedRevision ? "applied" : "saved" } as PageVariant)),
@@ -323,12 +385,12 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
         description: asset.description,
         versionId: asset.currentVersion?.id,
         contentUrl: asset.currentVersion?.contentUrl ? absoluteAssetUrl(asset.currentVersion.contentUrl) : undefined,
-        attributes: asset.attributes,
         canvasListItemId: asset.canvasListItemId,
         libraryStatus: asset.libraryStatus,
         pinned: asset.pinned,
         sortIndex: asset.sortIndex,
         versions: asset.versions?.map((version) => ({ ...version, contentUrl: version.contentUrl ? absoluteAssetUrl(version.contentUrl) : undefined })),
+        images: asset.images?.map((image) => ({ ...image, contentUrl: image.contentUrl ? absoluteAssetUrl(image.contentUrl) : undefined })),
       })),
       conversations: data.conversations,
       uiVersion: 6,
@@ -374,8 +436,8 @@ export function apiUpdateConversation(conversationId: string, patch: { title?: s
   return api<{ id: string; title: string }>(`/v1/conversations/${encodeURIComponent(conversationId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function apiUpdateAsset(assetId: string, patch: { name?: string; description?: string; attributes?: Record<string, string> }) {
-  return api<{ id: string; name: string; description: string }>(`/v1/assets/${encodeURIComponent(assetId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+export function apiUpdateAsset(assetId: string, patch: { name?: string; description?: string }) {
+  return api<{ id: string; name: string; description: string; updatedAt: string }>(`/v1/assets/${encodeURIComponent(assetId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 export function apiUpdateCanvasAssetListItem(itemId: string, patch: { displayName?: string; pinned?: boolean; hidden?: boolean; sortIndex?: number }) {
@@ -522,7 +584,7 @@ export async function apiUploadAsset(projectId: string, file: File, kind = "refe
   return body.data;
 }
 
-export function apiUpdatePlacement(placementId: string, patch: { x?: number; y?: number; zoom?: number; zIndex?: number; collapsed?: boolean; pinned?: boolean }) {
+export function apiUpdatePlacement(placementId: string, patch: { x?: number; y?: number; zoom?: number; zIndex?: number; collapsed?: boolean; pinned?: boolean; assetVersionId?: string }) {
   return api(`/v1/placements/${encodeURIComponent(placementId)}`, {
     method: "PATCH",
     body: JSON.stringify(patch),

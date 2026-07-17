@@ -33,10 +33,17 @@
 .reference-context-menu button:disabled:hover svg { color: #9aa5a9; }
 .reference-context-menu button.danger { color: #52616a; }
 .reference-context-menu button.danger svg { color: #688087; }
-.comic-context-menu { z-index: 92; width: 184px; }
+.comic-context-menu { z-index: 92; width: 184px; max-height: calc(100vh - 24px); overflow-x: hidden; overflow-y: auto; scrollbar-color: transparent transparent; scrollbar-width: thin; }
+.comic-context-menu:hover { scrollbar-color: rgba(145,153,157,.3) transparent; }
+.comic-context-menu::-webkit-scrollbar { width: 6px; }
+.comic-context-menu::-webkit-scrollbar-track { background: transparent; }
+.comic-context-menu::-webkit-scrollbar-thumb { border-radius: 999px; background: transparent; }
+.comic-context-menu:hover::-webkit-scrollbar-thumb { background: rgba(145,153,157,.3); }
 .comic-context-menu > header { display: flex; align-items: center; margin: 1px 3px 5px; padding: 5px 6px 8px; border-bottom: 1px solid rgba(74,121,126,.12); }
 .comic-context-menu > header strong { display: flex; min-width: 0; align-items: center; gap: 7px; overflow: hidden; color: #24343b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .comic-context-menu > header strong svg { width: 14px; height: 14px; flex: 0 0 auto; color: #688087; stroke-width: 2.15; }
+.comic-context-menu .object-location-badge { margin-left: auto; padding: 2px 5px; border-radius: 999px; background: rgba(64,143,146,.1); color: #41777a; font-size: 9px; font-style: normal; line-height: 1.2; }
+.comic-context-menu .floating-menu-divider { margin: 4px 6px; background: rgba(74,121,126,.13); }
 .reference-menu-divider { display: block; height: 1px; margin: 3px 4px; background: rgba(74,121,126,.13); }
 @keyframes referenceContextIn { from { opacity: 0; transform: translateY(3px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
@@ -56,11 +63,16 @@
 .frame-image-picker > header strong { color: var(--ink); font-size: 12px; }
 .frame-image-picker > header small { color: var(--muted); font-size: 8px; }
 .frame-image-picker > header button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
-.frame-image-upload { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 34px; margin-bottom: 8px; border: 1px dashed rgba(36,127,130,.28); border-radius: 11px; background: rgba(100,200,200,.08); color: var(--cyan-deep); font-size: 10px; font-weight: 850; cursor: pointer; }
-.frame-image-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; max-height: 276px; overflow: auto; padding: 1px; }
-.frame-image-grid > button { display: grid; gap: 5px; min-width: 0; border: 1px solid rgba(36,127,130,.12); border-radius: 11px; background: #fff; padding: 5px; color: #46565d; cursor: pointer; }
+.frame-image-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 86px; gap: 7px; max-height: 272px; overflow-x: hidden; overflow-y: auto; padding: 1px 5px 1px 1px; scrollbar-color: transparent transparent; scrollbar-width: thin; }
+.frame-image-grid:hover { scrollbar-color: rgba(145,153,157,.3) transparent; }
+.frame-image-grid::-webkit-scrollbar { width: 6px; }
+.frame-image-grid::-webkit-scrollbar-track { background: transparent; }
+.frame-image-grid::-webkit-scrollbar-thumb { border-radius: 999px; background: transparent; }
+.frame-image-grid:hover::-webkit-scrollbar-thumb { background: rgba(145,153,157,.3); }
+.frame-image-grid:hover::-webkit-scrollbar-thumb:hover { background: rgba(125,133,138,.44); }
+.frame-image-grid > button { display: grid; min-width: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 5px; overflow: hidden; border: 1px solid rgba(36,127,130,.12); border-radius: 11px; background: #fff; padding: 5px; color: #46565d; cursor: pointer; }
 .frame-image-grid > button:hover { border-color: rgba(36,127,130,.38); background: var(--cyan-soft); color: var(--cyan-deep); }
-.frame-image-grid img, .frame-image-placeholder { display: grid; width: 100%; aspect-ratio: 1.3; place-items: center; border-radius: 7px; background: #edf3f2; object-fit: cover; }
+.frame-image-grid img, .frame-image-placeholder { display: grid; width: 100%; min-height: 0; height: 100%; place-items: center; border-radius: 7px; background: #edf3f2; object-fit: cover; }
 .frame-image-grid strong { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .frame-image-picker > p { margin: 12px 4px 4px; color: var(--muted); font-size: 9px; text-align: center; }
 .dialogue-cursor-preview { position: fixed; z-index: 110; display: grid; width: 48px; height: 34px; place-items: center; border: 2px solid rgba(36,127,130,.7); border-radius: 50%; background: rgba(255,255,255,.88); color: var(--cyan-deep); box-shadow: 0 8px 24px rgba(23,32,38,.16); pointer-events: none; transform: translate(12px, 10px); }

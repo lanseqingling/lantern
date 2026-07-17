@@ -10,9 +10,11 @@ type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
 export type ComicContextPoint = { clientX: number; clientY: number; canvasX: number; canvasY: number };
 type DragState = {
-  mode: "frame_move" | "frame_resize" | "image_crop" | "balloon_move" | "balloon_resize" | "balloon_tail";
+  mode: "frame_move" | "frame_resize" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_tail";
   elementId: string;
-  frameId: string;
+  frameId?: string;
+  anchorGeometry?: Geometry;
+  coordinateBounds?: { minX: number; minY: number; maxX: number; maxY: number };
   startX: number;
   startY: number;
   startGeometry?: Geometry;
@@ -35,7 +37,9 @@ type ComicRendererProps = {
   multiMoveDelta?: { x: number; y: number };
   onSelect?: (selection: Selection) => void;
   onContextAction?: (selection: Selection, point: ComicContextPoint) => void;
+  onObjectDoubleClick?: (selection: Selection) => void;
   onPlaceDialogue?: (unitId: string, frameId: string, position: { x: number; y: number }) => void;
+  onPlacePageDialogue?: (unitId: string, position: { x: number; y: number }) => void;
   onCommitElement?: (unitId: string, elementId: string, patch: ElementPatch, label: string) => void;
   onCommitElements?: (unitId: string, patches: ElementPatchBatch, label: string) => void;
   onPageClick?: (pageIndex: number) => void;
@@ -44,6 +48,7 @@ type ComicRendererProps = {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const rectsOverlap = (a: Geometry, b: Geometry) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 0.5 && Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > 0.5;
+const containsGeometry = (bounds: Geometry, geometry: Geometry) => geometry.x >= bounds.x && geometry.y >= bounds.y && geometry.x + geometry.width <= bounds.x + bounds.width && geometry.y + geometry.height <= bounds.y + bounds.height;
 const geometryStyle = (geometry: Geometry, width: number, height: number): CSSProperties => ({
   left: `${geometry.x / width * 100}%`, top: `${geometry.y / height * 100}%`, width: `${geometry.width / width * 100}%`, height: `${geometry.height / height * 100}%`,
   transform: geometry.rotate ? `rotate(${geometry.rotate}deg)` : undefined,
@@ -90,8 +95,9 @@ function FrameShapeVisual({ frame, fill, stroke }: { frame: Frame; fill: string;
   </svg>;
 }
 
-export function ComicRenderer({ document, resolvedResources, pageIndex, selection, editable = false, interactionMode = "select", creationMode, multiSelectedIds, multiMoving = false, multiMoveDelta, onSelect, onContextAction, onPlaceDialogue, onCommitElement, onCommitElements, onPageClick, className }: ComicRendererProps) {
-  const unit = document.units[pageIndex] ?? document.units[0];
+export function ComicRenderer({ document, resolvedResources, pageIndex, selection, editable = false, interactionMode = "select", creationMode, multiSelectedIds, multiMoving = false, multiMoveDelta, onSelect, onContextAction, onObjectDoubleClick, onPlaceDialogue, onPlacePageDialogue, onCommitElement, onCommitElements, onPageClick, className }: ComicRendererProps) {
+  const requestedUnitId = document.reading.unitOrder[pageIndex];
+  const unit = document.units.find((item) => item.id === requestedUnitId) ?? document.units[0];
   const paperRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const suppressClick = useRef(false);
@@ -104,7 +110,11 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     ...(drafts[frame.id] as Partial<Frame> | undefined),
     layers: frame.layers.map((layer) => ({ ...layer, elements: layer.elements.map((element) => ({ ...element, ...(drafts[element.id] ?? {}) })) })) as Frame["layers"],
   });
-  const draftUnit = { ...unit, frames: unit.frames.map(frameDraft) };
+  const draftUnit = {
+    ...unit,
+    frames: unit.frames.map(frameDraft),
+    overlayLayers: unit.overlayLayers.map((layer) => ({ ...layer, elements: layer.elements.map((element) => ({ ...element, ...(drafts[element.id] ?? {}) })) })),
+  };
   const scene = projectComicRenderScene(document, draftUnit);
   const frames = scene.frames.map((node) => node.frame);
   const framesById = new Map(frames.map((frame) => [frame.id, frame]));
@@ -113,9 +123,28 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const texts = scene.elements.filter((node): node is TextSceneNode => node.element.kind === "text");
   const balloons = scene.elements.filter((node): node is BalloonSceneNode => node.element.kind === "balloon");
   const effects = scene.elements.filter((node): node is EffectSceneNode => node.element.kind === "effect");
+  const overlayImages = images.filter((node) => node.source === "overlay");
+  const overlayImageLabel = (node: ImageSceneNode) => {
+    const crossPurpose = node.overlayPurpose === "cross_page" || node.overlayPurpose === "cross_segment" ? node.overlayPurpose : undefined;
+    const orderGroup = crossPurpose ? overlayImages.filter((candidate) => candidate.overlayPurpose === crossPurpose) : overlayImages.filter((candidate) => candidate.overlayPurpose !== "cross_page" && candidate.overlayPurpose !== "cross_segment");
+    const order = orderGroup.findIndex((candidate) => candidate.element.id === node.element.id) + 1;
+    return `${crossPurpose === "cross_page" ? "跨页图" : crossPurpose === "cross_segment" ? "跨段图" : "图"} ${String(order).padStart(2, "0")}`;
+  };
+  const balloonOrder = (node: BalloonSceneNode) => {
+    const crossPage = node.overlayPurpose === "cross_page";
+    const orderGroup = balloons.filter((candidate) => crossPage ? candidate.overlayPurpose === "cross_page" : candidate.overlayPurpose !== "cross_page");
+    return orderGroup.findIndex((candidate) => candidate.element.id === node.element.id) + 1;
+  };
+  const balloonOrderLabel = (node: BalloonSceneNode) => `${node.overlayPurpose === "cross_page" ? "跨页泡" : node.element.shape === "caption_box" ? "旁白框" : "对白"} ${String(balloonOrder(node)).padStart(2, "0")}`;
 
-  const frameLabel = (frame: Frame) => `画格 ${readingOrder.get(frame.id) ?? ""}`.trim();
+  const frameLabel = (frame: Frame) => `${unit.kind === "spread" && frame.surfaceScope === "unit" ? "跨页格" : "画格"} ${String(readingOrder.get(frame.id) ?? "").padStart(2, "0")}`.trim();
   const selectFrame = (frame: Frame) => onSelect?.({ type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) });
+  const doubleClick = (event: ReactMouseEvent, next: Selection) => {
+    if (!editable || !onObjectDoubleClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onObjectDoubleClick(next);
+  };
   const eventPoint = (event: Pick<ReactMouseEvent, "clientX" | "clientY">): ComicContextPoint | undefined => {
     const bounds = paperRef.current?.getBoundingClientRect();
     if (!bounds?.width || !bounds.height) return undefined;
@@ -136,7 +165,18 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     dragRef.current = { ...state, startX: event.clientX, startY: event.clientY };
     draftsRef.current = {}; setDrafts({}); event.currentTarget.setPointerCapture(event.pointerId);
   };
-  const frameGeometryAllowed = (frameId: string, geometry: Geometry) => geometry.x >= 0 && geometry.y >= 0 && geometry.x + geometry.width <= unit.canvas.width && geometry.y + geometry.height <= unit.canvas.height && (unit.layoutPolicy.frameOverlap === "allow" || !unit.frames.some((frame) => frame.id !== frameId && rectsOverlap(geometry, frame.geometry)));
+  const surfaceForGeometry = (geometry: Geometry) => unit.surfaces.find((surface) => containsGeometry(surface.geometry, geometry));
+  const frameGeometryAllowed = (frameId: string, geometry: Geometry) => {
+    const current = unit.frames.find((frame) => frame.id === frameId);
+    const surface = current?.surfaceScope === "unit" ? undefined : current ? surfaceForGeometry(current.geometry) : undefined;
+    const bounds = surface?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+    return containsGeometry(bounds, geometry) && (unit.layoutPolicy.frameOverlap === "allow" || !unit.frames.some((frame) => frame.id !== frameId && rectsOverlap(geometry, frame.geometry)));
+  };
+  const nodeCoordinateBounds = (node: SceneElementNode, frame?: Frame) => {
+    if (node.source === "overlay" && frame) return { minX: -frame.geometry.x / frame.geometry.width, minY: -frame.geometry.y / frame.geometry.height, maxX: (unit.canvas.width - frame.geometry.x) / frame.geometry.width, maxY: (unit.canvas.height - frame.geometry.y) / frame.geometry.height };
+    const surface = node.surfaceId ? unit.surfaces.find((item) => item.id === node.surfaceId) : undefined;
+    return surface ? { minX: surface.geometry.x, minY: surface.geometry.y, maxX: surface.geometry.x + surface.geometry.width, maxY: surface.geometry.y + surface.geometry.height } : undefined;
+  };
 
   const pointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current; const bounds = paperRef.current?.getBoundingClientRect();
@@ -146,25 +186,33 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.moved = true;
     let patch: ElementPatch | undefined;
     if (drag.mode === "image_crop" && drag.startCrop) {
-      const frame = framesById.get(drag.frameId); if (!frame) return;
+      const frame = drag.frameId ? framesById.get(drag.frameId) : undefined; if (!frame) return;
       patch = { crop: { ...drag.startCrop, x: clamp(drag.startCrop.x - dx / frame.geometry.width * drag.startCrop.width, 0, 1 - drag.startCrop.width), y: clamp(drag.startCrop.y - dy / frame.geometry.height * drag.startCrop.height, 0, 1 - drag.startCrop.height) } };
-    } else if (drag.mode === "balloon_move" && drag.startTransform) {
-      const frame = framesById.get(drag.frameId); if (!frame) return;
-      const offsetX = dx / frame.geometry.width;
-      const offsetY = dy / frame.geometry.height;
-      const transform = { ...drag.startTransform, x: clamp(drag.startTransform.x + offsetX, 0, 1 - drag.startTransform.width), y: clamp(drag.startTransform.y + offsetY, 0, 1 - drag.startTransform.height) };
+    } else if ((drag.mode === "image_move" || drag.mode === "balloon_move") && drag.startTransform) {
+      const anchor = drag.anchorGeometry; if (!anchor) return;
+      const offsetX = drag.frameId ? dx / anchor.width : dx;
+      const offsetY = drag.frameId ? dy / anchor.height : dy;
+      const coordinateWidth = drag.frameId ? 1 : anchor.width;
+      const coordinateHeight = drag.frameId ? 1 : anchor.height;
+      const coordinateBounds = drag.coordinateBounds ?? { minX: 0, minY: 0, maxX: coordinateWidth, maxY: coordinateHeight };
+      const transform = { ...drag.startTransform, x: clamp(drag.startTransform.x + offsetX, coordinateBounds.minX, coordinateBounds.maxX - drag.startTransform.width), y: clamp(drag.startTransform.y + offsetY, coordinateBounds.minY, coordinateBounds.maxY - drag.startTransform.height) };
       patch = drag.startTailTarget
-        ? { transform, tailTarget: { x: clamp(drag.startTailTarget.x + offsetX, 0, 1), y: clamp(drag.startTailTarget.y + offsetY, 0, 1) } }
+        ? { transform, tailTarget: { x: clamp(drag.startTailTarget.x + offsetX, coordinateBounds.minX, coordinateBounds.maxX), y: clamp(drag.startTailTarget.y + offsetY, coordinateBounds.minY, coordinateBounds.maxY) } }
         : { transform };
-    } else if (drag.mode === "balloon_resize" && drag.startTransform) {
-      const frame = framesById.get(drag.frameId); if (!frame) return;
-      patch = { transform: { ...drag.startTransform, width: clamp(drag.startTransform.width + dx / frame.geometry.width, .12, 1 - drag.startTransform.x), height: clamp(drag.startTransform.height + dy / frame.geometry.height, .08, 1 - drag.startTransform.y) } };
+    } else if ((drag.mode === "image_resize" || drag.mode === "balloon_resize") && drag.startTransform) {
+      const anchor = drag.anchorGeometry; if (!anchor) return;
+      const minWidth = drag.frameId ? .12 : unit.canvas.width * .08;
+      const minHeight = drag.frameId ? .08 : unit.canvas.height * .05;
+      const coordinateWidth = drag.frameId ? 1 : anchor.width;
+      const coordinateHeight = drag.frameId ? 1 : anchor.height;
+      const coordinateBounds = drag.coordinateBounds ?? { minX: 0, minY: 0, maxX: coordinateWidth, maxY: coordinateHeight };
+      patch = { transform: { ...drag.startTransform, width: clamp(drag.startTransform.width + (drag.frameId ? dx / anchor.width : dx), minWidth, coordinateBounds.maxX - drag.startTransform.x), height: clamp(drag.startTransform.height + (drag.frameId ? dy / anchor.height : dy), minHeight, coordinateBounds.maxY - drag.startTransform.y) } };
     } else if (drag.mode === "balloon_tail" && drag.startTailTarget) {
-      const frame = framesById.get(drag.frameId); if (!frame) return;
+      const anchor = drag.anchorGeometry; if (!anchor) return;
       const transform = drag.startTransform;
       if (!transform) return;
-      const rawX = drag.startTailTarget.x + dx / frame.geometry.width;
-      const rawY = drag.startTailTarget.y + dy / frame.geometry.height;
+      const rawX = drag.startTailTarget.x + (drag.frameId ? dx / anchor.width : dx);
+      const rawY = drag.startTailTarget.y + (drag.frameId ? dy / anchor.height : dy);
       const centerX = transform.x + transform.width / 2;
       const centerY = transform.y + transform.height / 2;
       const vectorX = rawX - centerX || .001;
@@ -175,14 +223,18 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const radiusX = transform.width / 2;
       const radiusY = transform.height / 2;
       const edgeDistance = 1 / Math.sqrt((unitX / radiusX) ** 2 + (unitY / radiusY) ** 2);
-      const tailLength = clamp(magnitude - edgeDistance, .035, .16);
-      patch = { tailTarget: { x: clamp(centerX + unitX * (edgeDistance + tailLength), 0, 1), y: clamp(centerY + unitY * (edgeDistance + tailLength), 0, 1) } };
+      const minDimension = Math.min(transform.width, transform.height);
+      const tailLength = clamp(magnitude - edgeDistance, minDimension * .16, minDimension * .72);
+      const coordinateWidth = drag.frameId ? 1 : anchor.width;
+      const coordinateHeight = drag.frameId ? 1 : anchor.height;
+      const coordinateBounds = drag.coordinateBounds ?? { minX: 0, minY: 0, maxX: coordinateWidth, maxY: coordinateHeight };
+      patch = { tailTarget: { x: clamp(centerX + unitX * (edgeDistance + tailLength), coordinateBounds.minX, coordinateBounds.maxX), y: clamp(centerY + unitY * (edgeDistance + tailLength), coordinateBounds.minY, coordinateBounds.maxY) } };
     } else if (drag.startGeometry) {
       const start = drag.startGeometry;
       const geometry = drag.mode === "frame_resize"
         ? { ...start, width: clamp(start.width + dx, 120, unit.canvas.width - start.x), height: clamp(start.height + dy, 100, unit.canvas.height - start.y) }
         : { ...start, x: clamp(start.x + dx, 0, unit.canvas.width - start.width), y: clamp(start.y + dy, 0, unit.canvas.height - start.height) };
-      if (!frameGeometryAllowed(drag.frameId, geometry)) return;
+      if (!drag.frameId || !frameGeometryAllowed(drag.frameId, geometry)) return;
       patch = { geometry };
     }
     if (!patch) return;
@@ -192,7 +244,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const drag = dragRef.current; if (!drag) return;
     if (drag.moved) { suppressClick.current = true; window.setTimeout(() => { suppressClick.current = false; }, 0); }
     const patch = draftsRef.current[drag.elementId];
-    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : "移动画格";
+    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : "移动画格";
     if (patch) {
       if (drag.mode === "frame_move" || drag.mode === "frame_resize") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
       else onCommitElement?.(unit.id, drag.elementId, patch, label);
@@ -200,47 +252,73 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     draftsRef.current = {}; setDrafts({}); dragRef.current = null;
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   };
+  const badgeEntries = [
+    ...balloons.map((node) => ({ key: `balloon:${node.element.id}`, x: node.geometry.x + node.geometry.width, y: node.geometry.y + node.geometry.height })),
+    ...overlayImages.map((node) => ({ key: `image:${node.element.id}`, x: node.geometry.x + node.geometry.width, y: node.geometry.y })),
+    ...scene.frames.map(({ frame }) => ({ key: `frame:${frame.id}`, x: frame.geometry.x, y: frame.geometry.y })),
+  ];
+  const badgeOffsets = new Map<string, number>();
+  badgeEntries.forEach((entry, index) => {
+    const collisionIndex = badgeEntries.slice(0, index).filter((other) => Math.abs(other.x - entry.x) < unit.canvas.width * .075 && Math.abs(other.y - entry.y) < unit.canvas.height * .05).length;
+    const direction = entry.x > unit.canvas.width / 2 ? -1 : 1;
+    badgeOffsets.set(entry.key, collisionIndex * 28 * direction);
+  });
 
   return <div className={`comic-page ${editable ? "is-editable" : "is-preview"} interaction-${interactionMode} ${creationMode ? `creation-${creationMode}` : ""} ${multiMoving ? "multi-moving" : ""} ${className ?? ""}`} data-testid="comic-page" data-page-id={unit.id} ref={paperRef}
     style={{ aspectRatio: `${unit.canvas.width} / ${unit.canvas.height}`, background: unit.canvas.background.color, "--multi-move-x": `${multiMoveDelta?.x ?? 0}px`, "--multi-move-y": `${multiMoveDelta?.y ?? 0}px` } as CSSProperties} onPointerMoveCapture={pointerMove} onPointerUpCapture={finishDrag} onPointerCancelCapture={finishDrag}
-    onClick={(event) => { if (interactionMode !== "select" || creationMode) return; const point = eventPoint(event); const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: `Page ${String(pageIndex + 1).padStart(2, "0")}` }); onPageClick?.(pageIndex); }}
+    onClick={(event) => { const point = eventPoint(event); if (creationMode === "dialogue" && point) { const frame = frameAtPoint(point); if (!frame) onPlacePageDialogue?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (interactionMode !== "select") return; const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: `Page ${String(pageIndex + 1).padStart(2, "0")}` }); onPageClick?.(pageIndex); }}
     onContextMenu={(event) => { const point = eventPoint(event); if (!point) return; const frame = frameAtPoint(point); contextFor(event, frame ? { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) } : { type: "presentation_unit", id: unit.id, pageId: unit.id, label: `Page ${String(pageIndex + 1).padStart(2, "0")}` }); }}>
     <div className="paper-grain" aria-hidden="true" />
+    {editable && unit.surfaces.length > 1 ? unit.surfaces.slice(1).map((surface) => <span key={`${surface.id}-seam`} className={`lcd-surface-seam ${unit.kind === "spread" ? "vertical" : "horizontal"}`} aria-hidden="true" style={unit.kind === "spread" ? { left: `${surface.geometry.x / unit.canvas.width * 100}%` } : { top: `${surface.geometry.y / unit.canvas.height * 100}%` }} />) : null}
     {scene.frames.map(({ frame, fillZIndex }) => <div className="lcd-frame-fill" key={`${frame.id}-fill`} style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: fillZIndex }}><FrameShapeVisual frame={frame} fill="#fff" /></div>)}
     {images.map((node) => {
       const image = node.element;
-      const frame = node.source === "frame" ? node.frame : undefined;
+      const frame = node.frame;
+      const frameContent = node.source === "frame";
       const selected = selection?.type === "image" && selection.id === image.id;
       const src = resolvedResources?.[image.assetVersionId]?.url;
-      const label = frame ? `${frameLabel(frame)}主图` : image.name ?? "页面图像";
+      const label = node.source === "overlay"
+        ? overlayImageLabel(node)
+        : frame
+          ? `${frameLabel(frame)}主图`
+          : "页面图像";
+      const imageSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
+      const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+      const coordinateBounds = nodeCoordinateBounds(node, frame);
       return <div className={`lcd-image ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(image.id) ? "multi-selected" : ""}`} data-element-id={image.id} data-page-id={unit.id} key={image.id}
-        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: image.opacity, mixBlendMode: image.blendMode, pointerEvents: frame ? undefined : "none" }}
-        onClick={(event) => { if (!frame) return; event.stopPropagation(); if (selected) onSelect?.({ type: "image", id: image.id, pageId: unit.id, label }); else selectFrame(frame); }}
-        onContextMenu={(event) => { if (!frame) return; contextFor(event, { type: "image", id: image.id, pageId: unit.id, label }); }}
-        onPointerDownCapture={(event) => {
-          if (!frame || !selected || interactionMode !== "crop") return;
+        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: image.opacity, mixBlendMode: image.blendMode }}
+        onClick={(event) => { event.stopPropagation(); if (!frameContent || selected || !frame) onSelect?.(imageSelection); else selectFrame(frame); }}
+        onDoubleClick={(event) => doubleClick(event, imageSelection)}
+        onContextMenu={(event) => contextFor(event, imageSelection)}
+        onPointerDown={(event) => {
+          if (event.button === 0 && event.detail > 1) return;
+          if (node.source === "overlay" && selected && interactionMode === "move" && event.button === 0) {
+            startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform }, imageSelection);
+            return;
+          }
+          if (!frameContent || !frame || !selected || interactionMode !== "crop") return;
           // A full-frame crop has no room to pan. Start a small viewport on the
           // first drag so the gesture immediately changes the visible framing.
           const startCrop = image.crop.width >= .999 && image.crop.height >= .999
             ? { x: .04, y: .04, width: .92, height: .92 }
             : image.crop;
-          startDrag(event, { mode: "image_crop", elementId: image.id, frameId: frame.id, startCrop }, { type: "image", id: image.id, pageId: unit.id, label });
+          startDrag(event, { mode: "image_crop", elementId: image.id, frameId: frame.id, startCrop }, imageSelection);
         }}>
         <div className="lcd-image-crop">
           {src ? <img src={src} alt="漫画画格中的格内成稿图" draggable={false} style={cropStyle(image)} /> : <div className="missing-frame-image" aria-label="等待格内成稿图"><span>等待格内成稿图</span></div>}
         </div>
-        {selected && editable ? <div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div> : null}
+        {selected && editable ? <><div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div>{node.source === "overlay" && interactionMode === "move" ? <button type="button" aria-label="调整纸面图片大小" className="resize-handle overlay-image-resize" onPointerDown={(event) => startDrag(event, { mode: "image_resize", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform }, imageSelection)}/> : null}</> : null}
       </div>;
     })}
     {scene.frames.map(({ frame, borderZIndex }) => {
-      const selected = selection?.type === "comic_frame" && selection.id === frame.id; const order = readingOrder.get(frame.id) ?? 0;
+      const selected = selection?.type === "comic_frame" && selection.id === frame.id;
       return <div className={`lcd-frame ${selected ? "selected" : ""} ${multiSelectedIds?.has(frame.id) ? "multi-selected" : ""}`} data-element-id={frame.id} data-page-id={unit.id} key={frame.id}
         style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: borderZIndex }}
         onClick={(event) => { event.stopPropagation(); if (creationMode === "dialogue") { const point = eventPoint(event); if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
-        onPointerDown={(event) => { if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) }); }}
+        onDoubleClick={(event) => doubleClick(event, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) })}
+        onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) }); }}
         onContextMenu={(event) => contextFor(event, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) })}>
         <FrameShapeVisual frame={frame} fill="none" stroke />
-        {editable ? <button type="button" className="reading-order" aria-label={`选择画格 ${order}`} onClick={(event) => { event.stopPropagation(); selectFrame(frame); }} onPointerDown={(event) => { if (interactionMode === "move") startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) }); }}>{order}</button> : null}
         {selected && editable ? <><div className="selection-corners frame-corners" aria-hidden="true"><span className="selection-label">{frameLabel(frame)}</span></div>{interactionMode === "move" ? <button type="button" aria-label="调整画格大小" className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) })}/> : null}</> : null}
       </div>;
     })}
@@ -259,27 +337,58 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     })}
     {balloons.map((node) => {
       const balloon = node.element;
-      const frame = node.source === "frame" ? node.frame : undefined;
-      const selected = Boolean(frame && selection?.type === "speech_balloon" && selection.id === balloon.id); const label = balloon.name ?? (frame ? `${frameLabel(frame)}气泡` : "页面气泡");
+      const frame = node.frame;
+      const selected = selection?.type === "speech_balloon" && selection.id === balloon.id; const label = node.overlayPurpose === "cross_page" ? balloonOrderLabel(node) : balloon.name ?? (node.source === "overlay" ? frame ? `${frameLabel(frame)}破格气泡` : "纸面气泡" : frame ? `${frameLabel(frame)}气泡` : "页面气泡");
+      const balloonSelection: Selection = { type: "speech_balloon", id: balloon.id, pageId: unit.id, label };
       const appearanceSrc = balloon.appearance ? resolvedResources?.[balloon.appearance.assetVersionId]?.url : undefined;
       const tail = projectBalloonTail(balloon);
       const strokeWidths = projectBalloonStrokeWidths(balloon);
       const paths = tail ? tailPaths(tail) : undefined;
       const localTailTip = tail ? { x: balloon.transform.x + tail.tip.x / 100 * balloon.transform.width, y: balloon.transform.y + tail.tip.y / 100 * balloon.transform.height } : undefined;
-      return <button type="button" tabIndex={frame ? undefined : -1} aria-hidden={frame ? undefined : true} className={`lcd-balloon shape-${balloon.shape} ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(balloon.id) ? "multi-selected" : ""}`} data-element-id={balloon.id} data-page-id={unit.id} key={balloon.id}
-        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), color: balloon.style.textColor, fontFamily: balloon.style.fontFamily, fontSize: `${balloon.style.fontSize / unit.canvas.width * 100}cqw`, writingMode: balloon.style.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb", pointerEvents: frame ? undefined : "none" }}
-        onClick={(event) => { if (!frame) return; event.stopPropagation(); if (!suppressClick.current) onSelect?.({ type: "speech_balloon", id: balloon.id, pageId: unit.id, label }); }}
-        onContextMenu={(event) => { if (!frame) return; contextFor(event, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label }); }}
-        onPointerDown={(event) => { if (frame && selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label }); }}>
+      const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+      const coordinateBounds = nodeCoordinateBounds(node, frame);
+      return <button type="button" className={`lcd-balloon shape-${balloon.shape} ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(balloon.id) ? "multi-selected" : ""}`} data-element-id={balloon.id} data-page-id={unit.id} key={balloon.id}
+        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), color: balloon.style.textColor, fontFamily: balloon.style.fontFamily, fontSize: `${balloon.style.fontSize / unit.canvas.width * 100}cqw`, writingMode: balloon.style.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb" }}
+        onClick={(event) => { event.stopPropagation(); if (!suppressClick.current) onSelect?.(balloonSelection); }}
+        onDoubleClick={(event) => doubleClick(event, balloonSelection)}
+        onContextMenu={(event) => contextFor(event, balloonSelection)}
+        onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, balloonSelection); }}>
         {appearanceSrc ? <img className="balloon-appearance" src={appearanceSrc} alt="" draggable={false} /> : <svg className="balloon-shape" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
           {balloon.shape === "caption_box" ? <rect className="balloon-outline" x="1.5" y="1.5" width="97" height="97" rx="3" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} /> : <ellipse className="balloon-outline" cx="50" cy="50" rx="48" ry="46" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} />}
           {tail && paths ? <><path className="balloon-tail-fill" d={paths.fill} style={{ fill: balloon.style.fill }} /><path className="balloon-tail-outline" d={paths.outline} vectorEffect="non-scaling-stroke" style={{ stroke: balloon.style.stroke, strokeWidth: strokeWidths.tail }} /><ellipse className="balloon-mask" cx="50" cy="50" rx="48" ry="46" style={{ fill: balloon.style.fill }} /></> : null}
         </svg>}
         <span className="balloon-content">{node.dialogueText ?? ""}</span>
-        {frame && selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label="调整气泡大小" onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label })}/>{tail && localTailTip ? <span className="balloon-tail-handle" aria-label="调整气泡尾巴长度与指向" style={{ left: `${tail.tip.x}%`, top: `${tail.tip.y}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame.id, startTransform: balloon.transform, startTailTarget: localTailTip }, { type: "speech_balloon", id: balloon.id, pageId: unit.id, label })}/> : null}</> : null}
+        {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label="调整气泡大小" onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform }, balloonSelection)}/>{tail && localTailTip ? <span className="balloon-tail-handle" aria-label="调整气泡尾巴长度与指向" style={{ left: `${tail.tip.x}%`, top: `${tail.tip.y}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: localTailTip }, balloonSelection)}/> : null}</> : null}
       </button>;
     })}
-    {editable ? balloons.map((node, index) => node.source === "frame" ? <span className="balloon-order-anchor" aria-hidden="true" key={`${node.element.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), zIndex: 2_000_000 }}><span className="balloon-order">{index + 1}</span></span> : null) : null}
+    {editable ? <div className="object-order-layer">
+      {balloons.map((node, index) => {
+        const balloon = node.element;
+        const frame = node.frame;
+        const crossPage = node.overlayPurpose === "cross_page";
+        const label = balloonOrderLabel(node);
+        const order = balloonOrder(node);
+        const nextSelection: Selection = { type: "speech_balloon", id: balloon.id, pageId: unit.id, label };
+        const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+        const coordinateBounds = nodeCoordinateBounds(node, frame);
+        return <span className="balloon-order-anchor" key={`${balloon.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`balloon:${balloon.id}`) ?? 0}px 0` }}><button type="button" className={`balloon-order ${crossPage ? "cross-page" : ""} ${selection?.type === "speech_balloon" && selection.id === balloon.id ? "selected" : ""}`} aria-label={`选择${label}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, nextSelection); }}>{crossPage ? label : String(order).padStart(2, "0")}</button></span>;
+      })}
+      {overlayImages.map((node) => {
+        const image = node.element;
+        const frame = node.frame;
+        const label = overlayImageLabel(node);
+        const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+        const coordinateBounds = nodeCoordinateBounds(node, frame);
+        const nextSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
+        return <span className="image-order-anchor" key={`${image.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`image:${image.id}`) ?? 0}px 0` }}><button type="button" className={`image-object-order ${selection?.type === "image" && selection.id === image.id ? "selected" : ""}`} aria-label={`选择${label}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform }, nextSelection); }}>{label}</button></span>;
+      })}
+      {scene.frames.map(({ frame }, index) => {
+        const order = readingOrder.get(frame.id) ?? index + 1;
+        const crossPage = unit.kind === "spread" && frame.surfaceScope === "unit";
+        const nextSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
+        return <button type="button" className={`reading-order frame-order-button ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - 12px)` }} aria-label={`选择${frameLabel(frame)}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); if (interactionMode === "move") startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, nextSelection); }}>{crossPage ? frameLabel(frame) : order}</button>;
+      })}
+    </div> : null}
     <span className="page-watermark">{unit.kind === "vertical_segment" ? `SCROLL ${String(pageIndex + 1).padStart(2, "0")}` : unit.kind === "four_panel_unit" ? "4-KOMA" : `PAGE ${String(pageIndex + 1).padStart(2, "0")}`}</span>
   </div>;
 }

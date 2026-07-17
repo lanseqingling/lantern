@@ -14,9 +14,6 @@
 .creation-dock button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid transparent; border-radius: 14px; background: transparent; color: #3e4c54; font-weight: 900; cursor: pointer; }
 .creation-dock button:hover, .creation-dock button.active { border-color: rgba(100,200,200,.42); background: var(--cyan-soft); color: var(--cyan-deep); }
 .creation-dock button[aria-label="自由拖动画布"].active { border-color: #e1ae4b; background: var(--amber); color: #fff; box-shadow: 0 6px 16px rgba(222,161,44,.24); }
-.creation-dock .dialogue-create-button { position: relative; }
-.creation-dock .dialogue-create-button > i { position: absolute; right: 4px; top: 3px; display: grid; width: 13px; height: 13px; place-items: center; border-radius: 50%; background: var(--cyan); color: #fff; font-size: 10px; font-style: normal; line-height: 1; }
-.creation-dock .dialogue-create-button.active > i { background: #fff; color: var(--cyan-deep); }
 .creation-dock .dock-history button { width: 30px; }
 
 .multi-selection-dock { position: absolute; z-index: 69; left: 50%; bottom: 16px; display: flex; align-items: center; gap: 4px; transform: translate(-50%, calc(100% + 34px)); visibility: hidden; padding: 7px; border: 1px solid rgba(255,255,255,.92); border-radius: 28px; opacity: 0; background: rgba(255,255,255,.86); box-shadow: 0 18px 48px rgba(23,32,38,.13), 0 0 0 1px rgba(100,200,200,.08); backdrop-filter: blur(20px); pointer-events: none; transition: transform 240ms cubic-bezier(.2,.8,.2,1), opacity 170ms ease, visibility 0s linear 240ms; }
@@ -364,6 +361,7 @@
 .delete-confirm-overlay { position: fixed; z-index: 260; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(17,28,33,.25); backdrop-filter: blur(4px); }
 .delete-confirm-overlay > section { width: min(330px, calc(100vw - 32px)); box-sizing: border-box; border: 1px solid rgba(255,255,255,.9); border-radius: 22px; background: rgba(255,255,255,.98); box-shadow: 0 26px 70px rgba(23,32,38,.24); padding: 20px; text-align: center; }
 .delete-confirm-icon { display: grid; width: 38px; height: 38px; margin: 0 auto 10px; place-items: center; border-radius: 13px; background: rgba(216,91,91,.1); color: var(--danger); }
+.delete-confirm-icon.neutral { background: rgba(100,200,200,.14); color: var(--cyan-deep); }
 .delete-confirm-overlay h2 { margin: 0; color: var(--ink); font-size: 16px; }
 .delete-confirm-overlay p { margin: 9px 0 18px; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .delete-confirm-actions { display: flex; justify-content: center; gap: 8px; }

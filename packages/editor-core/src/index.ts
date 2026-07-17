@@ -7,7 +7,7 @@ import type {
   WorkspaceChangeSet,
   WorkspaceCommand,
 } from "../../shared/src";
-import { changeSetCommands, normalizeStoryboardBeats, validateComicDocument, workspaceChangeSetSchema } from "../../shared/src";
+import { changeSetCommands, normalizeStoryboardBeats, orderedUnitSurfaces, validateComicDocument, workspaceChangeSetSchema } from "../../shared/src";
 import { planEditorCapability, type EditorCapabilityContext, type EditorCapabilityId } from "./capabilities";
 
 export * from "./capabilities";
@@ -123,6 +123,7 @@ export function applyWorkspaceChangeSet(
     if (operation.type === "resize_vertical_segment") {
       const unit = findUnit(operation.unitId);
       if (unit.kind !== "vertical_segment") throw new Error("resize_vertical_segment requires a vertical segment");
+      if (unit.surfaces.length !== 1) throw new Error("已合并的滚动段需要先拆分，才能修改单段比例");
       if (unit.frames.some((frame) => frame.geometry.y + frame.geometry.height > operation.canvasHeight)) {
         throw new Error("页面下方空间不足，现有画格会被裁切，无法应用该比例");
       }
@@ -138,10 +139,6 @@ export function applyWorkspaceChangeSet(
       findUnit(operation.unitId);
       document.units = document.units.filter((unit) => unit.id !== operation.unitId);
       document.reading.unitOrder = document.reading.unitOrder.filter((unitId) => unitId !== operation.unitId);
-      document.reading.unitOrder.forEach((unitId, index) => {
-        const unit = document.units.find((item) => item.id === unitId);
-        if (unit?.surfaces.length === 1) unit.surfaces[0].pageNumber = index + 1;
-      });
       continue;
     }
     if (operation.type === "update_storyboard_beat") {
@@ -168,6 +165,10 @@ export function applyWorkspaceChangeSet(
     }
     if (operation.type === "resize_frame") {
       findFrame(operation.unitId, operation.frameId).frame.geometry = structuredClone(operation.geometry);
+      continue;
+    }
+    if (operation.type === "set_frame_surface_scope") {
+      findFrame(operation.unitId, operation.frameId).frame.surfaceScope = operation.surfaceScope;
       continue;
     }
     if (operation.type === "reorder_frame") {
@@ -211,6 +212,10 @@ export function applyWorkspaceChangeSet(
       unit.frames = unit.frames.filter((frame) => frame.id !== operation.frameId);
       unit.readingSequence = unit.readingSequence.filter((entry) => entry.frameId !== operation.frameId);
       unit.overlayLayers = unit.overlayLayers.filter((layer) => !(layer.anchor.type === "frame" && layer.anchor.frameId === operation.frameId));
+      continue;
+    }
+    if (operation.type === "set_frame_overlap_policy") {
+      findUnit(operation.unitId).layoutPolicy.frameOverlap = operation.frameOverlap;
       continue;
     }
     if (operation.type === "set_art_crop") {
@@ -269,6 +274,43 @@ export function applyWorkspaceChangeSet(
       layer.elements = layer.elements.filter((element) => element.id !== operation.elementId) as typeof layer.elements;
       continue;
     }
+    if (operation.type === "add_overlay_layer") {
+      const unit = findUnit(operation.unitId);
+      if (unit.overlayLayers.some((layer) => layer.id === operation.layer.id)) throw new Error(`duplicate UnitOverlayLayer id: ${operation.layer.id}`);
+      unit.overlayLayers.push(structuredClone(operation.layer));
+      continue;
+    }
+    if (operation.type === "remove_overlay_layer") {
+      const unit = findUnit(operation.unitId);
+      const layer = unit.overlayLayers.find((item) => item.id === operation.layerId);
+      if (!layer) throw new Error(`missing UnitOverlayLayer: ${operation.layerId}`);
+      if (layer.elements.length) throw new Error(`UnitOverlayLayer is not empty: ${operation.layerId}`);
+      unit.overlayLayers = unit.overlayLayers.filter((item) => item.id !== operation.layerId);
+      continue;
+    }
+    if (operation.type === "add_overlay_element") {
+      const unit = findUnit(operation.unitId);
+      const layer = unit.overlayLayers.find((item) => item.id === operation.layerId);
+      if (!layer) throw new Error(`missing UnitOverlayLayer: ${operation.layerId}`);
+      if (layer.elements.some((element) => element.id === operation.element.id)) throw new Error(`duplicate OverlayElement id: ${operation.element.id}`);
+      layer.elements.push(structuredClone(operation.element));
+      continue;
+    }
+    if (operation.type === "remove_overlay_element") {
+      const unit = findUnit(operation.unitId);
+      const layer = unit.overlayLayers.find((item) => item.id === operation.layerId);
+      if (!layer?.elements.some((element) => element.id === operation.elementId)) throw new Error(`missing OverlayElement: ${operation.elementId}`);
+      layer.elements = layer.elements.filter((element) => element.id !== operation.elementId);
+      continue;
+    }
+    if (operation.type === "reorder_overlay_element") {
+      const layer = findUnit(operation.unitId).overlayLayers.find((item) => item.id === operation.layerId);
+      const currentIndex = layer?.elements.findIndex((element) => element.id === operation.elementId) ?? -1;
+      if (!layer || currentIndex < 0) throw new Error(`missing OverlayElement: ${operation.elementId}`);
+      const [element] = layer.elements.splice(currentIndex, 1);
+      layer.elements.splice(Math.min(operation.index, layer.elements.length), 0, element);
+      continue;
+    }
     if (operation.type === "duplicate_layer_element") {
       const { layer } = findLayer(operation.unitId, operation.frameId, operation.layerId);
       const element = layer.elements.find((item) => item.id === operation.elementId);
@@ -281,9 +323,17 @@ export function applyWorkspaceChangeSet(
       findLayer(operation.unitId, operation.frameId, operation.layerId).layer.zIndex = operation.zIndex;
       continue;
     }
+    if (operation.type === "reorder_overlay_layer") {
+      const layer = findUnit(operation.unitId).overlayLayers.find((item) => item.id === operation.layerId);
+      if (!layer) throw new Error(`missing UnitOverlayLayer: ${operation.layerId}`);
+      layer.zIndex = operation.zIndex;
+      continue;
+    }
     if (operation.type === "update_balloon") {
-      const { layer } = findLayer(operation.unitId, operation.frameId, operation.layerId);
-      const element = layer.elements.find((item) => item.id === operation.elementId);
+      const layer = operation.frameId
+        ? findLayer(operation.unitId, operation.frameId, operation.layerId).layer
+        : findUnit(operation.unitId).overlayLayers.find((item) => item.id === operation.layerId);
+      const element = layer?.elements.find((item) => item.id === operation.elementId);
       if (!element || element.kind !== "balloon") throw new Error(`missing BalloonElement: ${operation.elementId}`);
       Object.assign(element, structuredClone(operation.changes));
       continue;
@@ -291,6 +341,16 @@ export function applyWorkspaceChangeSet(
     const exhaustive: never = operation;
     throw new Error(`unsupported WorkspaceCommand: ${(exhaustive as WorkspaceCommand).type}`);
   }
+
+  let physicalPageNumber = 1;
+  document.reading.unitOrder.forEach((unitId) => {
+    const unit = document.units.find((item) => item.id === unitId);
+    if (!unit) return;
+    orderedUnitSurfaces(unit, document.reading.direction).forEach((surface) => {
+      surface.pageNumber = physicalPageNumber;
+      physicalPageNumber += 1;
+    });
+  });
 
   const validDocument = validateComicDocument(document);
   return {

@@ -11,9 +11,16 @@ import {
   type FrameElement,
   type FrameLayer,
   type Geometry,
+  type OverlayElement,
+  type PageSurface,
+  type Point,
   type PresentationUnit,
+  type UnitOverlayLayer,
   type WorkbenchFixture,
   type WorkspaceCommand,
+  deriveLocalTransform,
+  orderedUnitSurfaces,
+  resolveLocalTransform,
 } from "../../shared/src";
 
 export type CapabilityScope = "element" | "frame" | "unit" | "chapter";
@@ -90,10 +97,50 @@ function findFrameElement(context: EditorCapabilityContext, unitId: string, fram
   return { unit, frame, layer, element };
 }
 
+function findOverlayLayer(context: EditorCapabilityContext, unitId: string, layerId: string) {
+  const unit = context.fixture.working.document.units.find((item) => item.id === unitId);
+  if (!unit) throw new Error(`missing PresentationUnit: ${unitId}`);
+  const layer = unit.overlayLayers.find((item) => item.id === layerId);
+  if (!layer) throw new Error(`missing UnitOverlayLayer: ${layerId}`);
+  return { unit, layer };
+}
+
+function findOverlayElement(context: EditorCapabilityContext, unitId: string, layerId: string, elementId: string) {
+  const { unit, layer } = findOverlayLayer(context, unitId, layerId);
+  const element = layer.elements.find((item) => item.id === elementId);
+  if (!element) throw new Error(`missing OverlayElement: ${elementId}`);
+  return { unit, layer, element };
+}
+
+function findLocatedElement(context: EditorCapabilityContext, input: { unitId: string; frameId?: string; layerId: string; elementId: string }) {
+  return input.frameId
+    ? findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId)
+    : findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+}
+
+function overlayLayerFor(context: EditorCapabilityContext, unit: PresentationUnit, anchor: UnitOverlayLayer["anchor"], purpose: UnitOverlayLayer["purpose"], name: string, surfaceId?: string) {
+  const existing = unit.overlayLayers.find((layer) => layer.purpose === purpose
+    && layer.surfaceId === surfaceId
+    && layer.anchor.type === anchor.type
+    && (anchor.type === "unit" || layer.anchor.type === "frame" && layer.anchor.frameId === anchor.frameId));
+  if (existing) return { layer: existing, command: undefined };
+  const layer: UnitOverlayLayer = { id: context.createId(`${purpose}-overlay`), name, zIndex: Math.max(0, ...unit.frames.map((item) => item.zIndex), ...unit.overlayLayers.map((item) => item.zIndex)) + 1, visible: true, anchor, ...(surfaceId ? { surfaceId } : {}), purpose, elements: [] };
+  return { layer, command: { type: "add_overlay_layer" as const, unitId: unit.id, layer } };
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const overlaps = (left: Geometry, right: Geometry, gutter = 0) =>
   left.x < right.x + right.width + gutter && left.x + left.width + gutter > right.x
   && left.y < right.y + right.height + gutter && left.y + left.height + gutter > right.y;
+const containsGeometry = (container: Geometry, child: Geometry) => child.x >= container.x - .5 && child.y >= container.y - .5
+  && child.x + child.width <= container.x + container.width + .5 && child.y + child.height <= container.y + container.height + .5;
+const shiftedGeometry = <T extends Geometry>(geometry: T, x: number, y = 0): T => ({ ...geometry, x: geometry.x + x, y: geometry.y + y });
+const shiftedOverlayElement = (element: OverlayElement, x: number, y = 0): OverlayElement => {
+  const next = { ...structuredClone(element), transform: shiftedGeometry(element.transform, x, y) } as OverlayElement;
+  if (next.kind === "balloon" && next.tailTarget) next.tailTarget = { x: next.tailTarget.x + x, y: next.tailTarget.y + y };
+  return next;
+};
+const surfaceAt = (unit: PresentationUnit, point: { x: number; y: number }) => unit.surfaces.find((surface) => point.x >= surface.geometry.x && point.x <= surface.geometry.x + surface.geometry.width && point.y >= surface.geometry.y && point.y <= surface.geometry.y + surface.geometry.height) ?? unit.surfaces[0];
 
 function availableFrameGeometry(unit: PresentationUnit, preferred: { x: number; y: number }, size?: { width: number; height: number }) {
   const surface = unit.surfaces.find((candidate) => preferred.x >= candidate.geometry.x && preferred.x <= candidate.geometry.x + candidate.geometry.width && preferred.y >= candidate.geometry.y && preferred.y <= candidate.geometry.y + candidate.geometry.height) ?? unit.surfaces[0];
@@ -241,8 +288,9 @@ const deleteFrameCapability = defineCapability({
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { frame } = findFrame(context, input.unitId, input.frameId);
-    const dialogueIds = new Set(frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[]).flatMap((element) => element.kind === "balloon" ? [element.dialogueId] : []));
+    const { unit, frame } = findFrame(context, input.unitId, input.frameId);
+    const anchoredOverlayElements = unit.overlayLayers.filter((layer) => layer.anchor.type === "frame" && layer.anchor.frameId === frame.id).flatMap((layer) => layer.elements);
+    const dialogueIds = new Set([...frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[]), ...anchoredOverlayElements].flatMap((element) => element.kind === "balloon" ? [element.dialogueId] : []));
     return [
       { type: "remove_frame", unitId: input.unitId, frameId: input.frameId },
       ...Array.from(dialogueIds).filter((dialogueId) => dialogueReferenceCount(context, dialogueId) === 1).map((dialogueId): WorkspaceCommand => ({ type: "remove_dialogue", dialogueId })),
@@ -294,16 +342,17 @@ const placeFrameImageCapability = defineCapability({
 const replaceFrameImageCapability = defineCapability({
   id: "replace_frame_image",
   version: 1,
-  inputSchema: frameImageInputSchema.extend({ layerId: z.string().min(1), elementId: z.string().min(1) }),
+  inputSchema: frameImageInputSchema.extend({ frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1) }),
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
   risk: "low",
-  preconditions: ["art_element_exists", "asset_version_is_fixed"],
+  preconditions: ["frame_art_element_exists", "asset_version_is_fixed"],
   outputCommandTypes: ["declare_resource", "remove_layer_element", "add_layer_element"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
+    if (!input.frameId) throw new Error("纸面、破格、跨页和跨段图片不能直接更换，请先删除后重新放入");
     const { element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
     if (element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
     const commands: WorkspaceCommand[] = [];
@@ -311,10 +360,10 @@ const replaceFrameImageCapability = defineCapability({
       commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
     }
     const replacement: ArtElement = { ...structuredClone(element), assetId: input.assetId, assetVersionId: input.assetVersionId, crop: { x: 0, y: 0, width: 1, height: 1 } };
-    commands.push(
-      { type: "remove_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, elementId: input.elementId },
-      { type: "add_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, element: replacement },
-    );
+    commands.push(...[
+      { type: "remove_layer_element" as const, unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, elementId: input.elementId },
+      { type: "add_layer_element" as const, unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, element: replacement },
+    ]);
     return commands;
   },
 });
@@ -322,19 +371,24 @@ const replaceFrameImageCapability = defineCapability({
 const removeFrameImageCapability = defineCapability({
   id: "remove_frame_image",
   version: 1,
-  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),
+  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1) }),
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
   risk: "low",
   preconditions: ["art_element_exists"],
-  outputCommandTypes: ["remove_layer_element"],
+  outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_overlay_layer"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    const located = findLocatedElement(context, input);
+    const { element } = located;
     if (element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
-    return [{ type: "remove_layer_element", ...input }];
+    if (input.frameId) return [{ type: "remove_layer_element", ...input, frameId: input.frameId }];
+    return [
+      { type: "remove_overlay_element", unitId: input.unitId, layerId: input.layerId, elementId: input.elementId },
+      ...(located.layer.elements.length === 1 ? [{ type: "remove_overlay_layer" as const, unitId: input.unitId, layerId: input.layerId }] : []),
+    ];
   },
 });
 
@@ -378,20 +432,252 @@ const createDialogueBalloonCapability = defineCapability({
   },
 });
 
-const duplicateDialogueBalloonCapability = defineCapability({
-  id: "duplicate_dialogue_balloon",
+const createPageImageCapability = defineCapability({
+  id: "create_page_image",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    position: z.strictObject({ x: z.number(), y: z.number() }),
+    assetId: z.string().min(1),
+    assetVersionId: z.string().min(1),
+    mediaType: z.string().startsWith("image/"),
+    width: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+  }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["presentation_unit_exists", "asset_version_is_fixed", "resulting_document_is_valid"],
+  outputCommandTypes: ["declare_resource", "add_overlay_layer", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    const surface = surfaceAt(unit, input.position);
+    if (!surface) throw new Error("页面没有可放置图片的纸面");
+    const overlay = overlayLayerFor(context, unit, { type: "unit" }, "page_content", "纸面内容", surface.id);
+    const elementWidth = Math.min(surface.geometry.width * .42, Math.max(120, surface.geometry.width * .3));
+    const sourceRatio = input.width && input.height ? input.height / input.width : .75;
+    const elementHeight = Math.min(surface.geometry.height * .42, elementWidth * sourceRatio);
+    const element: ArtElement = {
+      id: context.createId("page-image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId,
+      transform: { x: clamp(input.position.x - elementWidth / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - elementWidth), y: clamp(input.position.y - elementHeight / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - elementHeight), width: elementWidth, height: elementHeight },
+      crop: { x: 0, y: 0, width: 1, height: 1 }, name: "纸面图片",
+    };
+    const commands: WorkspaceCommand[] = [];
+    if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) {
+      commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
+    }
+    if (overlay.command) commands.push(overlay.command);
+    commands.push({ type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element });
+    return commands;
+  },
+});
+
+const createPageDialogueBalloonCapability = defineCapability({
+  id: "create_page_dialogue_balloon",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), position: z.strictObject({ x: z.number(), y: z.number() }), content: z.string().max(2000).optional() }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["presentation_unit_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["add_dialogue", "add_overlay_layer", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    const surface = surfaceAt(unit, input.position);
+    if (!surface) throw new Error("页面没有可放置对白的纸面");
+    const overlay = overlayLayerFor(context, unit, { type: "unit" }, "page_content", "纸面内容", surface.id);
+    const dialogueId = context.createId("dialogue");
+    const width = Math.min(280, unit.canvas.width * .34);
+    const height = Math.min(180, unit.canvas.height * .16);
+    const balloon: BalloonElement = {
+      id: context.createId("page-balloon"), kind: "balloon", dialogueId,
+      transform: { x: clamp(input.position.x - width / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - width), y: clamp(input.position.y - height / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - height), width, height },
+      tailTarget: { x: clamp(input.position.x + width * .3, surface.geometry.x, surface.geometry.x + surface.geometry.width), y: clamp(input.position.y + height * .8, surface.geometry.y, surface.geometry.y + surface.geometry.height) },
+      shape: "normal", name: "纸面对白",
+      style: { fontFamily: "ui-sans-serif", fontSize: 18, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: 3 },
+    };
+    return [
+      { type: "add_dialogue", dialogue: { id: dialogueId, content: input.content ?? "新对白" } },
+      ...(overlay.command ? [overlay.command] : []),
+      { type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element: balloon },
+    ];
+  },
+});
+
+const promoteElementToOverlayCapability = defineCapability({
+  id: "promote_element_to_overlay",
   version: 1,
   inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
-  risk: "low",
-  preconditions: ["balloon_element_exists", "dialogue_exists"],
-  outputCommandTypes: ["add_dialogue", "add_layer_element"],
+  risk: "medium",
+  preconditions: ["frame_element_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["remove_layer_element", "add_overlay_layer", "add_overlay_element"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    const { unit, element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    const overlay = overlayLayerFor(context, unit, { type: "frame", frameId: input.frameId }, "breakout", "破格内容");
+    return [
+      { type: "remove_layer_element", ...input },
+      ...(overlay.command ? [overlay.command] : []),
+      { type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element: structuredClone(element) as OverlayElement },
+    ];
+  },
+});
+
+const convertElementToPageCapability = defineCapability({
+  id: "convert_element_to_page",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1) }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["frame_breakout_or_cross_surface_element_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const commands: WorkspaceCommand[] = [];
+    let unit: PresentationUnit;
+    let element: FrameElement | OverlayElement;
+    let unitGeometry: Geometry;
+    let unitTail: { x: number; y: number } | undefined;
+    if (input.frameId) {
+      const located = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+      unit = located.unit;
+      element = located.element;
+      unitGeometry = resolveLocalTransform(located.frame.geometry, element.transform);
+      unitTail = element.kind === "balloon" && element.tailTarget ? { x: located.frame.geometry.x + element.tailTarget.x * located.frame.geometry.width, y: located.frame.geometry.y + element.tailTarget.y * located.frame.geometry.height } : undefined;
+      commands.push({ type: "remove_layer_element", unitId: unit.id, frameId: located.frame.id, layerId: located.layer.id, elementId: element.id });
+    } else {
+      const located = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+      unit = located.unit;
+      element = located.element;
+      const anchor = located.layer.anchor;
+      if (anchor.type === "unit") {
+        if (located.layer.purpose !== "cross_page" && located.layer.purpose !== "cross_segment") throw new Error("对象已经属于纸面");
+        unitGeometry = element.transform;
+        unitTail = element.kind === "balloon" ? element.tailTarget : undefined;
+      } else {
+        const anchorFrame = unit.frames.find((frame) => frame.id === anchor.frameId);
+        if (!anchorFrame) throw new Error(`missing Frame: ${anchor.frameId}`);
+        unitGeometry = resolveLocalTransform(anchorFrame.geometry, element.transform);
+        unitTail = element.kind === "balloon" && element.tailTarget ? { x: anchorFrame.geometry.x + element.tailTarget.x * anchorFrame.geometry.width, y: anchorFrame.geometry.y + element.tailTarget.y * anchorFrame.geometry.height } : undefined;
+      }
+      commands.push({ type: "remove_overlay_element", unitId: unit.id, layerId: located.layer.id, elementId: element.id });
+      if (located.layer.elements.length === 1) commands.push({ type: "remove_overlay_layer", unitId: unit.id, layerId: located.layer.id });
+    }
+    const surface = surfaceAt(unit, { x: unitGeometry.x + unitGeometry.width / 2, y: unitGeometry.y + unitGeometry.height / 2 });
+    if (!surface) throw new Error("页面没有可承载对象的纸面");
+    const width = Math.min(unitGeometry.width, surface.geometry.width);
+    const height = Math.min(unitGeometry.height, surface.geometry.height);
+    const fittedGeometry = {
+      ...unitGeometry,
+      x: clamp(unitGeometry.x, surface.geometry.x, surface.geometry.x + surface.geometry.width - width),
+      y: clamp(unitGeometry.y, surface.geometry.y, surface.geometry.y + surface.geometry.height - height),
+      width,
+      height,
+    };
+    const nextElement = { ...structuredClone(element), transform: fittedGeometry } as OverlayElement;
+    if (nextElement.kind === "balloon" && unitTail) nextElement.tailTarget = unitTail;
+    const target = overlayLayerFor(context, unit, { type: "unit" }, "page_content", "纸面内容", surface.id);
+    if (target.command) commands.push(target.command);
+    commands.push({ type: "add_overlay_element", unitId: unit.id, layerId: target.layer.id, element: nextElement });
+    return commands;
+  },
+});
+
+const returnElementToFrameCapability = defineCapability({
+  id: "return_element_to_frame",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), frameId: z.string().min(1) }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["overlay_element_exists", "target_frame_exists", "image_return_requires_empty_frame_art_slot", "resulting_document_is_valid"],
+  outputCommandTypes: ["remove_overlay_element", "remove_overlay_layer", "add_frame_layer", "add_layer_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, layer, element } = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+    const frame = unit.frames.find((item) => item.id === input.frameId);
+    if (!frame) throw new Error(`missing Frame: ${input.frameId}`);
+    if (element.kind === "image" && frame.layers.some((frameLayer) => frameLayer.elements.some((frameElement) => frameElement.kind === "image"))) {
+      throw new Error("画格内已有图片，请先移除当前格内图片后再收回");
+    }
+    const anchor = layer.anchor;
+    const anchorFrame = anchor.type === "frame" ? unit.frames.find((item) => item.id === anchor.frameId) : undefined;
+    const unitGeometry = anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform;
+    const nextElement = { ...structuredClone(element), transform: element.kind === "image" ? { x: 0, y: 0, width: 1, height: 1 } : deriveLocalTransform(frame.geometry, unitGeometry) } as FrameElement;
+    if (nextElement.kind === "balloon" && nextElement.tailTarget) {
+      const unitTail = anchorFrame ? { x: anchorFrame.geometry.x + nextElement.tailTarget.x * anchorFrame.geometry.width, y: anchorFrame.geometry.y + nextElement.tailTarget.y * anchorFrame.geometry.height } : nextElement.tailTarget;
+      nextElement.tailTarget = { x: (unitTail.x - frame.geometry.x) / frame.geometry.width, y: (unitTail.y - frame.geometry.y) / frame.geometry.height };
+    }
+    const kind: FrameLayer["kind"] = nextElement.kind === "image" ? "art" : nextElement.kind === "effect" ? "effect" : "text";
+    let targetLayer = frame.layers.find((item) => item.kind === kind);
+    const commands: WorkspaceCommand[] = [{ type: "remove_overlay_element", unitId: unit.id, layerId: layer.id, elementId: element.id }];
+    if (layer.elements.length === 1) commands.push({ type: "remove_overlay_layer", unitId: unit.id, layerId: layer.id });
+    if (!targetLayer) {
+      targetLayer = { id: context.createId(`${kind}-layer`), kind, name: kind === "art" ? "画面" : kind === "text" ? "对白" : "效果", zIndex: kind === "art" ? 10 : kind === "text" ? 20 : 30, visible: true, overflow: kind === "art" ? "clip" : "visible", elements: [] } as FrameLayer;
+      commands.push({ type: "add_frame_layer", unitId: unit.id, frameId: frame.id, layer: targetLayer });
+    }
+    commands.push({ type: "add_layer_element", unitId: unit.id, frameId: frame.id, layerId: targetLayer.id, element: nextElement });
+    return commands;
+  },
+});
+
+const reorderOverlayElementCapability = defineCapability({
+  id: "reorder_overlay_element",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), position: z.enum(["front", "back"]) }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["overlay_element_exists"],
+  outputCommandTypes: ["reorder_overlay_layer", "remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, layer, element } = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+    const levels = [...unit.frames.map((frame) => frame.zIndex), ...unit.overlayLayers.map((overlay) => overlay.zIndex)];
+    const zIndex = input.position === "front" ? Math.max(0, ...levels) + 1 : Math.min(0, ...levels) - 1;
+    if (layer.elements.length === 1) return [{ type: "reorder_overlay_layer", unitId: unit.id, layerId: layer.id, zIndex }];
+    const detachedLayer: UnitOverlayLayer = { ...structuredClone(layer), id: context.createId(`${layer.purpose}-overlay`), zIndex, elements: [] };
+    return [
+      { type: "remove_overlay_element", unitId: unit.id, layerId: layer.id, elementId: element.id },
+      { type: "add_overlay_layer", unitId: unit.id, layer: detachedLayer },
+      { type: "add_overlay_element", unitId: unit.id, layerId: detachedLayer.id, element: structuredClone(element) },
+    ];
+  },
+});
+
+const duplicateDialogueBalloonCapability = defineCapability({
+  id: "duplicate_dialogue_balloon",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1) }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["balloon_element_exists", "dialogue_exists"],
+  outputCommandTypes: ["add_dialogue", "add_layer_element", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { element } = findLocatedElement(context, input);
     if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
     const sourceDialogue = context.fixture.working.document.dialogues.find((dialogue) => dialogue.id === element.dialogueId);
     if (!sourceDialogue) throw new Error(`missing Dialogue: ${element.dialogueId}`);
@@ -399,7 +685,9 @@ const duplicateDialogueBalloonCapability = defineCapability({
     const balloon: BalloonElement = { ...structuredClone(element), id: context.createId("balloon"), dialogueId, name: `${element.name ?? "对白"} 副本`, transform: { ...element.transform, x: clamp(element.transform.x + .05, 0, 1 - element.transform.width), y: clamp(element.transform.y + .05, 0, 1 - element.transform.height) } };
     return [
       { type: "add_dialogue", dialogue: { ...structuredClone(sourceDialogue), id: dialogueId } },
-      { type: "add_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, element: balloon },
+      input.frameId
+        ? { type: "add_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, element: balloon }
+        : { type: "add_overlay_element", unitId: input.unitId, layerId: input.layerId, element: balloon },
     ];
   },
 });
@@ -407,20 +695,22 @@ const duplicateDialogueBalloonCapability = defineCapability({
 const deleteDialogueBalloonCapability = defineCapability({
   id: "delete_dialogue_balloon",
   version: 1,
-  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),
+  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1) }),
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
   risk: "low",
   preconditions: ["balloon_element_exists"],
-  outputCommandTypes: ["remove_layer_element", "remove_dialogue"],
+  outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_dialogue"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    const { element } = findLocatedElement(context, input);
     if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
     return [
-      { type: "remove_layer_element", ...input },
+      input.frameId
+        ? { type: "remove_layer_element", ...input, frameId: input.frameId }
+        : { type: "remove_overlay_element", unitId: input.unitId, layerId: input.layerId, elementId: input.elementId },
       ...(dialogueReferenceCount(context, element.dialogueId) === 1 ? [{ type: "remove_dialogue" as const, dialogueId: element.dialogueId }] : []),
     ];
   },
@@ -550,6 +840,46 @@ const moveFrameCapability = defineCapability({
   },
 });
 
+const setFrameOverlapPolicyCapability = defineCapability({
+  id: "set_frame_overlap_policy",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), frameOverlap: z.enum(["forbid", "allow"]) }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["presentation_unit_exists", "forbid_requires_non_overlapping_frames"],
+  outputCommandTypes: ["set_frame_overlap_policy"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    if (input.frameOverlap === "forbid" && unit.frames.some((frame, index) => unit.frames.slice(index + 1).some((other) => overlaps(frame.geometry, other.geometry)))) {
+      throw new Error("当前仍有重叠画格，请先将它们移开再取消叠格");
+    }
+    return [{ type: "set_frame_overlap_policy", ...input }];
+  },
+});
+
+const reorderFrameCapability = defineCapability({
+  id: "reorder_frame",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1), zIndex: z.number().int() }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["frame_exists"],
+  outputCommandTypes: ["reorder_frame"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    findFrame(context, input.unitId, input.frameId);
+    return [{ type: "reorder_frame", ...input }];
+  },
+});
+
 const resizeFrameCapability = defineCapability({
   id: "resize_frame",
   version: 1,
@@ -572,12 +902,37 @@ const resizeFrameCapability = defineCapability({
   },
 });
 
+const setFrameCrossPageCapability = defineCapability({
+  id: "set_frame_cross_page",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1), enabled: z.boolean() }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["spread_exists", "frame_exists", "surface_scope_is_reversible"],
+  outputCommandTypes: ["set_frame_surface_scope"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, frame } = findFrame(context, input.unitId, input.frameId);
+    if (unit.kind !== "spread") throw new Error("只有真正双页中的画格可以设为跨页格");
+    if (input.enabled) {
+      if (frame.surfaceScope === "unit") throw new Error("画格已经是跨页格");
+      return [{ type: "set_frame_surface_scope", unitId: unit.id, frameId: frame.id, surfaceScope: "unit" }];
+    }
+    if (frame.surfaceScope !== "unit") throw new Error("画格当前不是跨页格");
+    if (!unit.surfaces.some((surface) => containsGeometry(surface.geometry, frame.geometry))) throw new Error("请先将画格完整移入左页或右页，再取消跨页");
+    return [{ type: "set_frame_surface_scope", unitId: unit.id, frameId: frame.id, surfaceScope: "surface" }];
+  },
+});
+
 const setElementTransformCapability = defineCapability({
   id: "set_element_transform",
   version: 1,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
-    frameId: z.string().min(1),
+    frameId: z.string().min(1).optional(),
     layerId: z.string().min(1),
     elementId: z.string().min(1),
     transform: geometrySchema,
@@ -591,7 +946,7 @@ const setElementTransformCapability = defineCapability({
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    findLocatedElement(context, input);
     return [{ type: "set_element_transform", ...input }];
   },
 });
@@ -609,7 +964,7 @@ const updateBalloonCapability = defineCapability({
   version: 1,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
-    frameId: z.string().min(1),
+    frameId: z.string().min(1).optional(),
     layerId: z.string().min(1),
     elementId: z.string().min(1),
     changes: balloonChangesInputSchema,
@@ -623,7 +978,7 @@ const updateBalloonCapability = defineCapability({
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    const { element } = findLocatedElement(context, input);
     if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
     return [{ type: "update_balloon", ...input }];
   },
@@ -689,6 +1044,234 @@ const setElementAppearanceCapability = defineCapability({
       if (resource.kind !== "image" || !resource.mediaType.startsWith("image/")) throw new Error("appearance must reference an image resource");
     }
     return [{ type: "set_element_appearance", ...input }];
+  },
+});
+
+function compositeSource(unit: PresentationUnit, surface: PageSurface, dx: number, dy: number): Pick<PresentationUnit, "frames" | "overlayLayers"> {
+  return {
+    frames: unit.frames.map((frame) => ({ ...structuredClone(frame), geometry: shiftedGeometry(frame.geometry, dx, dy) })),
+    overlayLayers: unit.overlayLayers.map((layer) => ({
+      ...structuredClone(layer),
+      ...(layer.anchor.type === "unit" && layer.purpose !== "cross_page" && layer.purpose !== "cross_segment" ? { surfaceId: surface.id } : {}),
+      elements: layer.anchor.type === "unit" ? layer.elements.map((element) => shiftedOverlayElement(element, dx, dy)) : structuredClone(layer.elements),
+    })),
+  };
+}
+
+function assertMergeablePair(document: EditorCapabilityContext["fixture"]["working"]["document"], unitId: string, nextUnitId: string, kind: "single_page" | "vertical_segment") {
+  const index = document.reading.unitOrder.indexOf(unitId);
+  if (index < 0 || document.reading.unitOrder[index + 1] !== nextUnitId) throw new Error("只能合并当前展示单元与紧邻的下一项");
+  const first = document.units.find((unit) => unit.id === unitId);
+  const second = document.units.find((unit) => unit.id === nextUnitId);
+  if (!first || !second || first.kind !== kind || second.kind !== kind) throw new Error(kind === "single_page" ? "只能合并两个相邻普通页面" : "只能合并两个相邻滚动段");
+  if (first.surfaces.length !== 1 || second.surfaces.length !== 1) throw new Error(kind === "single_page" ? "真正双页不能再次参与合并" : "已合并的滚动段不能再次参与合并");
+  if (kind === "single_page" && (first.canvas.width !== second.canvas.width || first.canvas.height !== second.canvas.height)) throw new Error("两个页面尺寸不同，无法合并为双页");
+  if (kind === "vertical_segment" && first.canvas.width !== second.canvas.width) throw new Error("两个滚动段宽度不同，无法合并");
+  if (first.canvas.background.color !== second.canvas.background.color || JSON.stringify(first.layoutPolicy) !== JSON.stringify(second.layoutPolicy)) throw new Error("两个展示单元的背景或布局策略不同，无法合并");
+  if ([...first.overlayLayers, ...second.overlayLayers].some((layer) => layer.purpose === "cross_page" || layer.purpose === "cross_segment")) throw new Error("已有跨 surface 对象，无法再次合并");
+  return { first, second, index };
+}
+
+const mergePagesToSpreadCapability = defineCapability({
+  id: "merge_pages_to_spread",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), nextUnitId: z.string().min(1) }),
+  scope: "chapter",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "high",
+  preconditions: ["adjacent_single_pages_exist", "page_geometry_and_layout_match"],
+  outputCommandTypes: ["add_presentation_unit", "remove_presentation_unit"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    if (document.format !== "page") throw new Error("只有页漫可以合并为双页");
+    const { first, second, index } = assertMergeablePair(document, input.unitId, input.nextUnitId, "single_page");
+    const rtl = document.reading.direction === "rtl";
+    const firstSurface = { ...structuredClone(first.surfaces[0]), name: first.name, role: rtl ? "right" as const : "left" as const, geometry: { x: rtl ? first.canvas.width : 0, y: 0, width: first.canvas.width, height: first.canvas.height } };
+    const secondSurface = { ...structuredClone(second.surfaces[0]), name: second.name, role: rtl ? "left" as const : "right" as const, geometry: { x: rtl ? 0 : first.canvas.width, y: 0, width: second.canvas.width, height: second.canvas.height } };
+    const firstContent = compositeSource(first, firstSurface, firstSurface.geometry.x, 0);
+    const secondContent = compositeSource(second, secondSurface, secondSurface.geometry.x, 0);
+    const spread: PresentationUnit = {
+      id: context.createId("spread"),
+      kind: "spread",
+      canvas: { width: first.canvas.width + second.canvas.width, height: first.canvas.height, background: structuredClone(first.canvas.background) },
+      surfaces: [firstSurface, secondSurface],
+      frames: [...firstContent.frames, ...secondContent.frames],
+      overlayLayers: [...firstContent.overlayLayers, ...secondContent.overlayLayers],
+      readingSequence: [...structuredClone(first.readingSequence), ...structuredClone(second.readingSequence)],
+      layoutPolicy: structuredClone(first.layoutPolicy),
+    };
+    return [
+      { type: "add_presentation_unit", unit: spread, readingIndex: index },
+      { type: "remove_presentation_unit", unitId: first.id },
+      { type: "remove_presentation_unit", unitId: second.id },
+    ];
+  },
+});
+
+const mergeVerticalSegmentsCapability = defineCapability({
+  id: "merge_vertical_segments",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), nextUnitId: z.string().min(1) }),
+  scope: "chapter",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "high",
+  preconditions: ["adjacent_vertical_segments_exist", "segment_width_and_layout_match"],
+  outputCommandTypes: ["add_presentation_unit", "remove_presentation_unit"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    if (document.format !== "vertical") throw new Error("只有条漫可以合并滚动段");
+    const { first, second, index } = assertMergeablePair(document, input.unitId, input.nextUnitId, "vertical_segment");
+    const firstSurface = { ...structuredClone(first.surfaces[0]), name: first.name, role: "segment" as const, geometry: { x: 0, y: 0, width: first.canvas.width, height: first.canvas.height } };
+    const secondSurface = { ...structuredClone(second.surfaces[0]), name: second.name, role: "segment" as const, geometry: { x: 0, y: first.canvas.height, width: second.canvas.width, height: second.canvas.height } };
+    const firstContent = compositeSource(first, firstSurface, 0, 0);
+    const secondContent = compositeSource(second, secondSurface, 0, first.canvas.height);
+    const composite: PresentationUnit = {
+      id: context.createId("segment-group"), kind: "vertical_segment",
+      canvas: { width: first.canvas.width, height: first.canvas.height + second.canvas.height, background: structuredClone(first.canvas.background) },
+      surfaces: [firstSurface, secondSurface], frames: [...firstContent.frames, ...secondContent.frames], overlayLayers: [...firstContent.overlayLayers, ...secondContent.overlayLayers],
+      readingSequence: [...structuredClone(first.readingSequence), ...structuredClone(second.readingSequence)], layoutPolicy: structuredClone(first.layoutPolicy),
+    };
+    return [{ type: "add_presentation_unit", unit: composite, readingIndex: index }, { type: "remove_presentation_unit", unitId: first.id }, { type: "remove_presentation_unit", unitId: second.id }];
+  },
+});
+
+function splitCompositeCommands(context: EditorCapabilityContext, unit: PresentationUnit): WorkspaceCommand[] {
+  const crossPurpose = unit.kind === "spread" ? "cross_page" : "cross_segment";
+  if (unit.overlayLayers.some((layer) => layer.purpose === crossPurpose)) throw new Error(unit.kind === "spread" ? "双页仍有跨页对象，请先将其转回纸面对象或移除" : "滚动段仍有跨段对象，请先将其转回段内对象或移除");
+  if (unit.kind === "spread" && unit.frames.some((frame) => frame.surfaceScope === "unit")) throw new Error("双页仍有跨页格，请先取消跨页或移除");
+  const surfaces = unit.kind === "spread" ? orderedUnitSurfaces(unit, context.fixture.working.document.reading.direction) : [...unit.surfaces].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0) || a.geometry.y - b.geometry.y);
+  const surfaceFor = (geometry: Geometry) => surfaces.find((surface) => containsGeometry(surface.geometry, geometry));
+  const frameSurface = new Map<string, PageSurface>();
+  unit.frames.forEach((frame) => { const surface = surfaceFor(frame.geometry); if (!surface) throw new Error("存在跨越分隔线的画格，请先移回单一纸面"); frameSurface.set(frame.id, surface); });
+  unit.overlayLayers.forEach((layer) => layer.elements.forEach((element) => {
+    const anchor = layer.anchor;
+    const anchorFrame = anchor.type === "frame" ? unit.frames.find((frame) => frame.id === anchor.frameId) : undefined;
+    const geometry = anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform;
+    if (!surfaceFor(geometry)) throw new Error("存在跨越分隔线的对象，请先移回单一纸面");
+  }));
+  const readingIndex = context.fixture.working.document.reading.unitOrder.indexOf(unit.id);
+  const units = surfaces.map((surface, surfaceIndex): PresentationUnit => {
+    const frames = unit.frames.filter((frame) => frameSurface.get(frame.id)?.id === surface.id).map((frame) => ({ ...structuredClone(frame), surfaceScope: undefined, geometry: shiftedGeometry(frame.geometry, -surface.geometry.x, -surface.geometry.y) }));
+    const frameIds = new Set(frames.map((frame) => frame.id));
+    const overlayLayers = unit.overlayLayers.flatMap((layer): UnitOverlayLayer[] => {
+      if (layer.anchor.type === "frame") return frameIds.has(layer.anchor.frameId) ? [{ ...structuredClone(layer), surfaceId: undefined }] : [];
+      const elements = layer.elements.filter((element) => surfaceFor(element.transform)?.id === surface.id).map((element) => shiftedOverlayElement(element, -surface.geometry.x, -surface.geometry.y));
+      if (!elements.length) return [];
+      return [{ ...structuredClone(layer), id: surfaceIndex === 0 ? layer.id : context.createId(`${layer.purpose}-overlay`), surfaceId: undefined, elements }];
+    });
+    const id = context.createId(unit.kind === "spread" ? "page" : "segment");
+    return {
+      id, ...(surface.name ? { name: surface.name } : {}), kind: unit.kind === "spread" ? "single_page" : "vertical_segment",
+      canvas: { width: surface.geometry.width, height: surface.geometry.height, background: structuredClone(unit.canvas.background) },
+      surfaces: [{ ...structuredClone(surface), name: undefined, role: unit.kind === "spread" ? "single" : "segment", geometry: { x: 0, y: 0, width: surface.geometry.width, height: surface.geometry.height } }],
+      frames, overlayLayers, readingSequence: unit.readingSequence.filter((entry) => frameIds.has(entry.frameId)), layoutPolicy: structuredClone(unit.layoutPolicy),
+    };
+  });
+  return [...units.map((next, index): WorkspaceCommand => ({ type: "add_presentation_unit", unit: next, readingIndex: readingIndex + index })), { type: "remove_presentation_unit", unitId: unit.id }];
+}
+
+const splitSpreadToPagesCapability = defineCapability({
+  id: "split_spread_to_pages", version: 1, inputSchema: z.strictObject({ unitId: z.string().min(1) }), scope: "chapter", humanEntry: "available", agentAccess: "disabled", risk: "high",
+  preconditions: ["spread_exists", "spread_contains_no_cross_surface_objects"], outputCommandTypes: ["add_presentation_unit", "remove_presentation_unit"], previewPolicy: "inline", undoPolicy: "atomic",
+  execute(input, context) { const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId); if (!unit || unit.kind !== "spread") throw new Error("目标不是真正双页"); return splitCompositeCommands(context, unit); },
+});
+
+const splitVerticalSegmentsCapability = defineCapability({
+  id: "split_vertical_segments", version: 1, inputSchema: z.strictObject({ unitId: z.string().min(1) }), scope: "chapter", humanEntry: "available", agentAccess: "disabled", risk: "high",
+  preconditions: ["compound_vertical_segment_exists", "segment_contains_no_cross_surface_objects"], outputCommandTypes: ["add_presentation_unit", "remove_presentation_unit"], previewPolicy: "inline", undoPolicy: "atomic",
+  execute(input, context) { const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId); if (!unit || unit.kind !== "vertical_segment" || unit.surfaces.length < 2) throw new Error("目标不是复合滚动段"); return splitCompositeCommands(context, unit); },
+});
+
+const crossSurfaceImageInputSchema = z.strictObject({ unitId: z.string().min(1), assetId: z.string().min(1), assetVersionId: z.string().min(1), mediaType: z.string().startsWith("image/"), width: z.number().positive().optional(), height: z.number().positive().optional() });
+function createCrossSurfaceImage(input: z.infer<typeof crossSurfaceImageInputSchema>, context: EditorCapabilityContext, purpose: "cross_page" | "cross_segment") {
+  const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+  const valid = purpose === "cross_page" ? unit?.kind === "spread" : unit?.kind === "vertical_segment" && unit.surfaces.length > 1;
+  if (!unit || !valid) throw new Error(purpose === "cross_page" ? "跨页图片只能放入真正双页" : "跨段图片只能放入已合并的滚动段");
+  const overlay = overlayLayerFor(context, unit, { type: "unit" }, purpose, purpose === "cross_page" ? "跨页内容" : "跨段内容");
+  const element: ArtElement = { id: context.createId(purpose === "cross_page" ? "cross-page-image" : "cross-segment-image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId, transform: { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height }, crop: { x: 0, y: 0, width: 1, height: 1 }, name: purpose === "cross_page" ? "跨页图片" : "跨段图片" };
+  const commands: WorkspaceCommand[] = [];
+  if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
+  if (overlay.command) commands.push(overlay.command);
+  commands.push({ type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element });
+  return commands;
+}
+
+const createCrossPageImageCapability = defineCapability({ id: "create_cross_page_image", version: 1, inputSchema: crossSurfaceImageInputSchema, scope: "unit", humanEntry: "available", agentAccess: "disabled", risk: "medium", preconditions: ["spread_exists", "asset_version_is_fixed"], outputCommandTypes: ["declare_resource", "add_overlay_layer", "add_overlay_element"], previewPolicy: "inline", undoPolicy: "atomic", execute(input, context) { return createCrossSurfaceImage(input, context, "cross_page"); } });
+const createCrossSegmentImageCapability = defineCapability({ id: "create_cross_segment_image", version: 1, inputSchema: crossSurfaceImageInputSchema, scope: "unit", humanEntry: "available", agentAccess: "disabled", risk: "medium", preconditions: ["compound_vertical_segment_exists", "asset_version_is_fixed"], outputCommandTypes: ["declare_resource", "add_overlay_layer", "add_overlay_element"], previewPolicy: "inline", undoPolicy: "atomic", execute(input, context) { return createCrossSurfaceImage(input, context, "cross_segment"); } });
+
+const convertCrossSurfaceInputSchema = z.strictObject({ unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1) });
+function convertImageToCrossSurface(input: z.infer<typeof convertCrossSurfaceInputSchema>, context: EditorCapabilityContext, purpose: "cross_page" | "cross_segment") {
+  if (input.frameId) throw new Error(purpose === "cross_page" ? "格内图片不能直接设为跨页图片，请先转为纸面图片" : "格内图片不能直接设为跨段图片，请先转为纸面图片");
+  const located = findLocatedElement(context, input);
+  const unit = located.unit;
+  const valid = purpose === "cross_page" ? unit.kind === "spread" : unit.kind === "vertical_segment" && unit.surfaces.length > 1;
+  if (!valid || located.element.kind !== "image") throw new Error(purpose === "cross_page" ? "只有真正双页中的图片可以设为跨页" : "只有复合滚动段中的图片可以设为跨段");
+  const commands: WorkspaceCommand[] = [];
+  const overlayLocated = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+  if (overlayLocated.layer.purpose === purpose) throw new Error("图片已经是跨 surface 对象");
+  if (overlayLocated.layer.anchor.type !== "unit") throw new Error(purpose === "cross_page" ? "画格归属图片不能直接设为跨页图片，请先转为纸面图片" : "画格归属图片不能直接设为跨段图片，请先转为纸面图片");
+  const geometry = overlayLocated.element.transform;
+  commands.push({ type: "remove_overlay_element", unitId: unit.id, layerId: overlayLocated.layer.id, elementId: overlayLocated.element.id });
+  if (overlayLocated.layer.elements.length === 1) commands.push({ type: "remove_overlay_layer", unitId: unit.id, layerId: overlayLocated.layer.id });
+  const overlay = overlayLayerFor(context, unit, { type: "unit" }, purpose, purpose === "cross_page" ? "跨页内容" : "跨段内容");
+  if (overlay.command) commands.push(overlay.command);
+  commands.push({ type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element: { ...structuredClone(located.element), transform: geometry } as OverlayElement });
+  return commands;
+}
+
+const convertImageToCrossPageCapability = defineCapability({ id: "convert_image_to_cross_page", version: 1, inputSchema: convertCrossSurfaceInputSchema, scope: "element", humanEntry: "available", agentAccess: "disabled", risk: "medium", preconditions: ["unit_owned_spread_image_exists"], outputCommandTypes: ["remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"], previewPolicy: "inline", undoPolicy: "atomic", execute(input, context) { return convertImageToCrossSurface(input, context, "cross_page"); } });
+const convertImageToCrossSegmentCapability = defineCapability({ id: "convert_image_to_cross_segment", version: 1, inputSchema: convertCrossSurfaceInputSchema, scope: "element", humanEntry: "available", agentAccess: "disabled", risk: "medium", preconditions: ["unit_owned_compound_segment_image_exists"], outputCommandTypes: ["remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"], previewPolicy: "inline", undoPolicy: "atomic", execute(input, context) { return convertImageToCrossSurface(input, context, "cross_segment"); } });
+
+const convertBalloonToCrossPageCapability = defineCapability({
+  id: "convert_balloon_to_cross_page",
+  version: 1,
+  inputSchema: convertCrossSurfaceInputSchema,
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["spread_exists", "balloon_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const located = findLocatedElement(context, input);
+    if (located.unit.kind !== "spread" || located.element.kind !== "balloon") throw new Error("只有真正双页中的对白可以设为跨页");
+    const commands: WorkspaceCommand[] = [];
+    let geometry: Geometry;
+    let tailTarget: Point | undefined;
+    if (input.frameId) {
+      const frameLocated = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+      geometry = resolveLocalTransform(frameLocated.frame.geometry, frameLocated.element.transform);
+      tailTarget = frameLocated.element.kind === "balloon" && frameLocated.element.tailTarget
+        ? { x: frameLocated.frame.geometry.x + frameLocated.element.tailTarget.x * frameLocated.frame.geometry.width, y: frameLocated.frame.geometry.y + frameLocated.element.tailTarget.y * frameLocated.frame.geometry.height }
+        : undefined;
+      commands.push({ type: "remove_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, elementId: input.elementId });
+    } else {
+      const overlayLocated = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+      if (overlayLocated.layer.purpose === "cross_page") throw new Error("对白已经是跨页对象");
+      const anchor = overlayLocated.layer.anchor;
+      const anchorFrame = anchor.type === "frame" ? overlayLocated.unit.frames.find((frame) => frame.id === anchor.frameId) : undefined;
+      geometry = anchorFrame ? resolveLocalTransform(anchorFrame.geometry, overlayLocated.element.transform) : overlayLocated.element.transform;
+      tailTarget = overlayLocated.element.kind === "balloon" && overlayLocated.element.tailTarget
+        ? anchorFrame
+          ? { x: anchorFrame.geometry.x + overlayLocated.element.tailTarget.x * anchorFrame.geometry.width, y: anchorFrame.geometry.y + overlayLocated.element.tailTarget.y * anchorFrame.geometry.height }
+          : overlayLocated.element.tailTarget
+        : undefined;
+      commands.push({ type: "remove_overlay_element", unitId: input.unitId, layerId: input.layerId, elementId: input.elementId });
+      if (overlayLocated.layer.elements.length === 1) commands.push({ type: "remove_overlay_layer", unitId: input.unitId, layerId: input.layerId });
+    }
+    const target = overlayLayerFor(context, located.unit, { type: "unit" }, "cross_page", "跨页内容");
+    if (target.command) commands.push(target.command);
+    const balloon = { ...structuredClone(located.element), transform: geometry, ...(tailTarget ? { tailTarget } : {}) } as OverlayElement;
+    commands.push({ type: "add_overlay_element", unitId: input.unitId, layerId: target.layer.id, element: balloon });
+    return commands;
   },
 });
 
@@ -827,6 +1410,12 @@ const capabilityRegistry = {
   replace_frame_image: replaceFrameImageCapability,
   remove_frame_image: removeFrameImageCapability,
   create_dialogue_balloon: createDialogueBalloonCapability,
+  create_page_image: createPageImageCapability,
+  create_page_dialogue_balloon: createPageDialogueBalloonCapability,
+  promote_element_to_overlay: promoteElementToOverlayCapability,
+  convert_element_to_page: convertElementToPageCapability,
+  return_element_to_frame: returnElementToFrameCapability,
+  reorder_overlay_element: reorderOverlayElementCapability,
   duplicate_dialogue_balloon: duplicateDialogueBalloonCapability,
   delete_dialogue_balloon: deleteDialogueBalloonCapability,
   update_dialogue: updateDialogueCapability,
@@ -834,11 +1423,23 @@ const capabilityRegistry = {
   create_frame_storyboard_beat: createFrameStoryboardBeatCapability,
   set_art_crop: setArtCropCapability,
   move_frame: moveFrameCapability,
+  set_frame_overlap_policy: setFrameOverlapPolicyCapability,
+  reorder_frame: reorderFrameCapability,
   resize_frame: resizeFrameCapability,
+  set_frame_cross_page: setFrameCrossPageCapability,
   set_element_transform: setElementTransformCapability,
   update_balloon: updateBalloonCapability,
   reorder_layer: reorderLayerCapability,
   set_element_appearance: setElementAppearanceCapability,
+  merge_pages_to_spread: mergePagesToSpreadCapability,
+  split_spread_to_pages: splitSpreadToPagesCapability,
+  create_cross_page_image: createCrossPageImageCapability,
+  convert_image_to_cross_page: convertImageToCrossPageCapability,
+  merge_vertical_segments: mergeVerticalSegmentsCapability,
+  split_vertical_segments: splitVerticalSegmentsCapability,
+  create_cross_segment_image: createCrossSegmentImageCapability,
+  convert_image_to_cross_segment: convertImageToCrossSegmentCapability,
+  convert_balloon_to_cross_page: convertBalloonToCrossPageCapability,
   create_page: createPageCapability,
   create_vertical_segment: createVerticalSegmentCapability,
   update_presentation_unit: updatePresentationUnitCapability,

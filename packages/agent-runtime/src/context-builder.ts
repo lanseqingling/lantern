@@ -298,6 +298,7 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
           readingOrder: order.get(frame.id),
           geometry: frame.geometry,
           zIndex: frame.zIndex,
+          surfaceScope: frame.surfaceScope ?? "surface",
           shape: frame.shape,
           mask: frame.mask,
           storyboardBeat: storyboardBeat ? {
@@ -322,7 +323,24 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
       layoutPolicy: unit.layoutPolicy,
       frameCount: frames.length,
       frames,
-      overlayLayers: unit.overlayLayers.map((layer) => ({ id: layer.id, purpose: layer.purpose, anchor: layer.anchor, zIndex: layer.zIndex, elementIds: layer.elements.map((element) => element.id) })),
+      overlayLayers: unit.overlayLayers.map((layer) => ({
+        id: layer.id,
+        purpose: layer.purpose,
+        anchor: layer.anchor,
+        surfaceId: layer.surfaceId,
+        composite: "unit_overlay" as const,
+        clip: "none" as const,
+        zIndex: layer.zIndex,
+        visible: layer.visible,
+        locked: layer.locked ?? false,
+        elements: layer.elements.map((element) => ({
+          ...element,
+          owner: layer.anchor.type === "frame" ? { type: "frame" as const, frameId: layer.anchor.frameId } : { type: "unit" as const, unitId: unit.id },
+          anchor: layer.anchor,
+          composite: "unit_overlay" as const,
+          clip: "none" as const,
+        })),
+      })),
     }];
   });
   const assetsByKind = (kind: string) => modelInput.assets

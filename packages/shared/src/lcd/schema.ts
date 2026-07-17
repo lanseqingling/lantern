@@ -59,6 +59,7 @@ export const frameMaskSchema = z.object({ mode: z.enum(["clip", "visible", "blee
 
 export const frameSchema = z.object({
   id: z.string().min(1), geometry: geometrySchema, zIndex: z.number().int(),
+  surfaceScope: z.enum(["surface", "unit"]).optional(),
   storyRefs: z.array(z.object({ storyboardBeatId: z.string().min(1), storyboardBeatVersionId: z.string().min(1), role: z.enum(["primary", "continuity"]) })),
   border: frameBorderSchema,
   shape: frameShapeSchema,
@@ -66,13 +67,13 @@ export const frameSchema = z.object({
   constraints: z.array(z.enum(["stay_on_surface", "preserve_aspect", "locked"])).optional(), ...visibilitySchema,
 });
 const overlayElementSchema = frameElementSchema;
-const overlayLayerSchema = z.object({
+export const overlayLayerSchema = z.object({
   id: z.string().min(1), name: z.string(), zIndex: z.number().int(), visible: z.boolean(), locked: z.boolean().optional(),
   anchor: z.discriminatedUnion("type", [z.object({ type: z.literal("unit") }), z.object({ type: z.literal("frame"), frameId: z.string().min(1) })]),
-  purpose: z.enum(["breakout", "cross_frame", "cross_page", "page_effect", "decoration"]), elements: z.array(overlayElementSchema),
+  surfaceId: z.string().min(1).optional(), purpose: z.enum(["breakout", "cross_frame", "cross_page", "cross_segment", "page_content", "page_effect", "decoration"]), elements: z.array(overlayElementSchema),
 });
 export const surfaceSchema = z.object({
-  id: z.string().min(1), role: z.enum(["single", "left", "right", "segment"]), geometry: rectSchema,
+  id: z.string().min(1), name: z.string().min(1).max(80).optional(), role: z.enum(["single", "left", "right", "segment"]), geometry: rectSchema,
   trim: z.object({ top: z.number(), right: z.number(), bottom: z.number(), left: z.number() }).optional(),
   bleed: z.object({ top: z.number(), right: z.number(), bottom: z.number(), left: z.number() }).optional(), pageNumber: z.number().int().positive().optional(),
 });
@@ -127,14 +128,17 @@ export function validateComicDocument(input: unknown): ComicDocument {
       claimId(surface.id);
       if (!insideCanvas(surface.geometry, unit.canvas)) throw new Error(`${surface.id} must stay inside unit canvas`);
     });
-    if (unit.kind === "spread" && (unit.surfaces.filter((surface) => surface.role === "left").length !== 1 || unit.surfaces.filter((surface) => surface.role === "right").length !== 1)) throw new Error(`${unit.id} spread must have one left and one right surface`);
-    if (unit.kind !== "spread" && unit.surfaces.length !== 1) throw new Error(`${unit.id} must have exactly one surface`);
+    if (unit.kind === "spread" && (unit.surfaces.length !== 2 || unit.surfaces.filter((surface) => surface.role === "left").length !== 1 || unit.surfaces.filter((surface) => surface.role === "right").length !== 1)) throw new Error(`${unit.id} spread must have exactly one left and one right surface`);
+    if (unit.kind === "vertical_segment" && unit.surfaces.some((surface) => surface.role !== "segment")) throw new Error(`${unit.id} vertical segment must contain only segment surfaces`);
+    if (unit.kind !== "spread" && unit.kind !== "vertical_segment" && unit.surfaces.length !== 1) throw new Error(`${unit.id} must have exactly one surface`);
     const frameIds = new Set(unit.frames.map((frame) => frame.id));
     const readingIds = unit.readingSequence.map((entry) => entry.frameId);
     if (new Set(readingIds).size !== readingIds.length || readingIds.some((id) => !frameIds.has(id)) || [...frameIds].some((id) => !readingIds.includes(id))) throw new Error(`${unit.id} readingSequence must contain every frame exactly once`);
     unit.frames.forEach((frame, frameIndex) => {
       claimId(frame.id);
       if (!insideCanvas(frame.geometry, unit.canvas)) throw new Error(`${frame.id} must stay inside unit canvas`);
+      if (frame.surfaceScope === "unit" && unit.kind !== "spread") throw new Error(`${frame.id} unit-scoped frame requires a spread`);
+      if (frame.surfaceScope !== "unit" && !unit.surfaces.some((surface) => insideCanvas({ x: frame.geometry.x - surface.geometry.x, y: frame.geometry.y - surface.geometry.y, width: frame.geometry.width, height: frame.geometry.height }, { width: surface.geometry.width, height: surface.geometry.height }))) throw new Error(`${frame.id} must stay inside one surface`);
       if (frame.storyRefs.filter((ref) => ref.role === "primary").length > 1) throw new Error(`${frame.id} may have at most one primary storyboard beat`);
       if (unit.layoutPolicy.frameOverlap === "forbid") unit.frames.slice(frameIndex + 1).forEach((other) => { if (overlaps(frame.geometry, other.geometry)) throw new Error(`${frame.id} overlaps ${other.id}`); });
       frame.layers.forEach((layer) => {
@@ -150,8 +154,15 @@ export function validateComicDocument(input: unknown): ComicDocument {
     unit.overlayLayers.forEach((layer) => {
       claimId(layer.id);
       if (layer.anchor.type === "frame" && !frameIds.has(layer.anchor.frameId)) throw new Error(`${layer.id} references missing anchor frame`);
+      if (layer.surfaceId && !unit.surfaces.some((surface) => surface.id === layer.surfaceId)) throw new Error(`${layer.id} references missing surface ${layer.surfaceId}`);
+      if (layer.surfaceId && layer.anchor.type !== "unit") throw new Error(`${layer.id} surface constraint requires a unit anchor`);
+      if (layer.surfaceId && (layer.purpose === "cross_page" || layer.purpose === "cross_segment")) throw new Error(`${layer.id} cross-surface layer cannot be constrained to one surface`);
+      if (layer.purpose === "cross_page" && unit.kind !== "spread") throw new Error(`${layer.id} cross-page layer requires a spread`);
+      if (layer.purpose === "cross_segment" && (unit.kind !== "vertical_segment" || unit.surfaces.length < 2)) throw new Error(`${layer.id} cross-segment layer requires a compound vertical segment`);
+      const constrainedSurface = layer.surfaceId ? unit.surfaces.find((surface) => surface.id === layer.surfaceId) : undefined;
       layer.elements.forEach((element) => {
         claimId(element.id);
+        if (constrainedSurface && !insideCanvas({ x: element.transform.x - constrainedSurface.geometry.x, y: element.transform.y - constrainedSurface.geometry.y, width: element.transform.width, height: element.transform.height }, { width: constrainedSurface.geometry.width, height: constrainedSurface.geometry.height })) throw new Error(`${element.id} must stay inside constrained surface ${constrainedSurface.id}`);
         if (element.kind === "image" && !resourceKeys.has(`${element.assetId}:${element.assetVersionId}`)) throw new Error(`${element.id} references an undeclared asset version`);
         if (element.kind === "text" || element.kind === "balloon") assertAppearanceResource(element);
         if (element.kind === "balloon" && !dialogueIds.has(element.dialogueId)) throw new Error(`${element.id} references missing dialogue ${element.dialogueId}`);

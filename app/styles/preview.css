@@ -5,6 +5,8 @@
 .preview-shell .paged-reader.is-spread .preview-page-wrap { grid-template-columns: repeat(2, auto); }
 .preview-shell .paged-reader.is-spread .preview-page-wrap .comic-page { border-left: 1px solid rgba(23,32,38,.12); }
 .preview-shell .paged-reader.is-spread .preview-page-wrap .comic-page:first-child { border-left: 0; }
+.preview-shell .paged-reader.is-true-spread .preview-page-wrap { width: 100vw; height: auto; }
+.preview-shell .paged-reader.is-true-spread .preview-page-wrap .comic-page { width: 100vw; height: auto; }
 .preview-shell.format-vertical .paged-reader.vertical-reader { display: block; overflow-x: hidden; overflow-y: auto; touch-action: pan-y; scrollbar-width: none; }
 .preview-shell.format-vertical .paged-reader.vertical-reader::-webkit-scrollbar { display: none; }
 .preview-shell.format-vertical .preview-page-wrap.vertical-preview-strip { display: flex; width: 50vw; height: auto; min-height: 100dvh; margin: 0 auto; flex-direction: column; gap: 0; pointer-events: none; }

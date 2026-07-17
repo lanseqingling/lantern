@@ -1,0 +1,44 @@
+import type { ComicDocument, PageSurface, PresentationUnit, ReadingDirection } from "./lcd/types";
+
+export type PageDisplayMode = "single" | "spread";
+export type PageDisplayGroup = { unitIndices: number[]; unitIds: string[]; trueSpread: boolean };
+
+export function orderedUnitSurfaces(unit: PresentationUnit, direction: ReadingDirection): PageSurface[] {
+  if (unit.kind !== "spread") return [...unit.surfaces].sort((left, right) => (left.pageNumber ?? 0) - (right.pageNumber ?? 0) || left.geometry.y - right.geometry.y || left.geometry.x - right.geometry.x);
+  const order = direction === "rtl" ? ["right", "left"] : ["left", "right"];
+  return [...unit.surfaces].sort((left, right) => order.indexOf(left.role) - order.indexOf(right.role));
+}
+
+export function physicalPageCount(document: ComicDocument) {
+  return document.reading.unitOrder.reduce((count, unitId) => count + (document.units.find((unit) => unit.id === unitId)?.surfaces.length ?? 0), 0);
+}
+
+export function pageDisplayGroups(document: ComicDocument, mode: PageDisplayMode): PageDisplayGroup[] {
+  const unitById = new Map(document.units.map((unit) => [unit.id, unit]));
+  const orderedUnits = document.reading.unitOrder.flatMap((unitId) => {
+    const unit = unitById.get(unitId);
+    return unit ? [unit] : [];
+  });
+  const groups: PageDisplayGroup[] = [];
+  for (let index = 0; index < orderedUnits.length;) {
+    const unit = orderedUnits[index];
+    if (unit.kind === "spread") {
+      groups.push({ unitIndices: [index], unitIds: [unit.id], trueSpread: true });
+      index += 1;
+      continue;
+    }
+    const next = orderedUnits[index + 1];
+    if (mode === "spread" && unit.kind === "single_page" && next?.kind === "single_page") {
+      groups.push({ unitIndices: [index, index + 1], unitIds: [unit.id, next.id], trueSpread: false });
+      index += 2;
+      continue;
+    }
+    groups.push({ unitIndices: [index], unitIds: [unit.id], trueSpread: false });
+    index += 1;
+  }
+  return groups;
+}
+
+export function displayGroupForUnit(groups: PageDisplayGroup[], unitIndex: number) {
+  return groups.find((group) => group.unitIndices.includes(unitIndex)) ?? groups[0];
+}

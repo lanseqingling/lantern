@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
-import { createComicPageView, frameElements, normalizeStoryboardBeat, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
+import { createComicPageView, frameElements, normalizeStoryboardBeat, pageDisplayGroups, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
@@ -134,6 +134,12 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "replace_frame_image",
     "remove_frame_image",
     "create_dialogue_balloon",
+    "create_page_image",
+    "create_page_dialogue_balloon",
+    "promote_element_to_overlay",
+    "convert_element_to_page",
+    "return_element_to_frame",
+    "reorder_overlay_element",
     "duplicate_dialogue_balloon",
     "delete_dialogue_balloon",
     "update_dialogue",
@@ -141,11 +147,23 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "create_frame_storyboard_beat",
     "set_art_crop",
     "move_frame",
+    "set_frame_overlap_policy",
+    "reorder_frame",
     "resize_frame",
+    "set_frame_cross_page",
     "set_element_transform",
     "update_balloon",
     "reorder_layer",
     "set_element_appearance",
+    "merge_pages_to_spread",
+    "split_spread_to_pages",
+    "create_cross_page_image",
+    "convert_image_to_cross_page",
+    "merge_vertical_segments",
+    "split_vertical_segments",
+    "create_cross_segment_image",
+    "convert_image_to_cross_segment",
+    "convert_balloon_to_cross_page",
     "create_page",
     "create_vertical_segment",
     "update_presentation_unit",
@@ -153,6 +171,161 @@ test("editor capabilities are registered but remain unavailable to Agent executi
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
+});
+
+test("true spreads stay indivisible, preserve physical surfaces and block unsafe splitting", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-spread-${++sequence}`, actor: "human" as const });
+  const originalFrameId = fixture.working.document.units[0].frames[0].id;
+  const added = dryRunEditorCapability("create_page", {}, context());
+  fixture.working = added.result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  const merged = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, context());
+  fixture.working = merged.result.working;
+  const spread = fixture.working.document.units.find((unit) => unit.kind === "spread")!;
+  assert.equal(fixture.working.document.reading.unitOrder.length, 1);
+  assert.deepEqual(spread.surfaces.map((surface) => surface.pageNumber).sort(), [1, 2]);
+  assert.equal(spread.frames.some((frame) => frame.id === originalFrameId), true);
+  assert.deepEqual(pageDisplayGroups(fixture.working.document, "single"), [{ unitIndices: [0], unitIds: [spread.id], trueSpread: true }]);
+  assert.deepEqual(pageDisplayGroups(fixture.working.document, "spread"), [{ unitIndices: [0], unitIds: [spread.id], trueSpread: true }]);
+
+  const resource = fixture.working.document.resources[0];
+  const crossPage = dryRunEditorCapability("create_cross_page_image", { unitId: spread.id, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context());
+  fixture.working = crossPage.result.working;
+  const crossLayer = fixture.working.document.units.find((unit) => unit.id === spread.id)?.overlayLayers.find((layer) => layer.purpose === "cross_page");
+  assert.equal(crossLayer?.surfaceId, undefined);
+  assert.equal(crossLayer?.elements.length, 1);
+  assert.deepEqual(crossLayer?.elements[0]?.transform, { x: 0, y: 0, width: spread.canvas.width, height: spread.canvas.height });
+  assert.throws(() => dryRunEditorCapability("replace_frame_image", { unitId: spread.id, layerId: crossLayer!.id, elementId: crossLayer!.elements[0].id, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context()), /不能直接更换/);
+  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨页对象/);
+  const crossImageId = crossLayer!.elements[0].id;
+  fixture.working = dryRunEditorCapability("convert_element_to_page", { unitId: spread.id, layerId: crossLayer!.id, elementId: crossImageId }, context()).result.working;
+  const restoredUnit = fixture.working.document.units.find((unit) => unit.id === spread.id)!;
+  const restoredLayer = restoredUnit.overlayLayers.find((layer) => layer.purpose === "page_content" && layer.elements.some((element) => element.id === crossImageId));
+  assert.equal(restoredUnit.overlayLayers.some((layer) => layer.purpose === "cross_page"), false);
+  assert.ok(restoredLayer?.surfaceId);
+  assert.deepEqual(restoredLayer?.elements[0].transform, { x: 0, y: 0, width: spread.canvas.width / 2, height: spread.canvas.height });
+  assert.equal(dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()).result.working.document.reading.unitOrder.length, 2);
+});
+
+test("safe spread splitting restores two units without changing object ids", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-safe-${++sequence}`, actor: "human" as const });
+  const originalFrameIds = fixture.working.document.units[0].frames.map((frame) => frame.id);
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  fixture.working = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, context()).result.working;
+  const spreadId = fixture.working.document.reading.unitOrder[0];
+  const split = dryRunEditorCapability("split_spread_to_pages", { unitId: spreadId }, context());
+  assert.equal(split.result.working.document.reading.unitOrder.length, 2);
+  assert.deepEqual(split.result.working.document.units.flatMap((unit) => unit.frames.map((frame) => frame.id)).sort(), originalFrameIds.sort());
+  assert.deepEqual(split.result.working.document.reading.unitOrder.flatMap((unitId) => split.result.working.document.units.find((unit) => unit.id === unitId)?.surfaces.map((surface) => surface.pageNumber) ?? []), [1, 2]);
+});
+
+test("frames and balloons can explicitly cross a true spread", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-cross-object-${++sequence}`, actor: "human" as const });
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  fixture.working = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, context()).result.working;
+  const spread = fixture.working.document.units.find((unit) => unit.kind === "spread")!;
+  const frame = spread.frames[0];
+
+  fixture.working = dryRunEditorCapability("set_frame_cross_page", { unitId: spread.id, frameId: frame.id, enabled: true }, context()).result.working;
+  assert.equal(fixture.working.document.units.find((unit) => unit.id === spread.id)?.frames.find((candidate) => candidate.id === frame.id)?.surfaceScope, "unit");
+  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨页格/);
+  fixture.working = dryRunEditorCapability("set_frame_cross_page", { unitId: spread.id, frameId: frame.id, enabled: false }, context()).result.working;
+
+  const created = dryRunEditorCapability("create_dialogue_balloon", { unitId: spread.id, frameId: frame.id, position: { x: .3, y: .2 } }, context());
+  const balloonCommand = created.commands.find((command) => command.type === "add_layer_element");
+  if (!balloonCommand || balloonCommand.type !== "add_layer_element" || balloonCommand.element.kind !== "balloon") throw new Error("missing created balloon");
+  const balloonId = balloonCommand.element.id;
+  fixture.working = created.result.working;
+  const currentFrame = fixture.working.document.units.find((unit) => unit.id === spread.id)!.frames.find((candidate) => candidate.id === frame.id)!;
+  const balloonLayer = currentFrame.layers.find((layer) => layer.elements.some((element) => element.id === balloonId))!;
+  fixture.working = dryRunEditorCapability("convert_balloon_to_cross_page", { unitId: spread.id, frameId: frame.id, layerId: balloonLayer.id, elementId: balloonId }, context()).result.working;
+  const crossLayer = fixture.working.document.units.find((unit) => unit.id === spread.id)!.overlayLayers.find((layer) => layer.purpose === "cross_page")!;
+  assert.equal(crossLayer.anchor.type, "unit");
+  assert.equal(crossLayer.elements.some((element) => element.id === balloonId && element.kind === "balloon"), true);
+  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨页对象/);
+  fixture.working = dryRunEditorCapability("convert_element_to_page", { unitId: spread.id, layerId: crossLayer.id, elementId: balloonId }, context()).result.working;
+  assert.equal(dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()).result.working.document.reading.unitOrder.length, 2);
+});
+
+test("a frame image must become paper-owned before it can become cross-page", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-frame-cross-${++sequence}`, actor: "human" as const });
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  fixture.working = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, context()).result.working;
+  const spread = fixture.working.document.units.find((unit) => unit.kind === "spread")!;
+  const frame = spread.frames.find((candidate) => candidate.layers.some((layer) => layer.elements.some((element) => element.kind === "image")))!;
+  const layer = frame.layers.find((candidate) => candidate.elements.some((element) => element.kind === "image"))!;
+  const image = layer.elements.find((element) => element.kind === "image")!;
+  assert.throws(() => dryRunEditorCapability("convert_image_to_cross_page", { unitId: spread.id, frameId: frame.id, layerId: layer.id, elementId: image.id }, context()), /先转为纸面图片/);
+  fixture.working = dryRunEditorCapability("convert_element_to_page", { unitId: spread.id, frameId: frame.id, layerId: layer.id, elementId: image.id }, context()).result.working;
+  const paperLayer = fixture.working.document.units.find((unit) => unit.id === spread.id)!.overlayLayers.find((candidate) => candidate.purpose === "page_content" && candidate.elements.some((element) => element.id === image.id))!;
+  const converted = dryRunEditorCapability("convert_image_to_cross_page", { unitId: spread.id, layerId: paperLayer.id, elementId: image.id }, context());
+  const convertedSpread = converted.result.working.document.units.find((unit) => unit.id === spread.id)!;
+  assert.equal(frameElements(convertedSpread.frames.find((candidate) => candidate.id === frame.id)!).some((element) => element.id === image.id), false);
+  assert.equal(convertedSpread.overlayLayers.find((candidate) => candidate.purpose === "cross_page")?.elements.some((element) => element.id === image.id), true);
+});
+
+test("page grouping never pairs an ordinary page across a true spread", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-group-${++sequence}`, actor: "human" as const });
+  for (let index = 0; index < 3; index += 1) fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  const [, secondId, thirdId] = fixture.working.document.reading.unitOrder;
+  fixture.working = dryRunEditorCapability("merge_pages_to_spread", { unitId: secondId, nextUnitId: thirdId }, context()).result.working;
+  const spreadId = fixture.working.document.reading.unitOrder[1];
+  assert.deepEqual(pageDisplayGroups(fixture.working.document, "single"), [
+    { unitIndices: [0], unitIds: [fixture.working.document.reading.unitOrder[0]], trueSpread: false },
+    { unitIndices: [1], unitIds: [spreadId], trueSpread: true },
+    { unitIndices: [2], unitIds: [fixture.working.document.reading.unitOrder[2]], trueSpread: false },
+  ]);
+  assert.deepEqual(pageDisplayGroups(fixture.working.document, "spread"), pageDisplayGroups(fixture.working.document, "single"));
+});
+
+test("RTL spread merge keeps the first reading unit on the physical right", () => {
+  const fixture = createInitialFixture();
+  fixture.working.document.reading.direction = "rtl";
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-rtl-${++sequence}`, actor: "human" as const });
+  const firstOriginalId = fixture.working.document.units[0].id;
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  const result = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, context());
+  const spread = result.result.working.document.units.find((unit) => unit.kind === "spread")!;
+  const firstSurfaceId = fixture.working.document.units.find((unit) => unit.id === firstOriginalId)!.surfaces[0].id;
+  const firstSurface = spread.surfaces.find((surface) => surface.id === firstSurfaceId)!;
+  assert.equal(firstSurface.role, "right");
+  assert.equal(firstSurface.geometry.x, spread.canvas.width / 2);
+  assert.equal(spread.frames.some((frame) => frame.geometry.x >= spread.canvas.width / 2), true);
+});
+
+test("compound vertical segments support one cross-segment image and remain physically numbered", () => {
+  const fixture = createInitialFixture();
+  fixture.working.document = structuredClone(previewFixtures.vertical);
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-vertical-${++sequence}`, actor: "human" as const });
+  fixture.working = dryRunEditorCapability("create_vertical_segment", { aspectRatio: "9:16" }, context()).result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  fixture.working = dryRunEditorCapability("merge_vertical_segments", { unitId: firstId, nextUnitId: secondId }, context()).result.working;
+  const compound = fixture.working.document.units.find((unit) => unit.kind === "vertical_segment" && unit.surfaces.length === 2)!;
+  assert.deepEqual(compound.surfaces.map((surface) => surface.pageNumber), [1, 2]);
+  assert.equal(compound.surfaces[1].geometry.y, compound.surfaces[0].geometry.height);
+  const resource = fixture.working.document.resources[0];
+  const crossed = dryRunEditorCapability("create_cross_segment_image", { unitId: compound.id, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context());
+  const crossLayer = crossed.result.working.document.units.find((unit) => unit.id === compound.id)?.overlayLayers.find((layer) => layer.purpose === "cross_segment");
+  assert.equal(crossLayer?.elements.length, 1);
+  assert.equal(crossLayer?.surfaceId, undefined);
+  fixture.working = crossed.result.working;
+  assert.throws(() => dryRunEditorCapability("split_vertical_segments", { unitId: compound.id }, context()), /跨段对象/);
 });
 
 test("human frame, image and dialogue management capabilities form valid atomic revisions", () => {
@@ -199,6 +372,96 @@ test("human frame, image and dialogue management capabilities form valid atomic 
   const deletedFrame = dryRunEditorCapability("delete_frame", { unitId: unit.id, frameId: frame.id }, context());
   assert.equal(deletedFrame.result.working.document.units[0].frames.some((item) => item.id === frame.id), false);
   assert.throws(() => planEditorCapability("create_frame", { unitId: unit.id, position: { x: 80, y: 80 } }, { ...context(), actor: "agent" }), /disabled for Agent/);
+});
+
+test("page objects, breakout and frame overlap preserve explicit ownership and visual geometry", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const imageLayer = frame.layers.find((layer) => layer.kind === "art")!;
+  const image = imageLayer.elements.find((element) => element.kind === "image")!;
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-overlay-${++sequence}`, actor: "human" as const });
+  const beforeGeometry = resolveLocalTransform(frame.geometry, image.transform);
+
+  const promoted = dryRunEditorCapability("promote_element_to_overlay", {
+    unitId: unit.id, frameId: frame.id, layerId: imageLayer.id, elementId: image.id,
+  }, context());
+  fixture.working = promoted.result.working;
+  const promotedUnit = fixture.working.document.units[0];
+  const promotedLayer = promotedUnit.overlayLayers.find((layer) => layer.purpose === "breakout");
+  assert.deepEqual(promotedLayer?.anchor, { type: "frame", frameId: frame.id });
+  assert.equal(promotedLayer?.elements[0]?.id, image.id);
+  const promotedView = createComicPageView(fixture.working.document, promotedUnit).elements.find((element) => element.id === image.id);
+  assert.deepEqual(promotedView?.geometry, beforeGeometry);
+  assert.deepEqual(promotedView?.type === "image" ? promotedView.location : undefined, { space: "overlay", layerId: promotedLayer?.id, anchor: { type: "frame", frameId: frame.id }, purpose: "breakout" });
+
+  const converted = dryRunEditorCapability("convert_element_to_page", { unitId: unit.id, layerId: promotedLayer!.id, elementId: image.id }, context());
+  fixture.working = converted.result.working;
+  const convertedUnit = fixture.working.document.units[0];
+  const convertedLayer = convertedUnit.overlayLayers.find((layer) => layer.purpose === "page_content");
+  assert.deepEqual(convertedLayer?.anchor, { type: "unit" });
+  assert.equal(convertedUnit.overlayLayers.some((layer) => layer.id === promotedLayer!.id), false);
+  const convertedView = createComicPageView(fixture.working.document, convertedUnit).elements.find((element) => element.id === image.id);
+  assert.deepEqual(convertedView?.geometry, beforeGeometry);
+  assert.deepEqual(convertedView?.type === "image" && convertedView.location.space === "overlay" ? convertedView.location.anchor : undefined, { type: "unit" });
+
+  const returned = dryRunEditorCapability("return_element_to_frame", {
+    unitId: unit.id, frameId: frame.id, layerId: convertedLayer!.id, elementId: image.id,
+  }, context());
+  fixture.working = returned.result.working;
+  const returnedUnit = fixture.working.document.units[0];
+  assert.equal(returnedUnit.overlayLayers.some((layer) => layer.id === convertedLayer!.id), false);
+  const returnedImage = frameElements(returnedUnit.frames[0]).find((element) => element.id === image.id);
+  assert.ok(returnedImage?.kind === "image");
+  assert.deepEqual(resolveLocalTransform(returnedUnit.frames[0].geometry, returnedImage.transform), beforeGeometry);
+
+  const returnedArtLayer = returnedUnit.frames[0].layers.find((layer) => layer.elements.some((element) => element.id === image.id))!;
+  const promotedAgain = dryRunEditorCapability("promote_element_to_overlay", { unitId: unit.id, frameId: frame.id, layerId: returnedArtLayer.id, elementId: image.id }, context());
+  fixture.working = promotedAgain.result.working;
+  const movedBreakoutLayer = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "breakout")!;
+  const occupiedFrame = dryRunEditorCapability("place_frame_image", {
+    unitId: unit.id, frameId: frame.id, assetId: fixture.working.document.resources[0].assetId, assetVersionId: fixture.working.document.resources[0].assetVersionId, mediaType: fixture.working.document.resources[0].mediaType,
+  }, context());
+  fixture.working = occupiedFrame.result.working;
+  assert.throws(() => dryRunEditorCapability("return_element_to_frame", { unitId: unit.id, frameId: frame.id, layerId: movedBreakoutLayer.id, elementId: image.id }, context()), /画格内已有图片/);
+  const occupiedUnit = fixture.working.document.units[0];
+  const occupiedArtLayer = occupiedUnit.frames[0].layers.find((layer) => layer.elements.some((element) => element.kind === "image"))!;
+  const occupiedImage = occupiedArtLayer.elements.find((element) => element.kind === "image")!;
+  const clearedFrame = dryRunEditorCapability("remove_frame_image", { unitId: unit.id, frameId: frame.id, layerId: occupiedArtLayer.id, elementId: occupiedImage.id }, context());
+  fixture.working = clearedFrame.result.working;
+  const movedBreakout = dryRunEditorCapability("set_element_transform", { unitId: unit.id, layerId: movedBreakoutLayer.id, elementId: image.id, transform: { x: -.2, y: .1, width: .8, height: .8 } }, context());
+  fixture.working = movedBreakout.result.working;
+  const returnedMovedBreakout = dryRunEditorCapability("return_element_to_frame", { unitId: unit.id, frameId: frame.id, layerId: movedBreakoutLayer.id, elementId: image.id }, context());
+  fixture.working = returnedMovedBreakout.result.working;
+  const normalizedImage = frameElements(fixture.working.document.units[0].frames[0]).find((element) => element.id === image.id);
+  assert.ok(normalizedImage?.kind === "image");
+  assert.deepEqual(normalizedImage.transform, { x: 0, y: 0, width: 1, height: 1 });
+
+  const pageDialogue = dryRunEditorCapability("create_page_dialogue_balloon", { unitId: unit.id, position: { x: 320, y: 180 } }, context());
+  fixture.working = pageDialogue.result.working;
+  const pageLayer = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "page_content");
+  const pageBalloon = pageLayer?.elements.find((element) => element.kind === "balloon");
+  assert.ok(pageBalloon?.kind === "balloon");
+  const pageView = createComicPageView(fixture.working.document, fixture.working.document.units[0]).elements.find((element) => element.id === pageBalloon.id);
+  assert.equal(pageView?.type === "speech_balloon" ? pageView.comicFrameId : "unexpected", undefined);
+  assert.equal(pageView?.type === "speech_balloon" ? pageView.location.space : "unexpected", "overlay");
+
+  const resource = fixture.working.document.resources[0];
+  const pageImageResult = dryRunEditorCapability("create_page_image", { unitId: unit.id, position: { x: 420, y: 260 }, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context());
+  fixture.working = pageImageResult.result.working;
+  const pageContent = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "page_content")!;
+  const reorderedOverlay = dryRunEditorCapability("reorder_overlay_element", { unitId: unit.id, layerId: pageContent.id, elementId: pageBalloon.id, position: "front" }, context());
+  const reorderedUnit = reorderedOverlay.result.working.document.units[0];
+  const balloonLayer = reorderedUnit.overlayLayers.find((layer) => layer.elements.some((element) => element.id === pageBalloon.id));
+  assert.ok(balloonLayer);
+  assert.ok((balloonLayer?.zIndex ?? 0) > Math.max(...reorderedUnit.frames.map((frame) => frame.zIndex), ...reorderedUnit.overlayLayers.filter((layer) => layer.id !== balloonLayer?.id).map((layer) => layer.zIndex)));
+
+  const overlap = dryRunEditorCapability("set_frame_overlap_policy", { unitId: unit.id, frameOverlap: "allow" }, context());
+  fixture.working = overlap.result.working;
+  assert.equal(fixture.working.document.units[0].layoutPolicy.frameOverlap, "allow");
+  const reordered = dryRunEditorCapability("reorder_frame", { unitId: unit.id, frameId: frame.id, zIndex: 99 }, context());
+  assert.equal(reordered.result.working.document.units[0].frames.find((item) => item.id === frame.id)?.zIndex, 99);
 });
 
 test("multiple human capabilities plan one atomic ChangeSet without mutating their source", () => {

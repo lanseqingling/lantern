@@ -291,6 +291,11 @@
 .draft-page.active { z-index: 2; border-color: rgba(100,200,200,.43); background: #fff; }
 .draft-page-main { display: grid; grid-template-columns: 42px minmax(0,1fr); gap: 8px; align-items: center; min-width: 0; border: 0; background: transparent; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .draft-page img { width: 42px; height: 50px; border-radius: 10px; object-fit: cover; object-position: center 55%; }
+.draft-page-thumbnail { position: relative; display: block; width: 42px; height: 50px; overflow: hidden; border-radius: 10px; }
+.draft-page-thumbnail img { border-radius: inherit; }
+.draft-page-seam { position: absolute; z-index: 2; pointer-events: none; background: rgba(36,54,58,.34); }
+.draft-page.composite:not(.true-spread) .draft-page-seam { left: 0; right: 0; top: 50%; height: 1px; }
+.draft-page.true-spread .draft-page-seam { top: 0; bottom: 0; left: 50%; width: 1px; }
 .draft-page-empty { display: block; box-sizing: border-box; width: 42px; height: 50px; border: 1px solid rgba(36,127,130,.2); border-radius: 10px; background: linear-gradient(135deg, rgba(100,200,200,.12), rgba(255,255,255,.82)); }
 .draft-page b, .draft-page small { display: block; }
 .draft-page-copy { min-width: 0; }

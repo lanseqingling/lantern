@@ -179,6 +179,8 @@ export type Frame = {
   id: string;
   geometry: Geometry;
   zIndex: number;
+  /** Defaults to one physical surface; `unit` explicitly enables a cross-page frame. */
+  surfaceScope?: "surface" | "unit";
   storyRefs: StoryboardBeatRef[];
   border: BorderStyle;
   shape: FrameShape;
@@ -209,14 +211,21 @@ export type UnitOverlayLayer = {
   visible: boolean;
   locked?: boolean;
   anchor: OverlayAnchor;
-  purpose: "breakout" | "cross_frame" | "cross_page" | "page_effect" | "decoration";
+  /** Optional physical-page constraint inside a true spread. */
+  surfaceId?: string;
+  purpose: "breakout" | "cross_frame" | "cross_page" | "cross_segment" | "page_content" | "page_effect" | "decoration";
   elements: OverlayElement[];
 };
+
+export type ElementLocation =
+  | { space: "frame"; frameId: string; layerId: string }
+  | { space: "overlay"; layerId: string; anchor: OverlayAnchor; surfaceId?: string; purpose: UnitOverlayLayer["purpose"] };
 
 export type FrameReadingEntry = { frameId: string; textOrder?: string[] };
 
 export type PageSurface = {
   id: string;
+  name?: string;
   role: "single" | "left" | "right" | "segment";
   geometry: Rect;
   trim?: Insets;
@@ -318,6 +327,7 @@ type CanvasViewBase = {
 
 export type ComicFrameElement = CanvasViewBase & {
   type: "comic_frame";
+  surfaceScope?: Frame["surfaceScope"];
   linkedStoryboardBeatId: string;
   linkedStoryboardBeatVersionId: string;
   readingOrder: number;
@@ -336,6 +346,7 @@ export type ImageElement = CanvasViewBase & {
   crop?: Rect;
   style?: { opacity?: number };
   layerId: string;
+  location: ElementLocation;
 };
 
 export type TextCanvasElement = CanvasViewBase & {
@@ -346,19 +357,21 @@ export type TextCanvasElement = CanvasViewBase & {
   style: TextElement["style"];
   appearance?: VisualAssetReference;
   layerId: string;
+  location: ElementLocation;
 };
 
 export type SpeechBalloonElement = CanvasViewBase & {
   type: "speech_balloon";
-  comicFrameId: string;
-  linkedStoryboardBeatId: string;
-  linkedStoryboardBeatVersionId: string;
+  comicFrameId?: string;
+  linkedStoryboardBeatId?: string;
+  linkedStoryboardBeatVersionId?: string;
   dialogueId: string;
   readingOrder: number;
   content: { text: string; shape: BalloonElement["shape"]; tailTarget?: Point };
   style: BalloonElement["style"];
   appearance?: VisualAssetReference;
   layerId: string;
+  location: ElementLocation;
 };
 
 export type CanvasElement = ComicFrameElement | ImageElement | TextCanvasElement | SpeechBalloonElement;
@@ -366,7 +379,7 @@ export type ComicPage = {
   id: string;
   name?: string;
   pageIndex: number;
-  kind: "page" | "vertical_segment" | "four_panel_unit";
+  kind: "page" | "spread" | "vertical_segment" | "four_panel_unit";
   canvas: { width: number; height: number; background: { color: string } };
   elements: CanvasElement[];
 };
@@ -379,6 +392,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
     const primary = frame.storyRefs.find((reference) => reference.role === "primary") ?? frame.storyRefs[0];
     elements.push({
       id: frame.id, type: "comic_frame", geometry: frame.geometry, zIndex: frame.zIndex,
+      surfaceScope: frame.surfaceScope,
       linkedStoryboardBeatId: primary?.storyboardBeatId ?? "unassigned",
       linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId ?? "unassigned-v1",
       readingOrder: readingOrder.get(frame.id) ?? 0, border: frame.border,
@@ -391,25 +405,56 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
         linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
         assetId: element.assetId, assetVersionId: element.assetVersionId, comicFrameId: frame.id, clipToFrame: layer.overflow !== "visible" && element.overflow !== "visible",
         frameRelativeGeometry: element.transform, crop: element.crop, style: { opacity: element.opacity }, visible: element.visible, name: element.name,
+        location: { space: "frame", frameId: frame.id, layerId: layer.id },
       });
       else if (element.kind === "balloon") elements.push({
         id: element.id, type: "speech_balloon", geometry, zIndex: frame.zIndex * 100 + layer.zIndex, layerId: layer.id, comicFrameId: frame.id,
         linkedStoryboardBeatId: primary?.storyboardBeatId ?? "unassigned", linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId ?? "unassigned-v1",
         dialogueId: element.dialogueId, readingOrder: 1, content: { text: dialogueById.get(element.dialogueId) ?? "", shape: element.shape, tailTarget: element.tailTarget ? { x: frame.geometry.x + element.tailTarget.x * frame.geometry.width, y: frame.geometry.y + element.tailTarget.y * frame.geometry.height } : undefined },
         style: element.style, appearance: element.appearance, visible: element.visible, name: element.name,
+        location: { space: "frame", frameId: frame.id, layerId: layer.id },
       });
       else if (element.kind === "text") elements.push({
         id: element.id, type: "text", geometry, zIndex: frame.zIndex * 100 + layer.zIndex, layerId: layer.id, comicFrameId: frame.id,
         linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
         content: { text: element.content, role: element.role }, style: element.style, appearance: element.appearance, visible: element.visible, name: element.name,
+        location: { space: "frame", frameId: frame.id, layerId: layer.id },
       });
     }));
+  });
+  unit.overlayLayers.forEach((layer) => {
+    const anchor = layer.anchor;
+    const anchorFrame = anchor.type === "frame" ? unit.frames.find((frame) => frame.id === anchor.frameId) : undefined;
+    const primary = anchorFrame?.storyRefs.find((reference) => reference.role === "primary") ?? anchorFrame?.storyRefs[0];
+    layer.elements.forEach((element, index) => {
+      const geometry = anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform;
+      const location: ElementLocation = { space: "overlay", layerId: layer.id, anchor: layer.anchor, ...(layer.surfaceId ? { surfaceId: layer.surfaceId } : {}), purpose: layer.purpose };
+      const zIndex = 1_000_000 + layer.zIndex * 10 + index;
+      if (element.kind === "image") elements.push({
+        id: element.id, type: "image", geometry, zIndex, layerId: layer.id,
+        linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
+        assetId: element.assetId, assetVersionId: element.assetVersionId, comicFrameId: anchorFrame?.id, clipToFrame: false,
+        frameRelativeGeometry: anchorFrame ? element.transform : undefined, crop: element.crop, style: { opacity: element.opacity }, visible: element.visible, name: element.name, location,
+      });
+      else if (element.kind === "balloon") elements.push({
+        id: element.id, type: "speech_balloon", geometry, zIndex, layerId: layer.id, comicFrameId: anchorFrame?.id,
+        linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
+        dialogueId: element.dialogueId, readingOrder: 1,
+        content: { text: dialogueById.get(element.dialogueId) ?? "", shape: element.shape, tailTarget: element.tailTarget ? anchorFrame ? { x: anchorFrame.geometry.x + element.tailTarget.x * anchorFrame.geometry.width, y: anchorFrame.geometry.y + element.tailTarget.y * anchorFrame.geometry.height } : element.tailTarget : undefined },
+        style: element.style, appearance: element.appearance, visible: element.visible, name: element.name, location,
+      });
+      else if (element.kind === "text") elements.push({
+        id: element.id, type: "text", geometry, zIndex, layerId: layer.id, comicFrameId: anchorFrame?.id,
+        linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
+        content: { text: element.content, role: element.role }, style: element.style, appearance: element.appearance, visible: element.visible, name: element.name, location,
+      });
+    });
   });
   return {
     id: unit.id,
     name: unit.name,
     pageIndex: document.reading.unitOrder.indexOf(unit.id),
-    kind: unit.kind === "single_page" || unit.kind === "spread" ? "page" : unit.kind,
+    kind: unit.kind === "single_page" ? "page" : unit.kind,
     canvas: unit.canvas,
     elements,
   };

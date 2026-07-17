@@ -554,12 +554,11 @@ export function apiSaveSnapshot(chapterId: string, expectedWorkingRevision: numb
   });
 }
 
-export async function apiDownloadPage(chapterId: string, unitId: string) {
-  if (!unitId) throw new Error("当前没有可下载的漫画页。");
-  const response = await fetch(apiUrl(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/download`));
+async function downloadPageResponse(path: string, fallbackName: string) {
+  const response = await fetch(apiUrl(path));
   if (!response.ok) throw new Error("下载失败，请稍后重试。");
   const blob = await response.blob();
-  const fileName = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] ?? `${unitId}.png`;
+  const fileName = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] ?? fallbackName;
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
@@ -568,6 +567,16 @@ export async function apiDownloadPage(chapterId: string, unitId: string) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+export async function apiDownloadPage(chapterId: string, unitId: string) {
+  if (!unitId) throw new Error("当前没有可下载的漫画页。");
+  return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/download`, `${unitId}.png`);
+}
+
+export async function apiDownloadSurface(chapterId: string, unitId: string, surfaceId: string) {
+  if (!unitId || !surfaceId) throw new Error("当前没有可下载的物理纸面。");
+  return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/surfaces/${encodeURIComponent(surfaceId)}/download`, `${surfaceId}.png`);
 }
 
 export function apiCancelTask(taskId: string) {

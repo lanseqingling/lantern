@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
 import { createDefaultWorkbench, loadWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@/packages/ui/src";
-import { apiDownloadPage, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
+import { apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
-
-type PageDisplayMode = "single" | "spread";
+import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageDisplayMode } from "@/packages/shared/src";
 
 export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId: string }) {
   const router = useRouter();
@@ -61,6 +60,10 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
 
   const sourceEnvelope = state.fixture.snapshot;
   const document = sourceEnvelope?.document ?? state.fixture.working.document;
+  const orderedUnits = document.reading.unitOrder.flatMap((unitId) => {
+    const unit = document.units.find((item) => item.id === unitId);
+    return unit ? [unit] : [];
+  });
   useEffect(() => {
     if (!loaded || !sourceEnvelope) return;
     setDockEntering(true);
@@ -68,18 +71,20 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     return () => window.clearTimeout(timer);
   }, [loaded, sourceEnvelope]);
   const isVertical = document.format === "vertical";
-  const shownPageIndex = Math.min(pageIndex, Math.max(0, document.units.length - 1));
-  const trailingUnpairedPage = !isVertical && pageDisplayMode === "spread" && document.units.length % 2 === 1 && shownPageIndex === document.units.length - 1;
-  const spreadStartIndex = Math.floor(shownPageIndex / 2) * 2;
+  const shownPageIndex = Math.min(pageIndex, Math.max(0, orderedUnits.length - 1));
+  const displayGroups = pageDisplayGroups(document, pageDisplayMode);
+  const currentGroup = displayGroupForUnit(displayGroups, shownPageIndex);
+  const currentGroupIndex = Math.max(0, displayGroups.indexOf(currentGroup));
   const displayedPageIndices = isVertical
-    ? document.units.map((_, index) => index)
-    : pageDisplayMode === "spread" && !trailingUnpairedPage
-      ? [spreadStartIndex, spreadStartIndex + 1].filter((index) => index < document.units.length)
-      : [shownPageIndex];
+    ? orderedUnits.map((_, index) => index)
+    : currentGroup?.unitIndices ?? [shownPageIndex];
   const downloadPageIndices = isVertical ? [shownPageIndex] : displayedPageIndices;
-  const pageStep = !isVertical && pageDisplayMode === "spread" && !trailingUnpairedPage ? 2 : 1;
-  const atFirstPage = shownPageIndex === 0;
-  const atLastPage = shownPageIndex >= document.units.length - 1;
+  const downloadSurfaces = downloadPageIndices.flatMap((index) => {
+    const unit = orderedUnits[index];
+    return unit ? orderedUnitSurfaces(unit, document.reading.direction).map((surface) => ({ unit, surface })) : [];
+  });
+  const atFirstPage = isVertical ? shownPageIndex === 0 : currentGroupIndex === 0;
+  const atLastPage = isVertical ? shownPageIndex >= orderedUnits.length - 1 : currentGroupIndex >= displayGroups.length - 1;
   const editUrl = `/comics/${comicId}/chapters/${chapterId}?focus=${shownPageIndex}`;
   const returnToCanvas = () => {
     if (modeSwitching) return;
@@ -92,15 +97,16 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   const switchPageMode = () => {
     const next = pageDisplayMode === "single" ? "spread" : "single";
     setPageDisplayMode(next);
-    if (next === "spread") setPageIndex((index) => Math.floor(index / 2) * 2);
   };
   const goPrevious = () => {
     if (atFirstPage) { setNotice("已经是第一话"); return; }
-    setPageIndex((index) => Math.max(0, index - pageStep));
+    if (isVertical) setPageIndex((index) => Math.max(0, index - 1));
+    else setPageIndex(displayGroups[currentGroupIndex - 1]?.unitIndices[0] ?? 0);
   };
   const goNext = () => {
     if (atLastPage) { setNotice("已经是最后一页"); return; }
-    setPageIndex((index) => Math.min(document.units.length - 1, index + pageStep));
+    if (isVertical) setPageIndex((index) => Math.min(orderedUnits.length - 1, index + 1));
+    else setPageIndex(displayGroups[currentGroupIndex + 1]?.unitIndices[0] ?? shownPageIndex);
   };
   const handleVerticalScroll = () => {
     if (verticalScrollFrameRef.current !== null) return;
@@ -125,8 +131,9 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     setDownloading(true);
     try {
       if (configuredRuntimeAdapter() === "demo") throw new Error("演示模式暂不支持导出，请切换到服务端模式后重试。");
-      for (const index of downloadPageIndices) await apiDownloadPage(chapterId, document.units[index]?.id ?? "");
-      setNotice(downloadPageIndices.length === 2 ? `第 ${downloadPageIndices.map((index) => index + 1).join("、")} 页已开始下载` : `第 ${shownPageIndex + 1} 页已开始下载`);
+      for (const { unit, surface } of downloadSurfaces) await apiDownloadSurface(chapterId, unit.id, surface.id);
+      const numbers = downloadSurfaces.map(({ surface }) => surface.pageNumber).filter((number): number is number => typeof number === "number");
+      setNotice(numbers.length > 1 ? `第 ${numbers.join("、")} 页已开始下载` : `第 ${numbers[0] ?? shownPageIndex + 1} 页已开始下载`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "保存失败，请稍后重试");
     } finally {
@@ -154,9 +161,9 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
 
   return (
     <main className={`preview-shell ${isVertical ? "format-vertical" : "format-page"}`}>
-      <section ref={isVertical ? verticalReaderRef : undefined} onScroll={isVertical ? handleVerticalScroll : undefined} className={`reader paged-reader ${isVertical ? "vertical-reader" : pageDisplayMode === "spread" && !trailingUnpairedPage ? "is-spread" : "is-single"}`} data-testid="preview-reader">
+      <section ref={isVertical ? verticalReaderRef : undefined} onScroll={isVertical ? handleVerticalScroll : undefined} className={`reader paged-reader ${isVertical ? "vertical-reader" : displayedPageIndices.length === 2 || currentGroup?.trueSpread ? "is-spread" : "is-single"} ${currentGroup?.trueSpread ? "is-true-spread" : ""}`} data-testid="preview-reader">
         {!isVertical ? <button type="button" className="preview-page-turn previous" aria-label="上一页" onClick={goPrevious} /> : null}
-        <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={document.units[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={document.units[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>
+        <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={orderedUnits[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={orderedUnits[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>
         {!isVertical ? <button type="button" className="preview-page-turn next" aria-label="下一页" onClick={goNext} /> : null}
       </section>
 
@@ -168,7 +175,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}
         <div className="preview-save-tool">
           <button type="button" aria-label="下载选项" aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
-          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadPageIndices.length === 2 ? "下载当前双页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
+          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadSurfaces.length > 1 ? "下载当前物理页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
         </div>
       </nav>
       {notice ? <div className="preview-notice" role="status">{notice}</div> : null}

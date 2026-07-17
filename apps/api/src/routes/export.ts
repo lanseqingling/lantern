@@ -32,6 +32,23 @@ export function registerExportRoutes(app: FastifyInstance) {
       .send(bytes);
   });
 
+  app.get<{ Params: { chapterId: string; unitId: string; surfaceId: string } }>("/v1/chapters/:chapterId/pages/:unitId/surfaces/:surfaceId/download", async (request, reply) => {
+    const user = await currentUser(request);
+    const workbench = await getWorkbench(user.id, request.params.chapterId);
+    const document = workbench.snapshot?.document;
+    if (!document) throw new AppError("not_found", "当前一话还没有已保存版本。", 404);
+    const unit = document.units.find((item) => item.id === request.params.unitId);
+    if (!unit) throw new AppError("not_found", "当前版本中不存在该展示单元。", 404);
+    const surface = unit.surfaces.find((item) => item.id === request.params.surfaceId);
+    if (!surface) throw new AppError("not_found", "当前展示单元中不存在该物理纸面。", 404);
+    const bytes = await renderPagePng(document, unit, surface);
+    return reply
+      .header("Content-Type", "image/png")
+      .header("Content-Disposition", `attachment; filename="${request.params.chapterId}-page-${surface.pageNumber ?? 1}.png"`)
+      .header("Cache-Control", "no-store")
+      .send(bytes);
+  });
+
   app.get<{ Params: { taskId: string; index: string }; Querystring: { expires: string; signature: string } }>("/v1/exports/:taskId/:index", async (request, reply) => {
     const index = Number(request.params.index);
     const expires = Number(request.query.expires);

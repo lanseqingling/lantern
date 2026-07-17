@@ -65,6 +65,10 @@ test("shared render scene defines visibility, clipping, geometry and overlay ord
   assert.equal(scene.elements[1].clipFrame, undefined);
   assert.deepEqual(scene.elements.at(-1)?.geometry, { x: 100, y: 21, width: 72, height: 36 });
   assert.ok((scene.elements.at(-1)?.zIndex ?? 0) > scene.frames[0].borderZIndex);
+  const raisedFrame = structuredClone(document);
+  raisedFrame.units[0].frames[0].zIndex = 2;
+  const raisedScene = projectComicRenderScene(raisedFrame, raisedFrame.units[0]);
+  assert.ok((raisedScene.elements.find((node) => node.element.id === "image-1")?.zIndex ?? 0) > (raisedScene.elements.find((node) => node.element.id === "overlay-text")?.zIndex ?? 0));
   const balloon = scene.elements.find((node) => node.element.kind === "balloon")?.element;
   assert.ok(balloon?.kind === "balloon");
   assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "thought" }), { outline: 1.8, tail: 1.8 });
@@ -87,6 +91,37 @@ test("export consumes the same render scene semantics", () => {
   assert.match(svg, />白。<\/tspan>/);
   assert.match(svg, /data-scene-id="overlay-text"/);
   assert.doesNotMatch(svg, /hidden-effect/);
+});
+
+test("cross-page images, frames and balloons are projected into both physical surface exports", () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  unit.kind = "spread";
+  unit.canvas.width = 400;
+  unit.surfaces = [
+    { id: "surface-left", role: "left", geometry: { x: 0, y: 0, width: 200, height: 300 }, pageNumber: 1 },
+    { id: "surface-right", role: "right", geometry: { x: 200, y: 0, width: 200, height: 300 }, pageNumber: 2 },
+  ];
+  unit.frames[0].surfaceScope = "unit";
+  unit.frames[0].geometry = { x: 120, y: 30, width: 160, height: 180 };
+  unit.overlayLayers.push({
+    id: "cross-page-layer", name: "跨页", zIndex: 2, visible: true, anchor: { type: "unit" }, purpose: "cross_page",
+    elements: [
+      { id: "cross-page-image", kind: "image", assetId: "asset-1", assetVersionId: "asset-1-v1", transform: { x: 0, y: 0, width: 400, height: 300 }, crop: { x: 0, y: 0, width: 1, height: 1 } },
+      { id: "cross-page-balloon", kind: "balloon", dialogueId: "dialogue-1", transform: { x: 160, y: 80, width: 80, height: 90 }, shape: "caption_box", style: { fontFamily: "Lantern Sans", fontSize: 12, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: 2 } },
+    ],
+  });
+  const assets = new Map([["asset-1-v1", "data:image/png;base64,AA=="]]);
+  const left = renderSurfaceSvg(document, unit, unit.surfaces[0], assets);
+  const right = renderSurfaceSvg(document, unit, unit.surfaces[1], assets);
+  assert.match(left, /viewBox="0 0 200 300"/);
+  assert.match(right, /viewBox="200 0 200 300"/);
+  assert.equal(left.match(/data-scene-id="cross-page-image"/g)?.length, 1);
+  assert.equal(right.match(/data-scene-id="cross-page-image"/g)?.length, 1);
+  assert.equal(left.match(/data-scene-id="image-1"/g)?.length, 1);
+  assert.equal(right.match(/data-scene-id="image-1"/g)?.length, 1);
+  assert.equal(left.match(/data-scene-id="cross-page-balloon"/g)?.length, 1);
+  assert.equal(right.match(/data-scene-id="cross-page-balloon"/g)?.length, 1);
 });
 
 test("PNG, long PNG and structured JSON match the persistent runtime export golden", async () => {

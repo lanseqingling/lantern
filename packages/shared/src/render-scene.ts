@@ -8,6 +8,7 @@ import type {
   OverlayElement,
   Point,
   PresentationUnit,
+  UnitOverlayLayer,
 } from "./lcd/types";
 import { resolveLocalTransform } from "./lcd/types";
 
@@ -27,6 +28,8 @@ export type SceneElementNode = {
   layerId: string;
   clipFrame?: Frame;
   dialogueText?: string;
+  overlayPurpose?: UnitOverlayLayer["purpose"];
+  surfaceId?: string;
 };
 
 export type ComicRenderScene = {
@@ -51,7 +54,6 @@ export type BalloonStrokeWidths = {
 const FRAME_STRIDE = 10_000;
 const FRAME_CONTENT_OFFSET = 100;
 const FRAME_BORDER_OFFSET = 9_000;
-const OVERLAY_OFFSET = 1_000_000;
 
 function effectiveOverflow(defaultOverflow: "clip" | "visible", layerOverflow: LayerOverflow, element: FrameElement | OverlayElement) {
   const elementOverflow = "overflow" in element ? element.overflow : undefined;
@@ -99,13 +101,18 @@ export function projectComicRenderScene(document: ComicDocument, unit: Presentat
     if (anchor.type === "frame" && !anchorFrame) continue;
     layer.elements.forEach((element, index) => {
       if (element.visible === false) return;
-      elements.push({
-        element,
-        geometry: anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform,
-        zIndex: OVERLAY_OFFSET + layer.zIndex * 10 + index,
+        elements.push({
+          element,
+          geometry: anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform,
+          // Frame and overlay composition levels share the same numeric space.
+          // An overlay at a given level sits above that frame's border; moving a
+          // frame or an overlay layer changes their relative visual order.
+          zIndex: layer.zIndex * FRAME_STRIDE + FRAME_BORDER_OFFSET + 1 + index,
         source: "overlay",
         frame: anchorFrame,
         layerId: layer.id,
+        overlayPurpose: layer.purpose,
+        surfaceId: layer.surfaceId,
         dialogueText: element.kind === "balloon" ? dialogues.get(element.dialogueId) ?? "" : undefined,
       });
     });
@@ -144,8 +151,9 @@ export function projectBalloonTail(balloon: Pick<BalloonElement, "shape" | "tran
   const radiusX = transform.width / 2;
   const radiusY = transform.height / 2;
   const edgeDistance = 1 / Math.sqrt((unitX / radiusX) ** 2 + (unitY / radiusY) ** 2);
-  const defaultLength = Math.min(0.09, Math.max(0.038, Math.min(transform.width, transform.height) * 0.34));
-  const length = balloon.tailTarget ? clamp(magnitude - edgeDistance, 0.035, 0.16) : defaultLength;
+  const minDimension = Math.min(transform.width, transform.height);
+  const defaultLength = minDimension * 0.34;
+  const length = balloon.tailTarget ? clamp(magnitude - edgeDistance, minDimension * 0.16, minDimension * 0.72) : defaultLength;
   const tip = {
     x: (centerX + unitX * (edgeDistance + length) - transform.x) / transform.width * 100,
     y: (centerY + unitY * (edgeDistance + length) - transform.y) / transform.height * 100,

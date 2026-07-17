@@ -133,9 +133,11 @@
 .asset-save-form-floating footer button[type="submit"]:hover { background: #4ebbbb; }
 .asset-sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: 0 0 6px 4px; }
 .asset-sidebar-head h2 { margin: 0 !important; }
+.asset-sidebar-actions { display: flex; align-items: center; gap: 5px; }
 .asset-studio-entry { display: flex; align-items: center; gap: 4px; flex: none; min-height: 24px; margin: 0; padding: 5px 7px; border: 1px solid rgba(100,200,200,.25); border-radius: 9px; background: rgba(236,249,247,.58); color: var(--cyan-deep); font: inherit; font-size: 8px; font-weight: 850; white-space: nowrap; cursor: pointer; }
 .asset-studio-entry:hover { background: rgba(236,249,247,.92); }
 .asset-studio-entry svg { width: 12px; height: 12px; }
+.asset-upload-button { margin-left: 0; }
 .comic-asset-studio-page { min-height: 100vh; padding: 32px clamp(22px, 6vw, 92px) 80px; background: radial-gradient(circle at 78% 7%, rgba(242,184,75,.13), transparent 23%), radial-gradient(circle at 12% 22%, rgba(100,200,200,.11), transparent 22%), #f7fbfa; color: #26363b; }
 .asset-studio-page-head { display: flex; align-items: center; gap: 14px; width: min(1280px, 100%); margin: 0 auto 28px; }
 .asset-studio-page-head > button { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.84); border-radius: 14px; background: rgba(255,255,255,.78); color: var(--cyan-deep); box-shadow: 0 8px 22px rgba(23,32,38,.06); cursor: pointer; }

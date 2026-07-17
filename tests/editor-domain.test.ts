@@ -127,6 +127,15 @@ test("adding a presentation unit appends a valid blank page without changing exi
 test("editor capabilities are registered but remain unavailable to Agent execution", () => {
   const capabilities = listEditorCapabilities();
   assert.deepEqual(capabilities.map((capability) => capability.id), [
+    "create_frame",
+    "duplicate_frame",
+    "delete_frame",
+    "place_frame_image",
+    "replace_frame_image",
+    "remove_frame_image",
+    "create_dialogue_balloon",
+    "duplicate_dialogue_balloon",
+    "delete_dialogue_balloon",
     "update_dialogue",
     "update_storyboard_beat",
     "create_frame_storyboard_beat",
@@ -144,6 +153,52 @@ test("editor capabilities are registered but remain unavailable to Agent executi
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
+});
+
+test("human frame, image and dialogue management capabilities form valid atomic revisions", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  unit.frames = [];
+  unit.readingSequence = [];
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-ui-${++sequence}`, actor: "human" as const });
+
+  const created = dryRunEditorCapability("create_frame", { unitId: unit.id, position: { x: 180, y: 220 } }, context());
+  const frame = created.result.working.document.units[0].frames[0];
+  assert.ok(frame);
+  assert.equal(frame.layers.some((layer) => layer.kind === "art"), true);
+  assert.equal(frame.layers.some((layer) => layer.kind === "text"), true);
+
+  fixture.working = created.result.working;
+  const duplicated = dryRunEditorCapability("duplicate_frame", { unitId: unit.id, frameId: frame.id }, context());
+  assert.equal(duplicated.result.working.document.units[0].frames.length, 2);
+  assert.notDeepEqual(duplicated.result.working.document.units[0].frames[0].geometry, duplicated.result.working.document.units[0].frames[1].geometry);
+
+  fixture.working = duplicated.result.working;
+  const resource = fixture.working.document.resources[0];
+  const image = dryRunEditorCapability("place_frame_image", {
+    unitId: unit.id,
+    frameId: frame.id,
+    assetId: resource.assetId,
+    assetVersionId: resource.assetVersionId,
+    mediaType: resource.mediaType,
+  }, context());
+  assert.equal(frameElements(image.result.working.document.units[0].frames[0]).filter((element) => element.kind === "image").length, 1);
+
+  fixture.working = image.result.working;
+  const dialogue = dryRunEditorCapability("create_dialogue_balloon", { unitId: unit.id, frameId: frame.id, position: { x: .3, y: .25 }, content: "测试对白" }, context());
+  const balloon = frameElements(dialogue.result.working.document.units[0].frames[0]).find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(balloon);
+  assert.equal(dialogue.result.working.document.dialogues.find((item) => item.id === balloon.dialogueId)?.content, "测试对白");
+
+  fixture.working = dialogue.result.working;
+  const removed = dryRunEditorCapability("delete_dialogue_balloon", { unitId: unit.id, frameId: frame.id, layerId: fixture.working.document.units[0].frames[0].layers.find((layer) => layer.kind === "text")!.id, elementId: balloon.id }, context());
+  assert.equal(frameElements(removed.result.working.document.units[0].frames[0]).some((element) => element.kind === "balloon"), false);
+  assert.equal(removed.result.working.document.dialogues.some((item) => item.id === balloon.dialogueId), false);
+  fixture.working = removed.result.working;
+  const deletedFrame = dryRunEditorCapability("delete_frame", { unitId: unit.id, frameId: frame.id }, context());
+  assert.equal(deletedFrame.result.working.document.units[0].frames.some((item) => item.id === frame.id), false);
+  assert.throws(() => planEditorCapability("create_frame", { unitId: unit.id, position: { x: 80, y: 80 } }, { ...context(), actor: "agent" }), /disabled for Agent/);
 });
 
 test("multiple human capabilities plan one atomic ChangeSet without mutating their source", () => {

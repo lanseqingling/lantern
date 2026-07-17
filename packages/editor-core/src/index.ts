@@ -1,4 +1,5 @@
 import type {
+  FrameElement,
   FrameLayer,
   SnapshotEnvelope,
   WorkbenchFixture,
@@ -49,6 +50,26 @@ export function applyWorkspaceChangeSet(
   for (const operation of changeSetCommands(parsedChangeSet)) {
     if (operation.type === "replace_storyboard_beats") {
       storyboardBeats.splice(0, storyboardBeats.length, ...structuredClone(operation.storyboardBeats));
+      continue;
+    }
+    if (operation.type === "declare_resource") {
+      const existing = document.resources.find((resource) => resource.assetVersionId === operation.resource.assetVersionId);
+      if (existing && existing.assetId !== operation.resource.assetId) throw new Error(`resource version belongs to another asset: ${operation.resource.assetVersionId}`);
+      if (!existing) document.resources.push(structuredClone(operation.resource));
+      continue;
+    }
+    if (operation.type === "add_dialogue") {
+      if (document.dialogues.some((dialogue) => dialogue.id === operation.dialogue.id)) throw new Error(`duplicate Dialogue id: ${operation.dialogue.id}`);
+      document.dialogues.push(structuredClone(operation.dialogue));
+      continue;
+    }
+    if (operation.type === "remove_dialogue") {
+      const referenced = document.units.some((unit) => [
+        ...unit.frames.flatMap((frame) => frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[])),
+        ...unit.overlayLayers.flatMap((layer) => layer.elements),
+      ].some((element) => element.kind === "balloon" && element.dialogueId === operation.dialogueId));
+      if (referenced) throw new Error(`Dialogue is still referenced: ${operation.dialogueId}`);
+      document.dialogues = document.dialogues.filter((dialogue) => dialogue.id !== operation.dialogueId);
       continue;
     }
     if (operation.type === "create_frame_storyboard_beat") {
@@ -229,6 +250,12 @@ export function applyWorkspaceChangeSet(
         if (operation.appearance) element.appearance = structuredClone(operation.appearance);
         else delete element.appearance;
       }
+      continue;
+    }
+    if (operation.type === "add_frame_layer") {
+      const { frame } = findFrame(operation.unitId, operation.frameId);
+      if (frame.layers.some((layer) => layer.id === operation.layer.id)) throw new Error(`duplicate FrameLayer id: ${operation.layer.id}`);
+      frame.layers.push(structuredClone(operation.layer));
       continue;
     }
     if (operation.type === "add_layer_element") {

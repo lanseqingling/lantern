@@ -75,24 +75,36 @@ Frame 是格内内容的父容器。每个 Frame 可以包含：
 - Frame 锚定：对象跟随画格移动，但在展示单元层合成，用于人物破框或气泡破框。
 - Unit 锚定：对象属于整页或双页共同空间，用于跨格、跨页、全页效果和装饰。
 
+### 统一归属与合成约定
+
+漫画对象不使用任意嵌套树解释视觉关系，而是分别声明归属、锚定、合成、裁切和顺序。归属决定对象属于 Frame 还是 PresentationUnit；锚定决定对象随画格还是随展示单元移动；合成决定对象进入格内图层还是 Unit Overlay；裁切决定对象受画格、纸面或不受局部边界裁切；视觉 `zIndex` 与阅读顺序始终独立。
+
+PageSurface 只定义最终输出切片，不作为普通作品对象的父容器。标准状态如下：
+
+| 状态 | 归属与合成规则 |
+|---|---|
+| 画格 | 属于 PresentationUnit，使用 Unit 坐标；画格遮罩只作用于其格内元素。 |
+| 普通格内图片、气泡、文字或效果 | 属于并锚定 Frame，在 Frame 内合成，按画格规则裁切。 |
+| 破格对象 | 属于并锚定来源 Frame，在 Unit Overlay 合成，不受来源画格裁切。 |
+| 无格图、纸面对白、旁白或装饰 | 属于并锚定 PresentationUnit，在 Unit Overlay 合成。 |
+| 跨格对象 | 在 Unit Overlay 合成；需要跟随来源画格时使用 Frame 锚点，否则使用 Unit 锚点。 |
+| 跨页对象 | 只存在于真正双页的共享 PresentationUnit，保存一次并由左右 PageSurface 分别裁切。 |
+| 叠格 | Frame 仍是同级对象，只改变重叠许可与 `zIndex`，不形成父子关系。 |
+
+无框画面仍是 Frame，只是边框为 `none`；无格图才是直接属于 PresentationUnit 的图片对象。自由分组、嵌套画格和完整图层树属于专业能力，不能成为普通破格、跨格或叠格的前置条件。
+
 ## 5. 坐标与合成
 
 - `Frame.geometry` 使用展示单元坐标。
 - Frame 内元素使用相对画格的局部坐标；`0,0,1,1` 表示填满画格。
-- Unit 锚定的覆盖元素使用展示单元坐标。
+- Unit 锚定的覆盖元素使用展示单元坐标；Frame 锚定的覆盖元素保持相对画格的稳定关系。
 - 移动画格只修改 Frame，不同步改写任何格内元素。
 - 调整格内取景只修改 `ArtElement.crop`。
 - 在格内移动人物或道具只修改元素的局部 `transform`。
 
-锚点和合成层级必须分开表达：
+普通移动只修改当前坐标空间内的位置，不能隐式改变归属、锚点、合成层或裁切。跨层变化必须使用显式能力；Frame 锚定对象提升到 Unit Overlay、收回 Frame 或改为 Unit 锚定时必须保持视觉位置，并作为一次可撤销变更提交。
 
-```text
-普通格内人物：anchor = frame，composite = frame，按画格裁切
-破框人物：    anchor = frame，composite = unit，不按画格裁切
-跨页大图：    anchor = unit， composite = unit，导出时按 surface 裁切
-```
-
-不得通过复制对象、同步两套绝对坐标或 CSS 偏移伪造破框、叠格和跨页关系。Frame 锚定对象提升到 Unit Overlay 时必须保持视觉位置，并能无损收回原画格。
+画格默认保持在纸面内且禁止重叠；允许叠格时必须显式改变布局策略并确定 `zIndex`。不得通过复制对象、同步两套绝对坐标或 CSS 偏移伪造破格、叠格和跨页关系。两个相邻单页的并排查看不是共享坐标空间，不能承载一个跨页对象。
 
 ## 6. 阅读顺序
 
@@ -165,8 +177,11 @@ PageVariant 分为：
 | 双页大图 | 双页展示单元 + 一个跨越两张纸面的 Frame 或 Unit Overlay 元素 |
 | 条漫 | 多个纵向展示单元，以 unitOrder 连接 |
 | 无框画面 | Frame 边框为 none，内容仍属于 Frame |
+| 无格图 | Unit 锚定的 Unit Overlay 图片元素 |
 | 人物破框 | Frame 锚定的 Unit Overlay 元素 |
+| 纸面对白或旁白 | Unit 锚定的 BalloonElement 或 TextElement |
 | 跨格拟声字 | Unit 锚定的文字或效果元素 |
+| 叠格 | 同级 Frame + 显式重叠许可 + 独立 zIndex 和阅读顺序 |
 | 表现型气泡 | BalloonElement 保留对白语义并引用固定版本的视觉外观 |
 | 复杂拟声字 | TextElement 保留文字语义并引用固定版本的视觉外观 |
 | 格内取景 | 修改 ArtElement.crop |

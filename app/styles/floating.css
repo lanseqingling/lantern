@@ -32,6 +32,11 @@
 .reference-context-menu button:disabled:hover { background: transparent; color: #9aa5a9; }
 .reference-context-menu button:disabled:hover svg { color: #9aa5a9; }
 .reference-context-menu button.danger { color: #52616a; }
+.reference-context-menu button.danger svg { color: #688087; }
+.comic-context-menu { z-index: 92; width: 184px; }
+.comic-context-menu > header { display: flex; align-items: center; margin: 1px 3px 5px; padding: 5px 6px 8px; border-bottom: 1px solid rgba(74,121,126,.12); }
+.comic-context-menu > header strong { display: flex; min-width: 0; align-items: center; gap: 7px; overflow: hidden; color: #24343b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.comic-context-menu > header strong svg { width: 14px; height: 14px; flex: 0 0 auto; color: #688087; stroke-width: 2.15; }
 .reference-menu-divider { display: block; height: 1px; margin: 3px 4px; background: rgba(74,121,126,.13); }
 @keyframes referenceContextIn { from { opacity: 0; transform: translateY(3px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
@@ -45,6 +50,22 @@
 .object-toolbar button:disabled:hover { background: transparent; color: #52616a; }
 .object-toolbar .object-ai-reference { background: var(--cyan); color: #fff; box-shadow: 0 6px 16px rgba(36,127,130,.22); }
 .object-toolbar .object-ai-reference:hover { background: var(--cyan-deep); color: #fff; }
+.frame-image-picker { position: fixed; z-index: 94; width: 318px; max-height: min(380px, calc(100vh - 24px)); overflow: hidden; padding: 10px; border: 1px solid rgba(255,255,255,.92); border-radius: 18px; background: rgba(250,253,252,.98); box-shadow: 0 20px 56px rgba(23,32,38,.2); backdrop-filter: blur(20px); }
+.frame-image-picker > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.frame-image-picker > header div { display: grid; gap: 2px; }
+.frame-image-picker > header strong { color: var(--ink); font-size: 12px; }
+.frame-image-picker > header small { color: var(--muted); font-size: 8px; }
+.frame-image-picker > header button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
+.frame-image-upload { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 34px; margin-bottom: 8px; border: 1px dashed rgba(36,127,130,.28); border-radius: 11px; background: rgba(100,200,200,.08); color: var(--cyan-deep); font-size: 10px; font-weight: 850; cursor: pointer; }
+.frame-image-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; max-height: 276px; overflow: auto; padding: 1px; }
+.frame-image-grid > button { display: grid; gap: 5px; min-width: 0; border: 1px solid rgba(36,127,130,.12); border-radius: 11px; background: #fff; padding: 5px; color: #46565d; cursor: pointer; }
+.frame-image-grid > button:hover { border-color: rgba(36,127,130,.38); background: var(--cyan-soft); color: var(--cyan-deep); }
+.frame-image-grid img, .frame-image-placeholder { display: grid; width: 100%; aspect-ratio: 1.3; place-items: center; border-radius: 7px; background: #edf3f2; object-fit: cover; }
+.frame-image-grid strong { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.frame-image-picker > p { margin: 12px 4px 4px; color: var(--muted); font-size: 9px; text-align: center; }
+.dialogue-cursor-preview { position: fixed; z-index: 110; display: grid; width: 48px; height: 34px; place-items: center; border: 2px solid rgba(36,127,130,.7); border-radius: 50%; background: rgba(255,255,255,.88); color: var(--cyan-deep); box-shadow: 0 8px 24px rgba(23,32,38,.16); pointer-events: none; transform: translate(12px, 10px); }
+.dialogue-cursor-preview::after { content: ""; position: absolute; right: 2px; bottom: -8px; width: 12px; height: 12px; border-right: 2px solid rgba(36,127,130,.7); background: rgba(255,255,255,.88); transform: skewY(35deg); }
+.dialogue-cursor-preview i { position: absolute; right: -5px; top: -7px; display: grid; width: 17px; height: 17px; place-items: center; border-radius: 50%; background: var(--cyan); color: #fff; font-size: 12px; font-style: normal; font-weight: 900; }
 .canvas-candidate-card { position: absolute; z-index: 37; width: 198px; overflow: hidden; padding: 8px; border: 1px solid rgba(100,200,200,.3); border-radius: 20px; background: rgba(255,255,255,.92); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
 .canvas-candidate-card > img, .candidate-storyboard-preview { display: block; width: 100%; height: 92px; object-fit: cover; border-radius: 14px; background: linear-gradient(135deg, rgba(100,200,200,.14), rgba(242,184,75,.12)); }
 .candidate-storyboard-preview { position: relative; }

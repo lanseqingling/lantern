@@ -321,9 +321,8 @@
 .page-edit-card-floating input:focus { border-color: rgba(36,127,130,.55); box-shadow: 0 0 0 3px rgba(100,200,200,.12); }
 .page-edit-card-floating .page-ratio-select .custom-select-trigger { justify-content: space-between; height: 32px; border-radius: 10px; font-size: 10px; }
 .page-edit-card-floating .page-ratio-select .custom-select-menu { left: 0; right: 0; min-width: 0; }
-.page-edit-warning, .page-delete-copy { margin: 0; font-size: 9px; line-height: 1.55; }
+.page-edit-warning { margin: 0; font-size: 9px; line-height: 1.55; }
 .page-edit-warning { border-radius: 9px; background: rgba(225,174,75,.12); color: #855f1b; padding: 7px 8px; }
-.page-delete-copy { color: #56676e; }
 .page-edit-card-floating footer { display: flex; justify-content: flex-end; gap: 7px; }
 .page-edit-card-floating footer button { min-height: 29px; border: 0; border-radius: 9px; background: rgba(23,32,38,.06); color: #64737a; padding: 0 10px; font-size: 9px; font-weight: 850; cursor: pointer; }
 .page-edit-card-floating footer button[type="submit"] { background: var(--cyan); color: #fff; }

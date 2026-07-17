@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/packages/ui/src";
 import { AssetImageViewer } from "@/app/components/AssetImageViewer";
+import { DeleteConfirmDialog } from "@/app/components/DeleteConfirmDialog";
 import type { ComicAssetImage } from "@/app/lib/api-client";
 
 type ComicBriefDialogProps = {
@@ -179,7 +180,7 @@ export function ComicBriefDialog({ title, eyebrow, description, value, placehold
         {onUploadReference ? <input ref={uploadInputRef} className="asset-image-upload-input" type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void uploadReferences(event.target.files)} /> : null}
       </div>
       {pendingRenameImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) { setPendingRenameImageId(null); setImageNameError(""); } }}><form className="asset-image-confirm asset-image-rename" role="dialog" aria-modal="true" aria-labelledby="visual-style-image-rename-title" onSubmit={(event) => { event.preventDefault(); void renameReference(); }}><span><Icon name="edit" /></span><h3 id="visual-style-image-rename-title">修改图片名称</h3><p>名称用于区分不同的视觉风格参考图片。</p><label><small>图片名称</small><input autoFocus value={imageNameDraft} maxLength={80} disabled={imageMutating} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setImageNameDraft(event.target.value)} /></label>{imageNameError ? <em role="alert">{imageNameError}</em> : null}<footer><button type="button" disabled={imageMutating} onClick={() => { setPendingRenameImageId(null); setImageNameError(""); }}>取消</button><button type="submit" className="primary" disabled={imageMutating}>{imageMutating ? "保存中…" : "保存"}</button></footer></form></div> : null}
-      {pendingDeleteImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) setPendingDeleteImageId(null); }}><section className="asset-image-confirm" role="alertdialog" aria-modal="true" aria-labelledby="visual-style-image-delete-title"><span><Icon name="trash" /></span><h3 id="visual-style-image-delete-title">删除这张图片？</h3><p>图片会从视觉风格参考中移除。</p><footer><button type="button" disabled={imageMutating} onClick={() => setPendingDeleteImageId(null)}>取消</button><button type="button" className="danger" disabled={imageMutating} onClick={() => void deleteReference()}>{imageMutating ? "删除中…" : "确认删除"}</button></footer></section></div> : null}
+      {pendingDeleteImageId ? <DeleteConfirmDialog dialogId="visual-style-image-delete" title="删除这张图片？" description="图片会从视觉风格参考中移除。" confirmLabel={imageMutating ? "删除中…" : "确认删除"} disabled={imageMutating} onCancel={() => setPendingDeleteImageId(null)} onConfirm={deleteReference} /> : null}
     </section>
   </div>;
 }

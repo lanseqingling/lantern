@@ -298,7 +298,6 @@
 .asset-image-confirm p { margin: 0; color: #75878c; font-size: 10px; line-height: 1.65; }
 .asset-image-confirm footer { display: flex; width: 100%; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .asset-image-confirm footer button { min-width: 72px; min-height: 34px; border: 1px solid rgba(54,103,106,.16); border-radius: 10px; background: #fff; color: #5d7076; font: inherit; font-size: 10px; font-weight: 850; cursor: pointer; }
-.asset-image-confirm footer button.danger { border-color: #52616a; background: #52616a; color: #fff; }
 .asset-image-confirm footer button.primary { border-color: var(--cyan-deep); background: var(--cyan-deep); color: #fff; }
 .asset-image-confirm footer button:disabled { cursor: not-allowed; opacity: .55; }
 .asset-image-rename { justify-items: stretch; text-align: left; }

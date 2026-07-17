@@ -594,13 +594,14 @@ export async function apiUploadAsset(projectId: string, file: File, kind = "refe
     form.set("x", String(placement.x));
     form.set("y", String(placement.y));
   }
-  const response = await fetch(`${uploadApiBase()}/v1/projects/${encodeURIComponent(projectId)}/assets?place=canvas`, {
+  const response = await fetch(`${uploadApiBase()}/v1/projects/${encodeURIComponent(projectId)}/assets${placement ? "?place=canvas" : ""}`, {
     method: "POST",
     body: form,
     credentials: "include",
   });
-  const body = await readApiResponse<unknown>(response, "上传失败");
+  const body = await readApiResponse<{ id: string; name: string; versions: Array<{ id: string; contentType?: string; width?: number; height?: number }> }>(response, "上传失败");
   if (!response.ok) throw new Error(body.error?.message ?? "上传失败");
+  if (!body.data) throw new Error("上传失败");
   return body.data;
 }
 

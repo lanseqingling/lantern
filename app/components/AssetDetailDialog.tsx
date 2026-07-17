@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/packages/ui/src";
 import { AssetImageViewer } from "@/app/components/AssetImageViewer";
+import { DeleteConfirmDialog } from "@/app/components/DeleteConfirmDialog";
 import type { ComicAssetDetail, ComicAssetListItem } from "@/app/lib/api-client";
 
 function kindLabel(kind: ComicAssetListItem["kind"]) {
@@ -308,7 +309,7 @@ export function AssetDetailDialog({
         </div>
       </> : null}
       {pendingRenameImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) { setPendingRenameImageId(null); setImageNameError(""); } }}><form className="asset-image-confirm asset-image-rename" role="dialog" aria-modal="true" aria-labelledby="asset-image-rename-title" onSubmit={(event) => { event.preventDefault(); void renameImage(); }}><span><Icon name="edit" /></span><h3 id="asset-image-rename-title">修改图片名称</h3><p>名称用于区分同一资产中的不同图片。</p><label><small>图片名称</small><input autoFocus value={imageNameDraft} maxLength={80} disabled={imageMutating} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setImageNameDraft(event.target.value)} /></label>{imageNameError ? <em role="alert">{imageNameError}</em> : null}<footer><button type="button" disabled={imageMutating} onClick={() => { setPendingRenameImageId(null); setImageNameError(""); }}>取消</button><button type="submit" className="primary" disabled={imageMutating}>{imageMutating ? "保存中…" : "保存"}</button></footer></form></div> : null}
-      {pendingDeleteImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) setPendingDeleteImageId(null); }}><section className="asset-image-confirm" role="alertdialog" aria-modal="true" aria-labelledby="asset-image-delete-title"><span><Icon name="trash" /></span><h3 id="asset-image-delete-title">删除这张图片？</h3><p>图片会从当前资产中移除，已经放到画布上的内容不会被打断。</p><footer><button type="button" disabled={imageMutating} onClick={() => setPendingDeleteImageId(null)}>取消</button><button type="button" className="danger" disabled={imageMutating} onClick={() => void deleteImage()}>{imageMutating ? "删除中…" : "确认删除"}</button></footer></section></div> : null}
+      {pendingDeleteImageId ? <DeleteConfirmDialog dialogId="asset-image-delete" title="删除这张图片？" description="图片会从当前资产中移除，已经放到画布上的内容不会被打断。" confirmLabel={imageMutating ? "删除中…" : "确认删除"} disabled={imageMutating} onCancel={() => setPendingDeleteImageId(null)} onConfirm={deleteImage} /> : null}
     </section>
   </div>;
 }

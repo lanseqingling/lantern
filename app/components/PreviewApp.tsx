@@ -83,10 +83,12 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     return unit ? unit.canvas.width / unit.canvas.height : 0;
   }).filter((ratio) => ratio > 0);
   const previewGroupAspect = displayedUnitRatios.reduce((sum, ratio) => sum + ratio, 0);
+  const previewColumnBase = Math.min(...displayedUnitRatios);
   const previewPageWrapStyle = !isVertical && previewGroupAspect > 0 ? {
     aspectRatio: `${previewGroupAspect}`,
-    gridTemplateColumns: displayedUnitRatios.map((ratio) => `${ratio}fr`).join(" "),
+    gridTemplateColumns: displayedUnitRatios.map((ratio) => `${ratio / previewColumnBase}fr`).join(" "),
     "--preview-width-at-full-height": `${previewGroupAspect * 100}dvh`,
+    "--preview-height-at-full-width": `${100 / previewGroupAspect}vw`,
   } as CSSProperties : undefined;
   const downloadPageIndices = isVertical ? [shownPageIndex] : displayedPageIndices;
   const downloadSurfaces = downloadPageIndices.flatMap((index) => {

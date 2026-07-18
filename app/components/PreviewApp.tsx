@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
 import { createDefaultWorkbench, loadWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
@@ -78,6 +78,16 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   const displayedPageIndices = isVertical
     ? orderedUnits.map((_, index) => index)
     : currentGroup?.unitIndices ?? [shownPageIndex];
+  const displayedUnitRatios = displayedPageIndices.map((index) => {
+    const unit = orderedUnits[index];
+    return unit ? unit.canvas.width / unit.canvas.height : 0;
+  }).filter((ratio) => ratio > 0);
+  const previewGroupAspect = displayedUnitRatios.reduce((sum, ratio) => sum + ratio, 0);
+  const previewPageWrapStyle = !isVertical && previewGroupAspect > 0 ? {
+    aspectRatio: `${previewGroupAspect}`,
+    gridTemplateColumns: displayedUnitRatios.map((ratio) => `${ratio}fr`).join(" "),
+    "--preview-width-at-full-height": `${previewGroupAspect * 100}dvh`,
+  } as CSSProperties : undefined;
   const downloadPageIndices = isVertical ? [shownPageIndex] : displayedPageIndices;
   const downloadSurfaces = downloadPageIndices.flatMap((index) => {
     const unit = orderedUnits[index];
@@ -163,7 +173,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     <main className={`preview-shell ${isVertical ? "format-vertical" : "format-page"}`}>
       <section ref={isVertical ? verticalReaderRef : undefined} onScroll={isVertical ? handleVerticalScroll : undefined} className={`reader paged-reader ${isVertical ? "vertical-reader" : displayedPageIndices.length === 2 || currentGroup?.trueSpread ? "is-spread" : "is-single"} ${currentGroup?.trueSpread ? "is-true-spread" : ""}`} data-testid="preview-reader">
         {!isVertical ? <button type="button" className="preview-page-turn previous" aria-label="上一页" onClick={goPrevious} /> : null}
-        <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={orderedUnits[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={orderedUnits[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>
+        <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"} style={previewPageWrapStyle}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={orderedUnits[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={orderedUnits[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>
         {!isVertical ? <button type="button" className="preview-page-turn next" aria-label="下一页" onClick={goNext} /> : null}
       </section>
 

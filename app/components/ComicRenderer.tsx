@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@/packages/shared/src";
-import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene } from "@/packages/shared/src";
+import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, scaleImageCrop } from "@/packages/shared/src";
 import type { Selection } from "@/app/lib/workbench-state";
 
 type ElementPatch = Record<string, unknown>;
@@ -23,6 +23,7 @@ type DragState = {
   startCrop?: { x: number; y: number; width: number; height: number };
   moved?: boolean;
 };
+type CropWheelState = { elementId: string; crop: ArtElement["crop"]; timer: number };
 
 type ComicRendererProps = {
   document: ComicDocument;
@@ -54,10 +55,15 @@ const geometryStyle = (geometry: Geometry, width: number, height: number): CSSPr
   transform: geometry.rotate ? `rotate(${geometry.rotate}deg)` : undefined,
 });
 const cropStyle = (image: ArtElement): CSSProperties => {
-  const crop = image.crop;
-  const x = crop.width >= 1 ? 50 : crop.x / (1 - crop.width) * 100;
-  const y = crop.height >= 1 ? 50 : crop.y / (1 - crop.height) * 100;
-  return { objectPosition: `${x}% ${y}%`, transform: `scale(${clamp(1 / Math.max(crop.width, crop.height), 1, 2.8)})` };
+  const crop = projectImageCrop(image.crop);
+  return {
+    left: `${crop.x * 100}%`,
+    top: `${crop.y * 100}%`,
+    width: `${crop.width * 100}%`,
+    height: `${crop.height * 100}%`,
+    objectPosition: "center",
+    transform: "none",
+  };
 };
 const frameClipPath = (frame: Frame, geometry: Geometry) => {
   const point = (x: number, y: number) => `${(x - geometry.x) / geometry.width * 100}% ${(y - geometry.y) / geometry.height * 100}%`;
@@ -86,12 +92,14 @@ type EffectSceneNode = SceneElementNode & { element: EffectElement };
 
 function FrameShapeVisual({ frame, fill, stroke }: { frame: Frame; fill: string; stroke?: boolean }) {
   const strokeColor = stroke && frame.border.style !== "none" ? frame.border.color : "none";
-  const strokeWidth = stroke ? frame.border.width / frame.geometry.width * 100 : 0;
+  const strokeWidth = stroke ? frame.border.width : 0;
   const common = { fill, stroke: strokeColor, strokeWidth, strokeDasharray: frame.border.style === "rough" ? "7 3 2 3" : undefined };
-  return <svg className="lcd-frame-shape" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
-    {frame.shape.kind === "ellipse" ? <ellipse cx="50" cy="50" rx="50" ry="50" {...common} />
-      : frame.shape.kind === "polygon" ? <polygon points={frame.shape.points.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} {...common} />
-        : <rect x="0" y="0" width="100" height="100" rx={frame.shape.radius ? frame.shape.radius / frame.geometry.width * 100 : 0} {...common} />}
+  const width = frame.geometry.width;
+  const height = frame.geometry.height;
+  return <svg className="lcd-frame-shape" aria-hidden="true" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+    {frame.shape.kind === "ellipse" ? <ellipse cx={width / 2} cy={height / 2} rx={width / 2} ry={height / 2} {...common} />
+      : frame.shape.kind === "polygon" ? <polygon points={frame.shape.points.map((point) => `${point.x * width},${point.y * height}`).join(" ")} {...common} />
+        : <rect x="0" y="0" width={width} height={height} rx={frame.shape.radius ?? 0} {...common} />}
   </svg>;
 }
 
@@ -100,9 +108,13 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const unit = document.units.find((item) => item.id === requestedUnitId) ?? document.units[0];
   const paperRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const cropWheelRef = useRef<CropWheelState | null>(null);
   const suppressClick = useRef(false);
   const [drafts, setDrafts] = useState<Record<string, ElementPatch>>({});
   const draftsRef = useRef<Record<string, ElementPatch>>({});
+  useEffect(() => () => {
+    if (cropWheelRef.current) window.clearTimeout(cropWheelRef.current.timer);
+  }, []);
   if (!unit) return <div className="empty-comic">暂无可预览的漫画页面</div>;
 
   const frameDraft = (frame: Frame): Frame => ({
@@ -158,6 +170,39 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     event.preventDefault(); event.stopPropagation();
     onSelect?.(next);
     onContextAction(next, point);
+  };
+  const zoomCropWithWheel = (event: ReactWheelEvent<HTMLDivElement>, image: ArtElement, frame: Frame) => {
+    if (!editable || interactionMode !== "crop" || selection?.type !== "image" || selection.id !== image.id || !onCommitElement) return;
+    const point = eventPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = paperRef.current?.getBoundingClientRect();
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? bounds?.height ?? 1 : 1);
+    if (!delta) return;
+    const draftCrop = draftsRef.current[image.id]?.crop as ArtElement["crop"] | undefined;
+    const currentCrop = draftCrop ?? image.crop;
+    const factor = clamp(Math.exp(delta * .0015), .78, 1.28);
+    const crop = scaleImageCrop(currentCrop, factor, {
+      x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1),
+      y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1),
+    });
+    if (["x", "y", "width", "height"].every((key) => Math.abs(crop[key as keyof ArtElement["crop"]] - currentCrop[key as keyof ArtElement["crop"]]) < 1e-8)) return;
+    const nextDrafts = { ...draftsRef.current, [image.id]: { crop } };
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
+    if (cropWheelRef.current) window.clearTimeout(cropWheelRef.current.timer);
+    const timer = window.setTimeout(() => {
+      const pending = cropWheelRef.current;
+      if (!pending || pending.elementId !== image.id) return;
+      onCommitElement(unit.id, image.id, { crop: pending.crop }, "缩放图片取景");
+      const remainingDrafts = { ...draftsRef.current };
+      delete remainingDrafts[image.id];
+      draftsRef.current = remainingDrafts;
+      setDrafts(remainingDrafts);
+      cropWheelRef.current = null;
+    }, 240);
+    cropWheelRef.current = { elementId: image.id, crop, timer };
   };
   const startDrag = (event: ReactPointerEvent, state: Omit<DragState, "startX" | "startY">, next: Selection) => {
     if (!editable) return;
@@ -287,6 +332,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const coordinateBounds = nodeCoordinateBounds(node, frame);
       return <div className={`lcd-image ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(image.id) ? "multi-selected" : ""}`} data-element-id={image.id} data-page-id={unit.id} key={image.id}
         style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: image.opacity, mixBlendMode: image.blendMode }}
+        onWheel={(event) => { if (frameContent && frame) zoomCropWithWheel(event, image, frame); }}
         onClick={(event) => { event.stopPropagation(); if (!frameContent || selected || !frame) onSelect?.(imageSelection); else selectFrame(frame); }}
         onDoubleClick={(event) => doubleClick(event, imageSelection)}
         onContextMenu={(event) => contextFor(event, imageSelection)}

@@ -13,9 +13,9 @@
 .lcd-surface-seam.horizontal { left: 0; right: 0; border-top-width: 1px; }
 .lcd-frame-fill, .lcd-frame-shape { width: 100%; height: 100%; pointer-events: none; }
 .lcd-frame-shape { position: absolute; inset: 0; overflow: visible; }
-.lcd-image { overflow: visible; background: #eef1f2; cursor: pointer; }
-.lcd-image-crop { width: 100%; height: 100%; overflow: hidden; }
-.lcd-image img { display: block; width: 100%; height: 100%; object-fit: cover; transform-origin: center; transition: filter 140ms ease; pointer-events: none; }
+.lcd-image { overflow: visible; background: transparent; cursor: pointer; }
+.lcd-image-crop { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.lcd-image img { position: absolute; display: block; width: 100%; height: 100%; object-fit: cover; transform-origin: center; transition: filter 140ms ease; pointer-events: none; }
 .missing-frame-image { display: grid; width: 100%; height: 100%; place-items: center; background: linear-gradient(135deg, rgba(100,200,200,.12), rgba(255,255,255,.78)); color: rgba(36,127,130,.68); font-size: 10px; letter-spacing: .04em; }
 .lcd-image:hover img { filter: contrast(1.03); }
 .lcd-image.selected { box-shadow: inset 0 0 0 2px rgba(100,200,200,.66); }

@@ -2,7 +2,7 @@
 
 这里存放可重复创建的开发样例；它们不是产品默认数据，也不能被业务代码作为跨漫画兜底内容。
 
-每个样例使用一个目录，例如 `rainy-station/`：
+每个样例使用一个目录，例如 `rainy-station/` 或 `campus-letter/`：
 
 - `seed.ts`：唯一的数据库、任务、候选与工作稿构造入口；必须可幂等重建。
 - `public/samples/<sample-id>/`：该样例所需的静态源图，仅在 seed 或离线 fixture 中读取。

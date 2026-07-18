@@ -3,9 +3,9 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../packages/server/src/db";
 import { getConfig } from "../packages/server/src/config";
-import { seedRainyStation } from "../samples/rainy-station/seed";
+import { seedCampusLetter } from "../samples/campus-letter/seed";
 
-async function resetToRainyStation() {
+async function resetToCampusLetter() {
   const config = getConfig();
   if (config.APP_ENV === "production") throw new Error("Refusing to clear local data in production");
 
@@ -36,11 +36,11 @@ async function resetToRainyStation() {
 
   const storageDirectory = path.resolve(process.cwd(), config.OBJECT_STORAGE_LOCAL_DIR);
   await rm(storageDirectory, { recursive: true, force: true });
-  await seedRainyStation();
-  console.log("Local data reset: only the 雨夜车站 sample remains.");
+  await seedCampusLetter();
+  console.log("Local data reset: only the 风停之前 sample remains.");
 }
 
-resetToRainyStation()
+resetToCampusLetter()
   .then(() => prisma.$disconnect())
   .catch(async (error) => {
     console.error(error instanceof Error ? error.stack ?? error.message : error);

@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
   balloonElementSchema,
+  comicDocumentSchema,
   geometrySchema,
   normalizedRectSchema,
+  storyboardBeatSchema,
   visualAssetReferenceSchema,
   type ArtElement,
   type BalloonElement,
@@ -601,20 +603,21 @@ const convertElementToPageCapability = defineCapability({
 const returnElementToFrameCapability = defineCapability({
   id: "return_element_to_frame",
   version: 1,
-  inputSchema: z.strictObject({ unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), frameId: z.string().min(1) }),
+  inputSchema: z.strictObject({ unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), frameId: z.string().min(1), replaceExistingImage: z.boolean().optional() }),
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
   risk: "medium",
   preconditions: ["overlay_element_exists", "target_frame_exists", "image_return_requires_empty_frame_art_slot", "resulting_document_is_valid"],
-  outputCommandTypes: ["remove_overlay_element", "remove_overlay_layer", "add_frame_layer", "add_layer_element"],
+  outputCommandTypes: ["remove_overlay_element", "remove_overlay_layer", "remove_layer_element", "add_frame_layer", "add_layer_element"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
     const { unit, layer, element } = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
     const frame = unit.frames.find((item) => item.id === input.frameId);
     if (!frame) throw new Error(`missing Frame: ${input.frameId}`);
-    if (element.kind === "image" && frame.layers.some((frameLayer) => frameLayer.elements.some((frameElement) => frameElement.kind === "image"))) {
+    const existingImage = element.kind === "image" ? frame.layers.flatMap((frameLayer) => frameLayer.elements.map((frameElement) => ({ frameLayer, frameElement }))).find(({ frameElement }) => frameElement.kind === "image") : undefined;
+    if (existingImage && !input.replaceExistingImage) {
       throw new Error("画格内已有图片，请先移除当前格内图片后再收回");
     }
     const anchor = layer.anchor;
@@ -629,6 +632,7 @@ const returnElementToFrameCapability = defineCapability({
     let targetLayer = frame.layers.find((item) => item.kind === kind);
     const commands: WorkspaceCommand[] = [{ type: "remove_overlay_element", unitId: unit.id, layerId: layer.id, elementId: element.id }];
     if (layer.elements.length === 1) commands.push({ type: "remove_overlay_layer", unitId: unit.id, layerId: layer.id });
+    if (existingImage) commands.push({ type: "remove_layer_element", unitId: unit.id, frameId: frame.id, layerId: existingImage.frameLayer.id, elementId: existingImage.frameElement.id });
     if (!targetLayer) {
       targetLayer = { id: context.createId(`${kind}-layer`), kind, name: kind === "art" ? "画面" : kind === "text" ? "对白" : "效果", zIndex: kind === "art" ? 10 : kind === "text" ? 20 : 30, visible: true, overflow: kind === "art" ? "clip" : "visible", elements: [] } as FrameLayer;
       commands.push({ type: "add_frame_layer", unitId: unit.id, frameId: frame.id, layer: targetLayer });
@@ -1402,6 +1406,29 @@ const deletePresentationUnitCapability = defineCapability({
   },
 });
 
+const restoreWorkspaceVersionCapability = defineCapability({
+  id: "restore_workspace_version",
+  version: 1,
+  inputSchema: z.strictObject({
+    document: comicDocumentSchema,
+    storyboardBeats: z.array(storyboardBeatSchema).max(120),
+  }),
+  scope: "chapter",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "high",
+  preconditions: ["trusted_workspace_version_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["replace_chapter_presentation", "replace_storyboard_beats"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input) {
+    return [
+      { type: "replace_chapter_presentation", document: structuredClone(input.document) },
+      { type: "replace_storyboard_beats", storyboardBeats: structuredClone(input.storyboardBeats) },
+    ];
+  },
+});
+
 const capabilityRegistry = {
   create_frame: createFrameCapability,
   duplicate_frame: duplicateFrameCapability,
@@ -1444,6 +1471,7 @@ const capabilityRegistry = {
   create_vertical_segment: createVerticalSegmentCapability,
   update_presentation_unit: updatePresentationUnitCapability,
   delete_presentation_unit: deletePresentationUnitCapability,
+  restore_workspace_version: restoreWorkspaceVersionCapability,
 } satisfies Record<string, RegisteredCapability>;
 
 export type EditorCapabilityId = keyof typeof capabilityRegistry;

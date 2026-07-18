@@ -88,6 +88,7 @@ async function clearPreviousSample() {
       prisma.message.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.agentConversation.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.canvasReferencePlacement.deleteMany({ where: { projectId: { in: projectIds } } }),
+      prisma.canvasAssetListItem.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.assetImage.deleteMany({ where: { asset: { projectId: { in: projectIds } } } }),
       prisma.asset.updateMany({ where: { projectId: { in: projectIds } }, data: { variantOfAssetId: null } }),
       prisma.assetVersion.deleteMany({ where: { asset: { projectId: { in: projectIds } } } }),

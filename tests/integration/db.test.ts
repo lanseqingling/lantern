@@ -288,6 +288,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       await prisma.agentConversation.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
       await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: { in: copiedProjectIds } } } });
       await prisma.storyboardBeat.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
+      await prisma.canvasAssetListItem.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
       await prisma.assetImage.deleteMany({ where: { asset: { projectId: { in: copiedProjectIds } } } });
       await prisma.assetVersion.deleteMany({ where: { asset: { projectId: { in: copiedProjectIds } } } });
       await prisma.asset.updateMany({ where: { projectId: { in: copiedProjectIds } }, data: { variantOfAssetId: null } });
@@ -304,6 +305,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.generationTask.deleteMany({ where: { projectId: ids.project } });
     await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: ids.project } } });
     await prisma.storyboardBeat.deleteMany({ where: { projectId: ids.project } });
+    await prisma.canvasAssetListItem.deleteMany({ where: { projectId: ids.project } });
     await prisma.assetImage.deleteMany({ where: { asset: { projectId: ids.project } } });
     await prisma.assetVersion.deleteMany({ where: { asset: { projectId: ids.project } } });
     await prisma.asset.updateMany({ where: { projectId: ids.project }, data: { variantOfAssetId: null } });

@@ -9,7 +9,7 @@ import {
   renderChapterPngPages,
   renderSurfaceSvg,
 } from "../packages/server/src/export-renderer";
-import { projectBalloonStrokeWidths, projectComicRenderScene, type ComicDocument, type StoryboardBeat } from "../packages/shared/src";
+import { projectBalloonStrokeWidths, projectComicRenderScene, projectImageCrop, scaleImageCrop, type ComicDocument, type StoryboardBeat } from "../packages/shared/src";
 
 const storyboardBeats: StoryboardBeat[] = Array.from({ length: 8 }, (_, index) => ({
   id: `golden-storyboardBeat-${index + 1}`,
@@ -75,11 +75,34 @@ test("shared render scene defines visibility, clipping, geometry and overlay ord
   assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "caption_box" }), { outline: 1.8, tail: 1.8 });
 });
 
+test("image crop uses one projection for workbench and export", () => {
+  assert.deepEqual(projectImageCrop({ x: .1, y: .2, width: .5, height: .4 }), { x: -.2, y: -.5, width: 2, height: 2.5 });
+});
+
+test("crop zoom keeps the pointer anchor and never shrinks the projected image below its frame", () => {
+  const zoomedIn = scaleImageCrop({ x: .1, y: .2, width: .5, height: .4 }, .5, { x: .25, y: .75 });
+  assert.deepEqual(zoomedIn, { x: .1625, y: .35, width: .25, height: .2 });
+  const sourceAnchorBefore = { x: .1 + .5 * .25, y: .2 + .4 * .75 };
+  const sourceAnchorAfter = { x: zoomedIn.x + zoomedIn.width * .25, y: zoomedIn.y + zoomedIn.height * .75 };
+  assert.deepEqual(sourceAnchorAfter, sourceAnchorBefore);
+
+  const zoomedOut = scaleImageCrop(zoomedIn, 100, { x: .5, y: .5 });
+  const projection = projectImageCrop(zoomedOut);
+  assert.equal(zoomedOut.width, 1);
+  assert.equal(zoomedOut.height, .8);
+  assert.ok(projection.width >= 1);
+  assert.ok(projection.height >= 1);
+  assert.ok(zoomedOut.x >= 0 && zoomedOut.y >= 0);
+  assert.ok(zoomedOut.x + zoomedOut.width <= 1);
+  assert.ok(zoomedOut.y + zoomedOut.height <= 1);
+});
+
 test("export consumes the same render scene semantics", () => {
   const document = renderFixture();
   const unit = document.units[0];
   const svg = renderSurfaceSvg(document, unit, unit.surfaces[0], new Map([["asset-1-v1", "data:image/png;base64,AA=="]]));
   assert.match(svg, /<polygon/);
+  assert.match(svg, /<polygon[^>]+stroke="#123456"[^>]+stroke-width="3"/);
   assert.match(svg, /fill="#f6f1e8"/);
   assert.match(svg, /data-scene-id="image-1"[^>]+mix-blend-mode:multiply[^>]+clip-path=/);
   assert.match(svg, /data-scene-id="balloon-1"/);

@@ -315,6 +315,43 @@ export function resolveLocalTransform(frame: Geometry, local: LocalTransform): G
   };
 }
 
+/** Projects a normalized source crop into the image box used by every renderer. */
+export function projectImageCrop(crop: NormalizedRect): Rect {
+  return {
+    x: -crop.x / crop.width,
+    y: -crop.y / crop.height,
+    width: 1 / crop.width,
+    height: 1 / crop.height,
+  };
+}
+
+/**
+ * Scales a normalized source crop around a point in the visible frame.
+ * A crop cannot grow past the source bounds, so the projected image always
+ * remains at least as wide and tall as its owning frame.
+ */
+export function scaleImageCrop(crop: NormalizedRect, factor: number, anchor: Point = { x: .5, y: .5 }, minimumSize = .08): NormalizedRect {
+  const clampNormalized = (value: number) => Math.min(1, Math.max(0, value));
+  const width = Math.min(1, Math.max(Number.EPSILON, crop.width));
+  const height = Math.min(1, Math.max(Number.EPSILON, crop.height));
+  const safeMinimum = Math.min(1, Math.max(Number.EPSILON, minimumSize));
+  const minimumFactor = Math.min(1, Math.max(safeMinimum / width, safeMinimum / height));
+  const maximumFactor = Math.max(1, Math.min(1 / width, 1 / height));
+  const appliedFactor = Math.min(maximumFactor, Math.max(minimumFactor, Number.isFinite(factor) && factor > 0 ? factor : 1));
+  const nextWidth = Math.min(1, width * appliedFactor);
+  const nextHeight = Math.min(1, height * appliedFactor);
+  const anchorX = clampNormalized(anchor.x);
+  const anchorY = clampNormalized(anchor.y);
+  const sourceX = crop.x + width * anchorX;
+  const sourceY = crop.y + height * anchorY;
+  return {
+    x: Math.min(1 - nextWidth, Math.max(0, sourceX - nextWidth * anchorX)),
+    y: Math.min(1 - nextHeight, Math.max(0, sourceY - nextHeight * anchorY)),
+    width: nextWidth,
+    height: nextHeight,
+  };
+}
+
 type CanvasViewBase = {
   id: string;
   geometry: Geometry;

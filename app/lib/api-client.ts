@@ -554,6 +554,16 @@ export function apiSaveSnapshot(chapterId: string, expectedWorkingRevision: numb
   });
 }
 
+export function apiRestoreSnapshot(chapterId: string, expectedWorkingRevision: number) {
+  return api<Pick<WorkbenchFixture, "working" | "storyboardBeats">>(`/v1/chapters/${encodeURIComponent(chapterId)}/restore-snapshot`, {
+    method: "POST",
+    body: JSON.stringify({ expectedWorkingRevision }),
+  }).then((result) => ({
+    ...result,
+    working: { ...result.working, resolvedResources: normalizeResolvedResources(result.working.resolvedResources) },
+  }));
+}
+
 async function downloadPageResponse(path: string, fallbackName: string) {
   const response = await fetch(apiUrl(path));
   if (!response.ok) throw new Error("下载失败，请稍后重试。");

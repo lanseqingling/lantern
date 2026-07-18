@@ -12,6 +12,7 @@ import {
   getLatestWorking,
   getOwnedProject,
   getWorkbench,
+  restoreLatestSnapshot,
 } from "../../../../packages/server/src/workbench-service";
 import { buildAgentContextDebugSnapshot } from "../../../../packages/agent-runtime/src/context-builder";
 import { getActiveConversationTask } from "../../../../packages/agent-runtime/src/task-service";
@@ -122,5 +123,17 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
       },
     });
     return ok(request, snapshot);
+  });
+
+  app.post<{ Params: { chapterId: string }; Body: { expectedWorkingRevision: number } }>("/v1/chapters/:chapterId/restore-snapshot", async (request) => {
+    const user = await currentUser(request);
+    const project = await prisma.project.findFirst({ where: { chapterId: request.params.chapterId, ownerUserId: user.id } });
+    if (!project) throw new AppError("not_found", "一话不存在。", 404);
+    return ok(request, await restoreLatestSnapshot({
+      ownerUserId: user.id,
+      projectId: project.id,
+      chapterId: request.params.chapterId,
+      expectedRevision: request.body.expectedWorkingRevision,
+    }));
   });
 }

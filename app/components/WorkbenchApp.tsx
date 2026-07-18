@@ -25,7 +25,7 @@ import type {
   WorkspaceChangeSet,
   WorkspaceOperation,
 } from "@/packages/shared/src";
-import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, type PageDisplayMode } from "@/packages/shared/src";
+import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, scaleImageCrop, type PageDisplayMode } from "@/packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
 import {
   createContinuationCandidate,
@@ -43,6 +43,7 @@ import {
   type Selection,
 } from "@/app/lib/workbench-state";
 import { saveGeneratedImageFromUrl, saveUploadedImage } from "@/app/lib/local-assets-client";
+import { buildFrameImageChoices, type FrameImageChoice } from "@/app/lib/frame-image-choices";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 import { fitVerticalNavigatorPaper, fitVerticalViewportWidth, nextVerticalViewportMode, verticalNavigatorWindow, verticalViewportModeMeta, type VerticalViewportMode } from "@/app/lib/vertical-workspace";
 import {
@@ -60,6 +61,7 @@ import {
   apiLoadWorkbench,
   apiPlaceAsset,
   apiRevertCandidate,
+  apiRestoreSnapshot,
   apiSaveSnapshot,
   apiSaveCandidateVariant,
   apiSendInteraction,
@@ -82,7 +84,6 @@ type CanvasCreationMode = "dialogue" | null;
 type ComicContextMenuState = { target: Selection; point: ComicContextPoint };
 type ComicDeleteTarget = { kind: "frame" | "image" | "dialogue"; selection: Selection };
 type FrameImageTarget = { selection: Selection; left: number; top: number; position?: { x: number; y: number }; placement?: "cross_page" | "cross_segment" };
-type FrameImageChoice = { assetId: string; assetVersionId: string; label: string; url?: string; mediaType: string; width?: number; height?: number };
 type CanvasAssetSaveKind = "character" | "scene" | "prop" | "reference_image";
 type MarqueeState = { startX: number; startY: number; currentX: number; currentY: number; moved: boolean };
 type MultiMoveState = { startX: number; startY: number; currentX: number; currentY: number; moved: boolean };
@@ -279,6 +280,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [leftOpen, setLeftOpen] = useState(true);
   const [agentOpen, setAgentOpen] = useState(true);
   const [projectMenu, setProjectMenu] = useState(false);
+  const [restoringSnapshot, setRestoringSnapshot] = useState(false);
   const [verticalSegmentMenuPosition, setVerticalSegmentMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [pageDisplayMode, setPageDisplayMode] = useState<PageDisplayMode>("single");
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -323,6 +325,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const suppressStageClickRef = useRef(false);
   const contextGestureRef = useRef<{ key: string; at: number } | null>(null);
   const scenarioHandled = useRef(false);
+  const stateRef = useRef(state);
+  const serverCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const serverCommitGenerationRef = useRef(0);
+  const serverPendingCommitCountRef = useRef(0);
+
+  useEffect(() => { stateRef.current = state; }, [state]);
 
   const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "page" | "session" | "vertical_segment") => {
     setComicContextMenu(null);
@@ -444,9 +452,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setContextDebugOpen(true);
     void refreshContextDebug();
   };
-  const refreshServerWorkbench = async (conversationId = runtimeIds?.conversationId) => {
+  const refreshServerWorkbench = async (conversationId = runtimeIds?.conversationId, force = false) => {
+    if (!force && serverPendingCommitCountRef.current) await serverCommitQueueRef.current;
     const loaded = await apiLoadWorkbench(runtimeIds?.chapterId ?? chapterId, conversationId || undefined);
-    const nextState = { ...loaded.state, currentPageIndex: Math.min(state.currentPageIndex, Math.max(0, loaded.state.fixture.working.document.units.length - 1)) };
+    const nextState = { ...loaded.state, currentPageIndex: Math.min(stateRef.current.currentPageIndex, Math.max(0, loaded.state.fixture.working.document.units.length - 1)) };
+    stateRef.current = nextState;
     setState(nextState);
     setSelection((current) => repairSelectionForState(current, nextState));
     setRuntimeIds(loaded.ids);
@@ -462,6 +472,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       if (configuredRuntimeAdapter() === "demo") {
         const loaded = loadWorkbench();
         if (canceled) return;
+        stateRef.current = loaded;
         setState(loaded);
         setSelection((current) => repairSelectionForState(current, loaded));
         setRuntimeAdapter("demo");
@@ -471,6 +482,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       try {
         const loaded = await apiLoadWorkbench(chapterId);
         if (canceled) return;
+        stateRef.current = loaded.state;
         setState(loaded.state);
         setSelection((current) => repairSelectionForState(current, loaded.state));
         setRuntimeIds(loaded.ids);
@@ -499,7 +511,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter !== "server") return;
     const hasPendingTask = activeTask?.status === "running";
     if (!hasPendingTask) return;
-    const timer = window.setInterval(() => void refreshServerWorkbench().catch(() => undefined), 900);
+    const timer = window.setInterval(() => { if (!serverPendingCommitCountRef.current) void refreshServerWorkbench().catch(() => undefined); }, 900);
     return () => window.clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtimeAdapter, activeTask?.id, activeTask?.status]);
@@ -898,57 +910,90 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setFuture([]);
   };
 
-  const commitOperations = (operations: WorkspaceOperation[], label: string, source: "manual" | "candidate", candidateId?: string, nextPageIndex?: number, onApplied?: () => void) => {
-    if (runtimeAdapter === "server" && runtimeIds) {
-      const changeSet = {
-        id: uid("changeset"),
-        projectId: runtimeIds.projectId,
-        baseRevision: state.fixture.working.revision,
-        source,
-        sourceCandidateId: candidateId,
-        commands: operations,
-      } satisfies WorkspaceChangeSet;
-      pushHistory(state.fixture, label, "working");
-      setToast(`${label} · 正在持久化`);
-      void apiCommitChangeSet(runtimeIds.projectId, changeSet)
-        .then((result) => {
-          setState((current) => ({ ...current, fixture: { ...current.fixture, ...result }, ...(typeof nextPageIndex === "number" ? { currentPageIndex: nextPageIndex } : {}) }));
-          onApplied?.();
-          setToast(`${label} · 工作稿 r${result.working.revision}`);
-        })
-        .catch((error) => {
-          setHistory((entries) => entries.slice(0, -1));
-          setToast(error instanceof Error ? error.message : "持久化失败，旧内容保持不变");
-          void refreshServerWorkbench().catch(() => undefined);
-        });
-      return true;
+  const commitOperations = (operations: WorkspaceOperation[], label: string, source: WorkspaceChangeSet["source"], candidateId?: string, nextPageIndex?: number, onApplied?: () => void, options?: { recordHistory?: boolean; resolvedResources?: PersistedWorkbench["fixture"]["working"]["resolvedResources"] }) => {
+    if (restoringSnapshot) {
+      setToast("正在回到上次保存，请稍候");
+      return false;
     }
+    const currentState = stateRef.current;
+    const currentFixture = currentState.fixture;
+    let result: ReturnType<typeof applyWorkspaceChangeSet>;
     try {
-      const result = applyWorkspaceChangeSet(
-        { working: state.fixture.working, storyboardBeats: state.fixture.storyboardBeats },
+      result = applyWorkspaceChangeSet(
+        { working: currentFixture.working, storyboardBeats: currentFixture.storyboardBeats },
         {
           id: uid("changeset"),
-          projectId: state.fixture.working.projectId,
-          baseRevision: state.fixture.working.revision,
+          projectId: currentFixture.working.projectId,
+          baseRevision: currentFixture.working.revision,
           source,
           sourceCandidateId: candidateId,
           commands: operations,
         },
       );
-      pushHistory(state.fixture, label, "working");
-      setState((current) => ({ ...current, fixture: { ...current.fixture, ...result }, ...(typeof nextPageIndex === "number" ? { currentPageIndex: nextPageIndex } : {}) }));
-      onApplied?.();
-      setToast(`${label} · 工作稿 r${result.working.revision}`);
-      return true;
     } catch (error) {
-      setToast(error instanceof Error && error.message.includes("REVISION_CONFLICT") ? "工作稿已变化，请重新生成候选" : "变更未应用，旧内容保持不变");
+      setToast(error instanceof Error && error.message.includes("REVISION_CONFLICT") ? "工作稿已变化，请重新操作" : error instanceof Error ? error.message : "变更未应用，旧内容保持不变");
       return false;
     }
+    const changeSet = {
+      id: uid("changeset"),
+      projectId: currentFixture.working.projectId,
+      baseRevision: currentFixture.working.revision,
+      source,
+      sourceCandidateId: candidateId,
+      commands: operations,
+    } satisfies WorkspaceChangeSet;
+    if (options?.recordHistory !== false) pushHistory(currentFixture, label, "working");
+    const nextState: PersistedWorkbench = {
+      ...currentState,
+      fixture: {
+        ...currentFixture,
+        ...result,
+        working: {
+          ...result.working,
+          resolvedResources: { ...currentFixture.working.resolvedResources, ...options?.resolvedResources },
+        },
+      },
+      ...(typeof nextPageIndex === "number" ? { currentPageIndex: nextPageIndex } : {}),
+    };
+    stateRef.current = nextState;
+    setState(nextState);
+    onApplied?.();
+
+    if (runtimeAdapter === "server" && runtimeIds) {
+      setToast(`${label} · 正在持久化`);
+      const generation = serverCommitGenerationRef.current;
+      serverPendingCommitCountRef.current += 1;
+      const persist = serverCommitQueueRef.current.then(async () => {
+        if (generation !== serverCommitGenerationRef.current) return;
+        const persisted = await apiCommitChangeSet(runtimeIds.projectId, changeSet);
+        if (generation !== serverCommitGenerationRef.current) return;
+        serverPendingCommitCountRef.current = Math.max(0, serverPendingCommitCountRef.current - 1);
+        setState((current) => {
+          if (current.fixture.working.revision !== persisted.working.revision) return current;
+          const next = { ...current, fixture: { ...current.fixture, ...persisted } };
+          stateRef.current = next;
+          return next;
+        });
+        if (!serverPendingCommitCountRef.current) setToast(`${label} · 工作稿 r${persisted.working.revision}`);
+      }).catch(async (error) => {
+        if (generation !== serverCommitGenerationRef.current) return;
+        serverCommitGenerationRef.current += 1;
+        serverPendingCommitCountRef.current = 0;
+        setHistory([]);
+        setFuture([]);
+        setToast(error instanceof Error ? `${error.message}，已重新载入工作稿` : "持久化失败，已重新载入工作稿");
+        await refreshServerWorkbench(undefined, true).catch(() => undefined);
+      });
+      serverCommitQueueRef.current = persist.then(() => undefined);
+      return true;
+    }
+    setToast(`${label} · 工作稿 r${result.working.revision}`);
+    return true;
   };
 
   const planCapabilities = (requests: EditorCapabilityRequest[]) =>
     planEditorCapabilities(requests, {
-      fixture: { working: state.fixture.working, storyboardBeats: state.fixture.storyboardBeats },
+      fixture: { working: stateRef.current.fixture.working, storyboardBeats: stateRef.current.fixture.storyboardBeats },
       createId: uid,
       actor: "human",
     });
@@ -1061,7 +1106,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const { frame, image } = frameAndImageForSelection(target);
     try {
       const resource = { assetId: choice.assetId, assetVersionId: choice.assetVersionId, mediaType: choice.mediaType, width: choice.width, height: choice.height };
-      const request: EditorCapabilityRequest = frameImageTarget?.placement === "cross_page"
+      const request: EditorCapabilityRequest = choice.source.kind === "page" && frame
+        ? { id: "return_element_to_frame", input: { unitId: choice.source.unitId, layerId: choice.source.layerId, elementId: choice.source.elementId, frameId: frame.id, replaceExistingImage: Boolean(image) } }
+        : frameImageTarget?.placement === "cross_page"
         ? { id: "create_cross_page_image", input: { unitId: target.pageId, ...resource } }
         : frameImageTarget?.placement === "cross_segment"
           ? { id: "create_cross_segment_image", input: { unitId: target.pageId, ...resource } }
@@ -1268,7 +1315,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         } else {
           setSelection({ type: "image", id: cropImage.id, pageId: target.pageId, label: "格内主图" });
           setObjectInteractionMode("crop");
-          setToast("已进入裁切模式：拖动图片调整当前画格取景");
+          setToast("已进入裁切模式：拖动调整位置，滚轮缩放图片");
         }
         return;
       }
@@ -1353,46 +1400,45 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     commitCapabilities(patches.flatMap(({ elementId, patch }) => capabilitiesForElementPatch(unitId, elementId, patch)), label);
 
   const commitPlacement = (nextReferences: ReferencePlacement[], label: string) => {
-    pushHistory(state.fixture, label, "placement");
-    setState((current) => ({ ...current, fixture: { ...current.fixture, references: nextReferences } }));
+    const current = stateRef.current;
+    pushHistory(current.fixture, label, "placement");
+    const next = { ...current, fixture: { ...current.fixture, references: nextReferences } };
+    stateRef.current = next;
+    setState(next);
     setToast(label);
   };
 
   const undo = () => {
     const entry = history[history.length - 1];
     if (!entry) return;
-    setFuture((entries) => [...entries, { fixture: structuredClone(state.fixture), label: entry.label, kind: entry.kind }]);
+    const current = stateRef.current;
+    if (entry.kind === "working") {
+      const plan = planCapabilities([{ id: "restore_workspace_version", input: { document: entry.fixture.working.document, storyboardBeats: entry.fixture.storyboardBeats } }]);
+      if (!commitOperations(plan.commands, `撤销：${entry.label}`, "undo", undefined, undefined, undefined, { recordHistory: false, resolvedResources: entry.fixture.working.resolvedResources })) return;
+    } else {
+      const next = { ...current, fixture: { ...current.fixture, references: structuredClone(entry.fixture.references) } };
+      stateRef.current = next;
+      setState(next);
+    }
+    setFuture((entries) => [...entries, { fixture: structuredClone(current.fixture), label: entry.label, kind: entry.kind }]);
     setHistory((entries) => entries.slice(0, -1));
-    setState((current) => ({
-      ...current,
-      fixture:
-        entry.kind === "placement"
-          ? { ...current.fixture, references: structuredClone(entry.fixture.references) }
-          : {
-              ...entry.fixture,
-              references: current.fixture.references,
-              working: { ...entry.fixture.working, revision: current.fixture.working.revision + 1, createdAt: new Date().toISOString() },
-            },
-    }));
     setToast(`已撤销：${entry.label}`);
   };
 
   const redo = () => {
     const entry = future[future.length - 1];
     if (!entry) return;
-    setHistory((entries) => [...entries, { fixture: structuredClone(state.fixture), label: entry.label, kind: entry.kind }]);
+    const current = stateRef.current;
+    if (entry.kind === "working") {
+      const plan = planCapabilities([{ id: "restore_workspace_version", input: { document: entry.fixture.working.document, storyboardBeats: entry.fixture.storyboardBeats } }]);
+      if (!commitOperations(plan.commands, `重做：${entry.label}`, "redo", undefined, undefined, undefined, { recordHistory: false, resolvedResources: entry.fixture.working.resolvedResources })) return;
+    } else {
+      const next = { ...current, fixture: { ...current.fixture, references: structuredClone(entry.fixture.references) } };
+      stateRef.current = next;
+      setState(next);
+    }
+    setHistory((entries) => [...entries, { fixture: structuredClone(current.fixture), label: entry.label, kind: entry.kind }]);
     setFuture((entries) => entries.slice(0, -1));
-    setState((current) => ({
-      ...current,
-      fixture:
-        entry.kind === "placement"
-          ? { ...current.fixture, references: structuredClone(entry.fixture.references) }
-          : {
-              ...entry.fixture,
-              references: current.fixture.references,
-              working: { ...entry.fixture.working, revision: current.fixture.working.revision + 1, createdAt: new Date().toISOString() },
-            },
-    }));
     setToast(`已重做：${entry.label}`);
   };
 
@@ -1655,21 +1701,58 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const saveChapter = () => {
     if (runtimeAdapter === "server" && runtimeIds) {
-      void apiSaveSnapshot(runtimeIds.chapterId, state.fixture.working.revision)
-        .then(() => refreshServerWorkbench())
-        .then(() => setToast(`一话已保存 · 快照 r${state.fixture.working.revision}`))
+      void serverCommitQueueRef.current
+        .then(() => {
+          const revision = stateRef.current.fixture.working.revision;
+          return apiSaveSnapshot(runtimeIds.chapterId, revision).then(() => revision);
+        })
+        .then((revision) => refreshServerWorkbench().then(() => revision))
+        .then((revision) => setToast(`一话已保存 · 快照 r${revision}`))
         .catch((error) => setToast(error instanceof Error ? error.message : "保存失败"));
       setProjectMenu(false);
       return;
     }
     try {
-      const snapshot = createSnapshot(state.fixture.working, state.fixture.working.revision);
-      setState((current) => ({ ...current, fixture: { ...current.fixture, snapshot } }));
+      const current = stateRef.current;
+      const snapshot = createSnapshot(current.fixture.working, current.fixture.working.revision);
+      const next = { ...current, fixture: { ...current.fixture, snapshot } };
+      stateRef.current = next;
+      setState(next);
       setProjectMenu(false);
       setToast(`一话已保存 · 快照 r${snapshot.sourceWorkingRevision}`);
     } catch {
       setToast("工作稿已变化，请重新保存");
     }
+  };
+
+  const restoreLastSaved = () => {
+    const snapshot = stateRef.current.fixture.snapshot;
+    if (!snapshot || restoringSnapshot) return;
+    setProjectMenu(false);
+    if (runtimeAdapter === "server" && runtimeIds) {
+      setRestoringSnapshot(true);
+      serverPendingCommitCountRef.current += 1;
+      void serverCommitQueueRef.current
+        .then(async () => {
+          const before = stateRef.current;
+          const result = await apiRestoreSnapshot(runtimeIds.chapterId, before.fixture.working.revision);
+          pushHistory(before.fixture, "回到上次保存", "working");
+          const next = { ...before, fixture: { ...before.fixture, ...result } };
+          stateRef.current = next;
+          setState(next);
+          setSelection((current) => repairSelectionForState(current, next));
+          setToast(`已回到保存版本 r${snapshot.sourceWorkingRevision}`);
+        })
+        .catch((error) => setToast(error instanceof Error ? error.message : "无法回到上次保存"))
+        .finally(() => {
+          serverPendingCommitCountRef.current = Math.max(0, serverPendingCommitCountRef.current - 1);
+          setRestoringSnapshot(false);
+        });
+      return;
+    }
+    const current = stateRef.current;
+    const plan = planCapabilities([{ id: "restore_workspace_version", input: { document: snapshot.document, storyboardBeats: current.fixture.storyboardBeats } }]);
+    commitOperations(plan.commands, "回到上次保存", "undo", undefined, undefined, undefined, { resolvedResources: snapshot.resolvedResources });
   };
 
   const updateReference = (id: string, patch: Partial<ReferencePlacement>, label: string) => {
@@ -1906,9 +1989,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const cropImage = (direction: "in" | "out" | "left" | "right" | "up" | "down" | "reset") => {
     if (!selectedElement || selectedElement.type !== "image" || !selection.pageId) return;
     const crop = selectedElement.crop ?? { x: 0, y: 0, width: 1, height: 1 };
-    const next = { ...crop };
-    if (direction === "in") { next.width = Math.max(0.45, crop.width - 0.08); next.height = Math.max(0.22, crop.height - 0.05); }
-    if (direction === "out") { next.width = Math.min(1, crop.width + 0.08); next.height = Math.min(1, crop.height + 0.05); }
+    let next = { ...crop };
+    if (direction === "in") next = scaleImageCrop(crop, .86);
+    if (direction === "out") next = scaleImageCrop(crop, 1.16);
     if (direction === "left") next.x = Math.max(0, crop.x - 0.03);
     if (direction === "right") next.x = Math.min(1 - next.width, crop.x + 0.03);
     if (direction === "up") next.y = Math.max(0, crop.y - 0.03);
@@ -1937,7 +2020,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setSelection({ type: "image", id: image.id, pageId: selection.pageId, label: `${selection.label} · 格内图片裁切` });
     setInspectorOpen(false);
     setObjectInteractionMode("crop");
-    setToast("已进入裁切模式：拖动图片调整当前画格取景");
+    setToast("已进入裁切模式：拖动调整位置，滚轮缩放图片");
   };
 
   const endCrop = () => {
@@ -2713,15 +2796,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const rightIndex = assetListOrder.indexOf(right.id);
     return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
   });
-  const mediaTypeForUrl = (url?: string) => url?.toLowerCase().includes(".webp") ? "image/webp" : url?.toLowerCase().match(/\.jpe?g(?:\?|$)/) ? "image/jpeg" : "image/png";
-  const frameImageChoices: FrameImageChoice[] = canvasAssetLibrary.filter((asset) => asset.kind === "reference_image").flatMap((asset) => {
-    if (asset.images?.length) return asset.images.map((image) => {
-      const version = asset.versions?.find((candidate) => candidate.id === image.versionId);
-      return { assetId: asset.id, assetVersionId: image.versionId, label: `${asset.name} · ${image.label}`, url: image.contentUrl ?? version?.contentUrl, mediaType: mediaTypeForUrl(image.contentUrl ?? version?.contentUrl), width: version?.width, height: version?.height };
-    });
-    const version = asset.versions?.[0];
-    const assetVersionId = asset.versionId ?? version?.id;
-    return assetVersionId ? [{ assetId: asset.id, assetVersionId, label: asset.name, url: asset.contentUrl ?? version?.contentUrl, mediaType: mediaTypeForUrl(asset.contentUrl ?? version?.contentUrl), width: version?.width, height: version?.height }] : [];
+  const frameImagePickerSelection = frameImageTarget ? frameAndImageForSelection(frameImageTarget.selection) : undefined;
+  const frameImageChoices = buildFrameImageChoices({
+    assets: canvasAssetLibrary,
+    canvasImages: canvasReferences,
+    resources: state.fixture.working.document.resources,
+    resolvedResources: state.fixture.working.resolvedResources,
+    currentPage: frameImageTarget?.selection.pageId ? workingPages.find((candidate) => candidate.id === frameImageTarget.selection.pageId) : undefined,
+    includeCurrentPageImages: !frameImageTarget?.placement && Boolean(frameImagePickerSelection?.frame || frameImagePickerSelection?.image?.location.space === "frame"),
   });
 
   const activeAssetMenu = canvasAssetLibrary.find((asset) => asset.id === assetMenuId);
@@ -2962,6 +3044,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
             }}><span className="menu-action-label"><Icon name="asset" />资产空间</span></button>
             <i className="project-menu-divider" />
             <button type="button" onClick={saveChapter}><span className="menu-action-label"><Icon name="save" />保存</span></button>
+            <button type="button" onClick={restoreLastSaved} disabled={!state.fixture.snapshot || state.fixture.snapshot.sourceWorkingRevision === state.fixture.working.revision || restoringSnapshot}><span className="menu-action-label"><Icon name="undo" />回到上次保存</span></button>
             <button type="button" onClick={goToPreview} disabled={previewDisabled} title={previewTitle}><span className="menu-action-label"><Icon name="preview" />阅读预览</span></button>
             <i className="project-menu-divider" />
             <button type="button" className="context-debug-entry" onClick={openContextDebug}><span className="menu-action-label"><Icon name="context" />查看当前上下文</span></button>
@@ -3154,7 +3237,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
         {inspectorOpen && editingStoryboardTarget && editorStyle ? <aside className="object-inspector near-selection" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{editingStoryboardBeat ? "编辑单格画面" : "创建单格画面"} · {editingStoryboardTarget.label}</span><button type="button" aria-label="关闭单格画面编辑" onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><label>标题<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder="例如：空站来信" onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>描述<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder="描述这一格的场景、人物、动作、情绪或叙事作用" onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? "保存" : "创建并绑定"}</button></aside> : null}
 
-        {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label="关闭对象编辑器" onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>正在编辑格内图片裁切。拖动画面或使用下面动作，只改变图片在漫画格里的取景。</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>放大</button><button type="button" onClick={() => cropImage("out")}>缩小</button><button type="button" onClick={() => cropImage("left")}>左移</button><button type="button" onClick={() => cropImage("up")}>上移</button><button type="button" onClick={() => cropImage("down")}>下移</button><button type="button" onClick={() => cropImage("right")}>右移</button><button type="button" onClick={() => cropImage("reset")}>重置</button></div><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: `画格 ${selectedElement.comicFrameId.split("-").pop()}` })}>回到画格</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"}</button></> : null}</aside> : null}
+        {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label="关闭对象编辑器" onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>正在编辑格内图片裁切。拖动画面调整位置，使用滚轮或下面动作缩放；缩小到画格边缘后会停止。</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>放大</button><button type="button" onClick={() => cropImage("out")}>缩小</button><button type="button" onClick={() => cropImage("left")}>左移</button><button type="button" onClick={() => cropImage("up")}>上移</button><button type="button" onClick={() => cropImage("down")}>下移</button><button type="button" onClick={() => cropImage("right")}>右移</button><button type="button" onClick={() => cropImage("reset")}>重置</button></div><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: `画格 ${selectedElement.comicFrameId.split("-").pop()}` })}>回到画格</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"}</button></> : null}</aside> : null}
       </CanvasStage>
 
       {comicContextMenu && comicContextMenuStyle ? <FloatingMenu className="comic-context-menu reference-context-menu" style={comicContextMenuStyle} aria-label="对象管理菜单" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
@@ -3188,8 +3271,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       </FloatingMenu> : null}
 
       {frameImageTarget && frameImagePickerStyle ? <FloatingMenu role="dialog" className="frame-image-picker" style={frameImagePickerStyle} aria-label="选择漫画图片" onPointerDown={(event) => event.stopPropagation()}>
-        <header><div><strong>{frameImageTarget.placement === "cross_page" ? "放入跨页图片" : frameImageTarget.placement === "cross_segment" ? "放入跨段图片" : (() => { const image = frameAndImageForSelection(frameImageTarget.selection).image; return image ? image.location.space === "frame" ? "更换格内图片" : image.location.purpose === "cross_page" ? "更换跨页图片" : image.location.purpose === "cross_segment" ? "更换跨段图片" : image.location.anchor.type === "unit" ? "更换纸面图片" : "更换破格图片" : frameImageTarget.selection.type === "presentation_unit" ? "放入纸面图片" : "放入格内图片"; })()}</strong><small>选择左侧资产列表中的图片</small></div><button type="button" aria-label="关闭图片选择" onClick={() => setFrameImageTarget(null)}><Icon name="x" /></button></header>
-        <div className="frame-image-grid">{frameImageChoices.map((choice) => <button type="button" key={`${choice.assetId}:${choice.assetVersionId}`} onClick={() => placeFrameImage(choice)}>{choice.url ? <img src={choice.url} alt="" /> : <span className="frame-image-placeholder"><Icon name="asset" /></span>}<strong>{choice.label}</strong></button>)}</div>
+        <header><div><strong>{frameImageTarget.placement === "cross_page" ? "放入跨页图片" : frameImageTarget.placement === "cross_segment" ? "放入跨段图片" : (() => { const image = frameAndImageForSelection(frameImageTarget.selection).image; return image ? image.location.space === "frame" ? "更换格内图片" : image.location.purpose === "cross_page" ? "更换跨页图片" : image.location.purpose === "cross_segment" ? "更换跨段图片" : image.location.anchor.type === "unit" ? "更换纸面图片" : "更换破格图片" : frameImageTarget.selection.type === "presentation_unit" ? "放入纸面图片" : "放入格内图片"; })()}</strong><small>{frameImagePickerSelection?.frame ? "选择当前页、画布或资产中的图片" : "选择左侧资产列表中的图片"}</small></div><button type="button" aria-label="关闭图片选择" onClick={() => setFrameImageTarget(null)}><Icon name="x" /></button></header>
+        <div className="frame-image-grid">{frameImageChoices.map((choice) => <button type="button" key={choice.id} onClick={() => placeFrameImage(choice)}>{choice.url ? <img src={choice.url} alt="" /> : <span className="frame-image-placeholder"><Icon name="asset" /></span>}<strong>{choice.label}</strong></button>)}</div>
         {!frameImageChoices.length ? <p>左侧资产列表还没有图片资产，请先使用资产栏的“+”上传。</p> : null}
       </FloatingMenu> : null}
 

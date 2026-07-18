@@ -168,6 +168,7 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "create_vertical_segment",
     "update_presentation_unit",
     "delete_presentation_unit",
+    "restore_workspace_version",
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
@@ -428,11 +429,17 @@ test("page objects, breakout and frame overlap preserve explicit ownership and v
   const occupiedUnit = fixture.working.document.units[0];
   const occupiedArtLayer = occupiedUnit.frames[0].layers.find((layer) => layer.elements.some((element) => element.kind === "image"))!;
   const occupiedImage = occupiedArtLayer.elements.find((element) => element.kind === "image")!;
-  const clearedFrame = dryRunEditorCapability("remove_frame_image", { unitId: unit.id, frameId: frame.id, layerId: occupiedArtLayer.id, elementId: occupiedImage.id }, context());
-  fixture.working = clearedFrame.result.working;
-  const movedBreakout = dryRunEditorCapability("set_element_transform", { unitId: unit.id, layerId: movedBreakoutLayer.id, elementId: image.id, transform: { x: -.2, y: .1, width: .8, height: .8 } }, context());
+  const replacedFrame = dryRunEditorCapability("return_element_to_frame", { unitId: unit.id, frameId: frame.id, layerId: movedBreakoutLayer.id, elementId: image.id, replaceExistingImage: true }, context());
+  fixture.working = replacedFrame.result.working;
+  assert.equal(frameElements(fixture.working.document.units[0].frames[0]).some((element) => element.id === occupiedImage.id), false);
+  assert.equal(frameElements(fixture.working.document.units[0].frames[0]).some((element) => element.id === image.id), true);
+  assert.equal(fixture.working.document.units[0].overlayLayers.some((layer) => layer.elements.some((element) => element.id === image.id)), false);
+  const replacementLayer = fixture.working.document.units[0].frames[0].layers.find((layer) => layer.elements.some((element) => element.id === image.id))!;
+  fixture.working = dryRunEditorCapability("promote_element_to_overlay", { unitId: unit.id, frameId: frame.id, layerId: replacementLayer.id, elementId: image.id }, context()).result.working;
+  const movedBreakoutLayerAgain = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "breakout" && layer.elements.some((element) => element.id === image.id))!;
+  const movedBreakout = dryRunEditorCapability("set_element_transform", { unitId: unit.id, layerId: movedBreakoutLayerAgain.id, elementId: image.id, transform: { x: -.2, y: .1, width: .8, height: .8 } }, context());
   fixture.working = movedBreakout.result.working;
-  const returnedMovedBreakout = dryRunEditorCapability("return_element_to_frame", { unitId: unit.id, frameId: frame.id, layerId: movedBreakoutLayer.id, elementId: image.id }, context());
+  const returnedMovedBreakout = dryRunEditorCapability("return_element_to_frame", { unitId: unit.id, frameId: frame.id, layerId: movedBreakoutLayerAgain.id, elementId: image.id }, context());
   fixture.working = returnedMovedBreakout.result.working;
   const normalizedImage = frameElements(fixture.working.document.units[0].frames[0]).find((element) => element.id === image.id);
   assert.ok(normalizedImage?.kind === "image");
@@ -462,6 +469,21 @@ test("page objects, breakout and frame overlap preserve explicit ownership and v
   assert.equal(fixture.working.document.units[0].layoutPolicy.frameOverlap, "allow");
   const reordered = dryRunEditorCapability("reorder_frame", { unitId: unit.id, frameId: frame.id, zIndex: 99 }, context());
   assert.equal(reordered.result.working.document.units[0].frames.find((item) => item.id === frame.id)?.zIndex, 99);
+});
+
+test("restoring a workspace version is one validated revision", () => {
+  const fixture = createInitialFixture();
+  const originalDocument = structuredClone(fixture.working.document);
+  const originalBeats = structuredClone(fixture.storyboardBeats);
+  const frame = fixture.working.document.units[0].frames[0];
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-restore-${++sequence}`, actor: "human" as const });
+  fixture.working = dryRunEditorCapability("move_frame", { unitId: fixture.working.document.units[0].id, frameId: frame.id, position: { x: frame.geometry.x + 12, y: frame.geometry.y + 12 } }, context()).result.working;
+  const restored = dryRunEditorCapability("restore_workspace_version", { document: originalDocument, storyboardBeats: originalBeats }, context());
+  assert.deepEqual(restored.result.working.document, originalDocument);
+  assert.deepEqual(restored.result.storyboardBeats, originalBeats);
+  assert.equal(restored.result.working.revision, fixture.working.revision + 1);
+  assert.deepEqual(restored.commands.map((command) => command.type), ["replace_chapter_presentation", "replace_storyboard_beats"]);
 });
 
 test("multiple human capabilities plan one atomic ChangeSet without mutating their source", () => {

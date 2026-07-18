@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "../../shared/src";
-import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene } from "../../shared/src";
+import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop } from "../../shared/src";
 import { prisma } from "./db";
 import { getObject, putObject } from "./object-storage";
 
@@ -78,10 +78,10 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>) {
   const transform = transformAttribute(geometry);
   if (element.kind === "image") {
     const data = assets.get(element.assetVersionId); if (!data) return "";
-    const crop = element.crop;
-    const width = geometry.width / crop.width; const height = geometry.height / crop.height;
+    const crop = projectImageCrop(element.crop);
+    const width = geometry.width * crop.width; const height = geometry.height * crop.height;
     const blend = element.blendMode && element.blendMode !== "normal" ? ` style="mix-blend-mode:${element.blendMode}"` : "";
-    return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x - crop.x * width}" y="${geometry.y - crop.y * height}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${element.opacity ?? 1}"${blend}${clip}${transform}/>`;
+    return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x + crop.x * geometry.width}" y="${geometry.y + crop.y * geometry.height}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${element.opacity ?? 1}"${blend}${clip}${transform}/>`;
   }
   if (element.kind === "balloon") {
     const shell = renderAppearance(element.appearance, geometry, assets) ?? renderBalloonShell(element, geometry);

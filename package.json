@@ -40,6 +40,8 @@
     "db:seed:if-empty": "tsx prisma/seed-if-empty.ts",
     "db:sample:rainy-station": "tsx samples/rainy-station/seed.ts",
     "db:reset:rainy-station": "tsx scripts/reset-to-rainy-station.ts",
+    "db:sample:campus-letter": "tsx samples/campus-letter/seed.ts",
+    "db:reset:campus-letter": "tsx scripts/reset-to-campus-letter.ts",
     "db:studio": "prisma studio",
     "provider:probe": "tsx scripts/probe-providers.ts"
   },

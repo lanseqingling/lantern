@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 import { createSignedAssetPath } from "./signed-assets";
-import { applyWorkspaceChangeSet } from "../../editor-core/src";
+import { applyWorkspaceChangeSet, planEditorCapability } from "../../editor-core/src";
 import { mergeAssetVersionHeads, normalizeStoryboardBeats, validateComicDocument, type StoryboardBeat, type WorkspaceChangeSet, type WorkspaceCommand } from "../../shared/src";
 
 function json<T>(value: Prisma.JsonValue) {
@@ -27,6 +27,48 @@ export async function getLatestWorking(projectId: string) {
   const working = await prisma.workingRevision.findFirst({ where: { projectId }, orderBy: { revision: "desc" } });
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
   return working;
+}
+
+export async function restoreLatestSnapshot(args: { ownerUserId: string; projectId: string; chapterId: string; expectedRevision: number }) {
+  await getOwnedProject(args.ownerUserId, args.projectId);
+  const [current, snapshot] = await Promise.all([
+    getLatestWorking(args.projectId),
+    prisma.savedSnapshot.findFirst({ where: { projectId: args.projectId, chapterId: args.chapterId, ownerUserId: args.ownerUserId }, orderBy: { createdAt: "desc" } }),
+  ]);
+  if (!snapshot) throw new AppError("not_found", "还没有可回退的保存版本。", 404);
+  if (current.revision !== args.expectedRevision) throw new AppError("conflict", "工作稿已变化，请重新操作。", 409, { currentRevision: current.revision });
+  const source = await prisma.workingRevision.findUnique({ where: { projectId_revision: { projectId: args.projectId, revision: snapshot.sourceWorkingRevision } } });
+  if (!source) throw new AppError("not_found", "保存版本对应的工作稿不存在。", 404);
+  const document = validateComicDocument(json<unknown>(snapshot.document));
+  const storyboardBeats = normalizeStoryboardBeats(json<unknown[]>(source.storyboardBeats));
+  const plan = planEditorCapability("restore_workspace_version", { document, storyboardBeats }, {
+    fixture: {
+      working: {
+        documentId: current.id,
+        chapterId: args.chapterId,
+        projectId: args.projectId,
+        createdAt: current.createdAt.toISOString(),
+        state: "working",
+        revision: current.revision,
+        document: validateComicDocument(json<unknown>(current.document)),
+      },
+      storyboardBeats: normalizeStoryboardBeats(json<unknown[]>(current.storyboardBeats)),
+    },
+    createId: (prefix) => `${prefix}:${current.revision + 1}`,
+    actor: "human",
+  });
+  return commitChangeSet({
+    ownerUserId: args.ownerUserId,
+    projectId: args.projectId,
+    expectedRevision: current.revision,
+    changeSet: {
+      id: `restore-snapshot:${snapshot.id}:${current.revision + 1}`,
+      projectId: args.projectId,
+      baseRevision: current.revision,
+      source: "undo",
+      commands: plan.commands,
+    },
+  });
 }
 
 async function syncStoryboardBeatRecords(

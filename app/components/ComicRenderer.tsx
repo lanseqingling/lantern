@@ -5,6 +5,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@/packages/shared/src";
 import { frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@/packages/shared/src";
 import type { Selection } from "@/app/lib/workbench-state";
+import { snapFrameCornerToNeighborParallel, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 
 type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
@@ -18,6 +19,7 @@ type DragState = {
   startX: number;
   startY: number;
   startGeometry?: Geometry;
+  startSceneGeometry?: Geometry;
   startShape?: FrameShape;
   frameBounds?: Geometry;
   cornerIndex?: FrameCornerIndex;
@@ -28,6 +30,7 @@ type DragState = {
   moved?: boolean;
 };
 type CropWheelState = { elementId: string; crop: ArtElement["crop"]; timer: number };
+type SnapGuideState = { edgeGuides: EdgeExtensionGuide[] } | { parallelGuide: ParallelCornerGuide } | null;
 
 type ComicRendererProps = {
   document: ComicDocument;
@@ -129,6 +132,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const suppressClick = useRef(false);
   const [drafts, setDrafts] = useState<Record<string, ElementPatch>>({});
   const draftsRef = useRef<Record<string, ElementPatch>>({});
+  const [snapGuides, setSnapGuides] = useState<SnapGuideState>(null);
   useEffect(() => () => {
     if (cropWheelRef.current) window.clearTimeout(cropWheelRef.current.timer);
   }, []);
@@ -230,7 +234,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     if (!editable) return;
     event.preventDefault(); event.stopPropagation(); onSelect?.(next);
     dragRef.current = { ...state, startX: event.clientX, startY: event.clientY };
-    draftsRef.current = {}; setDrafts({}); event.currentTarget.setPointerCapture(event.pointerId);
+    draftsRef.current = {}; setDrafts({}); setSnapGuides(null); event.currentTarget.setPointerCapture(event.pointerId);
   };
   const surfaceForGeometry = (geometry: Geometry) => unit.surfaces.find((surface) => containsGeometry(surface.geometry, geometry));
   const editableBoundsForFrame = (frame: Frame) => frame.surfaceScope === "unit"
@@ -261,21 +265,78 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const pointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current; const bounds = paperRef.current?.getBoundingClientRect();
     if (!drag || !bounds) return;
+    setSnapGuides(null);
     const dx = (event.clientX - drag.startX) / bounds.width * unit.canvas.width;
     const dy = (event.clientY - drag.startY) / bounds.height * unit.canvas.height;
+    const snapThreshold = { x: 5 / bounds.width * unit.canvas.width, y: 5 / bounds.height * unit.canvas.height };
+    const moveSnapThreshold = {
+      x: Math.abs(event.clientX - drag.startX) >= 1 ? snapThreshold.x : -1,
+      y: Math.abs(event.clientY - drag.startY) >= 1 ? snapThreshold.y : -1,
+    };
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.moved = true;
     let patch: ElementPatch | undefined;
     if (drag.mode === "frame_corner" && drag.startGeometry && drag.startShape && drag.frameBounds && drag.cornerIndex !== undefined) {
       const axis = drag.axis ?? frameCornerDragAxis(event.clientX - drag.startX, event.clientY - drag.startY);
       if (!axis) return;
       drag.axis = axis;
-      const reshaped = reshapeFrameCorner(drag.startGeometry, drag.startShape, drag.cornerIndex, axis, axis === "x" ? dx : dy, drag.frameBounds);
+      const rawDelta = axis === "x" ? dx : dy;
+      const parallelSnap = drag.frameId ? snapFrameCornerToNeighborParallel(
+        { id: drag.frameId, geometry: drag.startGeometry, shape: drag.startShape },
+        drag.cornerIndex,
+        axis,
+        rawDelta,
+        unit.frames,
+        snapThreshold[axis],
+      ) : { delta: rawDelta };
+      let usedParallelSnap = Boolean(parallelSnap.guide);
+      let reshaped = reshapeFrameCorner(drag.startGeometry, drag.startShape, drag.cornerIndex, axis, parallelSnap.delta, drag.frameBounds);
+      if (reshaped && drag.frameId && !frameGeometryAllowed(drag.frameId, reshaped.geometry) && parallelSnap.guide) {
+        reshaped = reshapeFrameCorner(drag.startGeometry, drag.startShape, drag.cornerIndex, axis, rawDelta, drag.frameBounds);
+        usedParallelSnap = false;
+      }
       if (!reshaped || !drag.frameId || !frameGeometryAllowed(drag.frameId, reshaped.geometry)) return;
+      if (parallelSnap.guide && usedParallelSnap) {
+        const reshapedPoints = frameQuadrilateralPoints(reshaped.shape);
+        const actualMoving = reshapedPoints?.[drag.cornerIndex];
+        const actualMovingPoint = actualMoving ? {
+          x: reshaped.geometry.x + actualMoving.x * reshaped.geometry.width,
+          y: reshaped.geometry.y + actualMoving.y * reshaped.geometry.height,
+        } : undefined;
+        const activeEdge = parallelSnap.guide.activeEdge;
+        usedParallelSnap = Boolean(actualMovingPoint && [activeEdge.start, activeEdge.end].some((point) => Math.hypot(point.x - actualMovingPoint.x, point.y - actualMovingPoint.y) < 1e-3));
+      }
+      if (parallelSnap.guide && usedParallelSnap) setSnapGuides({ parallelGuide: parallelSnap.guide });
       patch = reshaped;
     } else if (drag.mode === "image_crop" && drag.startCrop) {
       const frame = drag.frameId ? framesById.get(drag.frameId) : undefined; if (!frame) return;
       patch = { crop: { ...drag.startCrop, x: clamp(drag.startCrop.x - dx / frame.geometry.width * drag.startCrop.width, 0, 1 - drag.startCrop.width), y: clamp(drag.startCrop.y - dy / frame.geometry.height * drag.startCrop.height, 0, 1 - drag.startCrop.height) } };
-    } else if ((drag.mode === "image_move" || drag.mode === "balloon_move" || drag.mode === "text_move") && drag.startTransform) {
+    } else if (drag.mode === "image_move" && drag.startTransform && drag.startSceneGeometry) {
+      const anchor = drag.anchorGeometry; if (!anchor) return;
+      const coordinateWidth = drag.frameId ? 1 : anchor.width;
+      const coordinateHeight = drag.frameId ? 1 : anchor.height;
+      const coordinateBounds = drag.coordinateBounds ?? { minX: 0, minY: 0, maxX: coordinateWidth, maxY: coordinateHeight };
+      const rawTransform = {
+        ...drag.startTransform,
+        x: clamp(drag.startTransform.x + (drag.frameId ? dx / anchor.width : dx), coordinateBounds.minX, coordinateBounds.maxX - drag.startTransform.width),
+        y: clamp(drag.startTransform.y + (drag.frameId ? dy / anchor.height : dy), coordinateBounds.minY, coordinateBounds.maxY - drag.startTransform.height),
+      };
+      const actualDx = (rawTransform.x - drag.startTransform.x) * (drag.frameId ? anchor.width : 1);
+      const actualDy = (rawTransform.y - drag.startTransform.y) * (drag.frameId ? anchor.height : 1);
+      const snapped = snapGeometryToFrameEdgeExtensions(
+        { ...drag.startSceneGeometry, x: drag.startSceneGeometry.x + actualDx, y: drag.startSceneGeometry.y + actualDy },
+        unit.frames.filter((frame) => frame.id !== drag.frameId),
+        moveSnapThreshold,
+      );
+      const snappedDx = snapped.geometry.x - drag.startSceneGeometry.x;
+      const snappedDy = snapped.geometry.y - drag.startSceneGeometry.y;
+      const transform = {
+        ...drag.startTransform,
+        x: clamp(drag.startTransform.x + (drag.frameId ? snappedDx / anchor.width : snappedDx), coordinateBounds.minX, coordinateBounds.maxX - drag.startTransform.width),
+        y: clamp(drag.startTransform.y + (drag.frameId ? snappedDy / anchor.height : snappedDy), coordinateBounds.minY, coordinateBounds.maxY - drag.startTransform.height),
+      };
+      if (snapped.guides.length) setSnapGuides({ edgeGuides: snapped.guides });
+      patch = { transform };
+    } else if ((drag.mode === "balloon_move" || drag.mode === "text_move") && drag.startTransform) {
       const anchor = drag.anchorGeometry; if (!anchor) return;
       const offsetX = drag.frameId ? dx / anchor.width : dx;
       const offsetY = drag.frameId ? dy / anchor.height : dy;
@@ -286,7 +347,35 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       patch = drag.startTailTarget
         ? { transform, tailTarget: { x: clamp(drag.startTailTarget.x + offsetX, coordinateBounds.minX, coordinateBounds.maxX), y: clamp(drag.startTailTarget.y + offsetY, coordinateBounds.minY, coordinateBounds.maxY) } }
         : { transform };
-    } else if ((drag.mode === "image_resize" || drag.mode === "balloon_resize" || drag.mode === "text_resize") && drag.startTransform) {
+    } else if (drag.mode === "image_resize" && drag.startTransform && drag.startSceneGeometry) {
+      const anchor = drag.anchorGeometry; if (!anchor) return;
+      const minWidth = drag.frameId ? .12 : unit.canvas.width * .08;
+      const minHeight = drag.frameId ? .08 : unit.canvas.height * .05;
+      const coordinateWidth = drag.frameId ? 1 : anchor.width;
+      const coordinateHeight = drag.frameId ? 1 : anchor.height;
+      const coordinateBounds = drag.coordinateBounds ?? { minX: 0, minY: 0, maxX: coordinateWidth, maxY: coordinateHeight };
+      const rawTransform = {
+        ...drag.startTransform,
+        width: clamp(drag.startTransform.width + (drag.frameId ? dx / anchor.width : dx), minWidth, coordinateBounds.maxX - drag.startTransform.x),
+        height: clamp(drag.startTransform.height + (drag.frameId ? dy / anchor.height : dy), minHeight, coordinateBounds.maxY - drag.startTransform.y),
+      };
+      const rawGeometry = {
+        ...drag.startSceneGeometry,
+        width: rawTransform.width * (drag.frameId ? anchor.width : 1),
+        height: rawTransform.height * (drag.frameId ? anchor.height : 1),
+      };
+      const snapped = snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold);
+      const transform = {
+        ...rawTransform,
+        width: clamp(snapped.geometry.width / (drag.frameId ? anchor.width : 1), minWidth, coordinateBounds.maxX - drag.startTransform.x),
+        height: clamp(snapped.geometry.height / (drag.frameId ? anchor.height : 1), minHeight, coordinateBounds.maxY - drag.startTransform.y),
+      };
+      const actualRight = drag.startSceneGeometry.x + transform.width * (drag.frameId ? anchor.width : 1);
+      const actualBottom = drag.startSceneGeometry.y + transform.height * (drag.frameId ? anchor.height : 1);
+      const guides = snapped.guides.filter((guide) => Math.abs((guide.axis === "x" ? actualRight : actualBottom) - guide.position) < 1e-6);
+      if (guides.length) setSnapGuides({ edgeGuides: guides });
+      patch = { transform };
+    } else if ((drag.mode === "balloon_resize" || drag.mode === "text_resize") && drag.startTransform) {
       const anchor = drag.anchorGeometry; if (!anchor) return;
       const minWidth = drag.frameId ? .12 : unit.canvas.width * .08;
       const minHeight = drag.frameId ? .08 : unit.canvas.height * .05;
@@ -316,12 +405,23 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const coordinateHeight = drag.frameId ? 1 : anchor.height;
       const coordinateBounds = drag.coordinateBounds ?? { minX: 0, minY: 0, maxX: coordinateWidth, maxY: coordinateHeight };
       patch = { tailTarget: { x: clamp(centerX + unitX * (edgeDistance + tailLength), coordinateBounds.minX, coordinateBounds.maxX), y: clamp(centerY + unitY * (edgeDistance + tailLength), coordinateBounds.minY, coordinateBounds.maxY) } };
-    } else if (drag.startGeometry) {
+    } else if (drag.mode === "frame_move" && drag.startGeometry && drag.frameId) {
       const start = drag.startGeometry;
-      const geometry = drag.mode === "frame_resize"
-        ? { ...start, width: clamp(start.width + dx, 120, unit.canvas.width - start.x), height: clamp(start.height + dy, 100, unit.canvas.height - start.y) }
-        : { ...start, x: clamp(start.x + dx, 0, unit.canvas.width - start.width), y: clamp(start.y + dy, 0, unit.canvas.height - start.height) };
-      if (!drag.frameId || !frameGeometryAllowed(drag.frameId, geometry)) return;
+      const rawGeometry = { ...start, x: clamp(start.x + dx, 0, unit.canvas.width - start.width), y: clamp(start.y + dy, 0, unit.canvas.height - start.height) };
+      const snapped = snapGeometryToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold);
+      const snappedAllowed = frameGeometryAllowed(drag.frameId, snapped.geometry);
+      const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
+      if (!frameGeometryAllowed(drag.frameId, geometry)) return;
+      if (snappedAllowed && snapped.guides.length) setSnapGuides({ edgeGuides: snapped.guides });
+      patch = { geometry };
+    } else if (drag.mode === "frame_resize" && drag.startGeometry && drag.frameId) {
+      const start = drag.startGeometry;
+      const rawGeometry = { ...start, width: clamp(start.width + dx, 120, unit.canvas.width - start.x), height: clamp(start.height + dy, 100, unit.canvas.height - start.y) };
+      const snapped = snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold);
+      const snappedAllowed = snapped.geometry.width >= 120 && snapped.geometry.height >= 100 && frameGeometryAllowed(drag.frameId, snapped.geometry);
+      const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
+      if (!frameGeometryAllowed(drag.frameId, geometry)) return;
+      if (snappedAllowed && snapped.guides.length) setSnapGuides({ edgeGuides: snapped.guides });
       patch = { geometry };
     }
     if (!patch) return;
@@ -336,7 +436,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       if (drag.mode === "frame_move" || drag.mode === "frame_resize" || drag.mode === "frame_corner") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
       else onCommitElement?.(unit.id, drag.elementId, patch, label);
     }
-    draftsRef.current = {}; setDrafts({}); dragRef.current = null;
+    draftsRef.current = {}; setDrafts({}); setSnapGuides(null); dragRef.current = null;
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   };
   const badgeEntries = [
@@ -356,6 +456,15 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     onClick={(event) => { const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue" && point) { const frame = frameAtPoint(point); if (!frame) onPlacePageDialogue?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (interactionMode !== "select") return; const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: `Page ${String(pageIndex + 1).padStart(2, "0")}` }); onPageClick?.(pageIndex); }}
     onContextMenu={(event) => { const point = eventPoint(event); if (!point) return; const frame = frameAtPoint(point); contextFor(event, frame ? { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) } : { type: "presentation_unit", id: unit.id, pageId: unit.id, label: `Page ${String(pageIndex + 1).padStart(2, "0")}` }); }}>
     <div className="paper-grain" aria-hidden="true" />
+    {snapGuides ? <svg className="snap-guide-layer" viewBox={`0 0 ${unit.canvas.width} ${unit.canvas.height}`} preserveAspectRatio="none" aria-hidden="true">
+      {"edgeGuides" in snapGuides ? snapGuides.edgeGuides.map((guide) => guide.axis === "x"
+        ? <line className="edge-extension" key={`x-${guide.position}`} x1={guide.position} x2={guide.position} y1={0} y2={unit.canvas.height} />
+        : <line className="edge-extension" key={`y-${guide.position}`} x1={0} x2={unit.canvas.width} y1={guide.position} y2={guide.position} />) : null}
+      {"parallelGuide" in snapGuides ? <>
+        <line className="parallel-reference-edge" x1={snapGuides.parallelGuide.referenceEdge.start.x} y1={snapGuides.parallelGuide.referenceEdge.start.y} x2={snapGuides.parallelGuide.referenceEdge.end.x} y2={snapGuides.parallelGuide.referenceEdge.end.y} />
+        <line className="parallel-active-edge" x1={snapGuides.parallelGuide.activeEdge.start.x} y1={snapGuides.parallelGuide.activeEdge.start.y} x2={snapGuides.parallelGuide.activeEdge.end.x} y2={snapGuides.parallelGuide.activeEdge.end.y} />
+      </> : null}
+    </svg> : null}
     {editable && unit.surfaces.length > 1 ? unit.surfaces.slice(1).map((surface) => <span key={`${surface.id}-seam`} className={`lcd-surface-seam ${unit.kind === "spread" ? "vertical" : "horizontal"}`} aria-hidden="true" style={unit.kind === "spread" ? { left: `${surface.geometry.x / unit.canvas.width * 100}%` } : { top: `${surface.geometry.y / unit.canvas.height * 100}%` }} />) : null}
     {scene.frames.map(({ frame, fillZIndex }) => <div className="lcd-frame-fill" key={`${frame.id}-fill`} style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: fillZIndex }}><FrameShapeVisual frame={frame} fill="#fff" /></div>)}
     {images.map((node) => {
@@ -381,7 +490,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         onPointerDown={(event) => {
           if (event.button === 0 && event.detail > 1) return;
           if (node.source === "overlay" && selected && interactionMode === "move" && event.button === 0) {
-            startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform }, imageSelection);
+            startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, imageSelection);
             return;
           }
           if (!frameContent || !frame || !selected || interactionMode !== "crop") return;
@@ -395,7 +504,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         <div className="lcd-image-crop">
           {src ? <img src={src} alt="漫画画格中的格内成稿图" draggable={false} style={cropStyle(image)} /> : <div className="missing-frame-image" aria-label="等待格内成稿图"><span>等待格内成稿图</span></div>}
         </div>
-        {selected && editable ? <><div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div>{node.source === "overlay" && interactionMode === "move" ? <button type="button" aria-label="调整纸面图片大小" className="resize-handle overlay-image-resize" onPointerDown={(event) => startDrag(event, { mode: "image_resize", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform }, imageSelection)}/> : null}</> : null}
+        {selected && editable ? <><div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div>{node.source === "overlay" && interactionMode === "move" ? <button type="button" aria-label="调整纸面图片大小" className="resize-handle overlay-image-resize" onPointerDown={(event) => startDrag(event, { mode: "image_resize", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, imageSelection)}/> : null}</> : null}
       </div>;
     })}
     {scene.frames.map(({ frame, borderZIndex }) => {
@@ -405,7 +514,10 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
       const retainedSelection = selection?.type === "image" && cropEditing ? selection : frameSelection;
       return <div className={`lcd-frame ${selected ? "selected" : ""} ${cropEditing ? "crop-editing" : ""} ${multiSelectedIds?.has(frame.id) ? "multi-selected" : ""}`} data-element-id={frame.id} data-page-id={unit.id} key={frame.id}
-        style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: borderZIndex }}
+        // Corner controls live inside the frame stacking context. Lift that
+        // context above the global object-number layer only while editing so
+        // moved handles remain clickable even when they cross another badge.
+        style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: cropEditing ? 2_147_483_646 : borderZIndex }}
         onClick={(event) => { event.stopPropagation(); const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
         onDoubleClick={(event) => doubleClick(event, frameSelection)}
         onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection); }}
@@ -482,7 +594,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
         const coordinateBounds = nodeCoordinateBounds(node, frame);
         const nextSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
-        return <span className="image-order-anchor" key={`${image.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`image:${image.id}`) ?? 0}px 0` }}><button type="button" className={`image-object-order ${selection?.type === "image" && selection.id === image.id ? "selected" : ""}`} aria-label={`选择${label}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform }, nextSelection); }}>{label}</button></span>;
+        return <span className="image-order-anchor" key={`${image.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`image:${image.id}`) ?? 0}px 0` }}><button type="button" className={`image-object-order ${selection?.type === "image" && selection.id === image.id ? "selected" : ""}`} aria-label={`选择${label}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, nextSelection); }}>{label}</button></span>;
       })}
       {scene.frames.map(({ frame }, index) => {
         const order = readingOrder.get(frame.id) ?? index + 1;

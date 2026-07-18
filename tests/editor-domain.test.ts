@@ -5,6 +5,7 @@ import { createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilat
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
+import { snapFrameCornerToNeighborParallel, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../app/lib/editor-snapping";
 
 test("all demo runtime fixtures satisfy executable LCD v0.4", () => {
   Object.values(previewFixtures).forEach((fixture) => assert.equal(validateComicDocument(fixture).protocolVersion, "lcd-0.4"));
@@ -124,6 +125,69 @@ test("frame corner gestures lock to one axis and rebase an outward trapezoid", (
     geometry: { x: 10, y: 20, width: 250, height: 100 },
     shape: { kind: "polygon", points: [{ x: 0, y: 0 }, { x: .8, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] },
   });
+});
+
+test("moving objects snap only to close like-for-like frame edge extensions", () => {
+  const target = { geometry: { x: 10, y: 20, width: 80, height: 90 } };
+  const snapped = snapGeometryToFrameEdgeExtensions(
+    { x: 14, y: 150, width: 50, height: 40 },
+    [target],
+    { x: 5, y: 5 },
+  );
+  assert.deepEqual(snapped.geometry, { x: 10, y: 150, width: 50, height: 40 });
+  assert.deepEqual(snapped.guides, [{ kind: "edge_extension", axis: "x", position: 10 }]);
+
+  const outsideThreshold = snapGeometryToFrameEdgeExtensions(
+    { x: 16, y: 150, width: 50, height: 40 },
+    [target],
+    { x: 5, y: 5 },
+  );
+  assert.equal(outsideThreshold.geometry.x, 16);
+  assert.deepEqual(outsideThreshold.guides, []);
+
+  const crossEdgeOnly = snapGeometryToFrameEdgeExtensions(
+    { x: 56, y: 150, width: 40, height: 40 },
+    [{ geometry: { x: 100, y: 20, width: 40, height: 90 } }],
+    { x: 5, y: 5 },
+  );
+  assert.equal(crossEdgeOnly.geometry.x, 56);
+  assert.deepEqual(crossEdgeOnly.guides, []);
+});
+
+test("resizing objects snaps their right and bottom edges to matching frame extensions", () => {
+  const target = { geometry: { x: 10, y: 20, width: 80, height: 90 } };
+  const snapped = snapGeometrySizeToFrameEdgeExtensions(
+    { x: 30, y: 40, width: 56, height: 66 },
+    [target],
+    { x: 5, y: 5 },
+  );
+  assert.deepEqual(snapped.geometry, { x: 30, y: 40, width: 60, height: 70 });
+  assert.deepEqual(snapped.guides, [
+    { kind: "edge_extension", axis: "x", position: 90 },
+    { kind: "edge_extension", axis: "y", position: 110 },
+  ]);
+
+  const outsideThreshold = snapGeometrySizeToFrameEdgeExtensions(
+    { x: 30, y: 40, width: 54, height: 64 },
+    [target],
+    { x: 5, y: 5 },
+  );
+  assert.deepEqual(outsideThreshold.geometry, { x: 30, y: 40, width: 54, height: 64 });
+  assert.deepEqual(outsideThreshold.guides, []);
+});
+
+test("corner editing snaps the active facing edge parallel to the nearest neighboring frame edge", () => {
+  const leftFrame = { id: "left", geometry: { x: 0, y: 10, width: 100, height: 100 }, shape: { kind: "polygon" as const, points: [{ x: 0, y: 0 }, { x: .9, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] } };
+  const rightFrame = { id: "right", geometry: { x: 120, y: 20, width: 80, height: 100 }, shape: { kind: "rect" as const } };
+  const snapped = snapFrameCornerToNeighborParallel(rightFrame, 3, "x", 7, [leftFrame], 5);
+  assert.equal(snapped.delta, 10);
+  assert.equal(snapped.guide?.frameId, "left");
+  assert.deepEqual(snapped.guide?.referenceEdge, { start: { x: 90, y: 10 }, end: { x: 100, y: 110 } });
+  assert.deepEqual(snapped.guide?.activeEdge, { start: { x: 120, y: 20 }, end: { x: 130, y: 120 } });
+
+  const outsideThreshold = snapFrameCornerToNeighborParallel(rightFrame, 3, "x", 4, [leftFrame], 5);
+  assert.equal(outsideThreshold.delta, 4);
+  assert.equal(outsideThreshold.guide, undefined);
 });
 
 test("reshape frame capability applies geometry and four-corner shape atomically", () => {

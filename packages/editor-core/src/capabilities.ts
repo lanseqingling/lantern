@@ -906,6 +906,53 @@ const resizeFrameCapability = defineCapability({
   },
 });
 
+const frameCornerPointSchema = z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+const editableFrameShapeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("rect"), radius: z.number().nonnegative().optional() }),
+  z.strictObject({ kind: z.literal("polygon"), points: z.tuple([frameCornerPointSchema, frameCornerPointSchema, frameCornerPointSchema, frameCornerPointSchema]) }),
+]);
+
+const reshapeFrameCapability = defineCapability({
+  id: "reshape_frame",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    geometry: geometrySchema,
+    shape: editableFrameShapeSchema,
+  }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["frame_exists", "shape_is_axis_locked_quadrilateral", "resulting_document_is_valid"],
+  outputCommandTypes: ["resize_frame", "set_frame_style"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    findFrame(context, input.unitId, input.frameId);
+    if (input.shape.kind === "polygon") {
+      const crossProducts = input.shape.points.map((point, index, points) => {
+        const next = points[(index + 1) % points.length];
+        const after = points[(index + 2) % points.length];
+        return (next.x - point.x) * (after.y - next.y) - (next.y - point.y) * (after.x - next.x);
+      });
+      if (crossProducts.some((value) => Math.abs(value) < 1e-5) || crossProducts.some((value) => Math.sign(value) !== Math.sign(crossProducts[0]))) {
+        throw new Error("画格角点不能交叉或折叠");
+      }
+      const area = Math.abs(input.shape.points.reduce((sum, point, index, points) => {
+        const next = points[(index + 1) % points.length];
+        return sum + point.x * next.y - next.x * point.y;
+      }, 0)) / 2;
+      if (area < .08) throw new Error("画格角度过大，请保留足够的可见区域");
+    }
+    return [
+      { type: "resize_frame", unitId: input.unitId, frameId: input.frameId, geometry: input.geometry },
+      { type: "set_frame_style", unitId: input.unitId, frameId: input.frameId, shape: input.shape },
+    ];
+  },
+});
+
 const setFrameCrossPageCapability = defineCapability({
   id: "set_frame_cross_page",
   version: 1,
@@ -1453,6 +1500,7 @@ const capabilityRegistry = {
   set_frame_overlap_policy: setFrameOverlapPolicyCapability,
   reorder_frame: reorderFrameCapability,
   resize_frame: resizeFrameCapability,
+  reshape_frame: reshapeFrameCapability,
   set_frame_cross_page: setFrameCrossPageCapability,
   set_element_transform: setElementTransformCapability,
   update_balloon: updateBalloonCapability,

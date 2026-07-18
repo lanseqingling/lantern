@@ -91,6 +91,77 @@ export type FrameShape =
   | { kind: "polygon"; points: Point[] }
   | { kind: "ellipse" };
 
+export type FrameCornerIndex = 0 | 1 | 2 | 3;
+export type FrameCornerAxis = "x" | "y";
+
+const rectangularFramePoints: [Point, Point, Point, Point] = [
+  { x: 0, y: 0 },
+  { x: 1, y: 0 },
+  { x: 1, y: 1 },
+  { x: 0, y: 1 },
+];
+
+/** Returns the editable corners in clockwise top-left → top-right → bottom-right → bottom-left order. */
+export function frameQuadrilateralPoints(shape: FrameShape): [Point, Point, Point, Point] | undefined {
+  if (shape.kind === "rect") return structuredClone(rectangularFramePoints);
+  if (shape.kind !== "polygon" || shape.points.length !== 4) return undefined;
+  return shape.points.map((point) => ({ ...point })) as [Point, Point, Point, Point];
+}
+
+/** Locks a corner gesture to the first axis whose movement clears the pointer threshold. */
+export function frameCornerDragAxis(deltaX: number, deltaY: number, threshold = 4): FrameCornerAxis | undefined {
+  if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < threshold) return undefined;
+  return Math.abs(deltaX) >= Math.abs(deltaY) ? "x" : "y";
+}
+
+const roundedCoordinate = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
+
+/**
+ * Moves one quadrilateral corner along a single axis and rebases the frame geometry
+ * to the resulting polygon bounds. Other corners remain fixed in canvas space.
+ */
+export function reshapeFrameCorner(
+  geometry: Geometry,
+  shape: FrameShape,
+  cornerIndex: FrameCornerIndex,
+  axis: FrameCornerAxis,
+  delta: number,
+  bounds: Geometry,
+): { geometry: Geometry; shape: Extract<FrameShape, { kind: "polygon" }> } | undefined {
+  const points = frameQuadrilateralPoints(shape);
+  if (!points || !Number.isFinite(delta)) return undefined;
+  const absolute = points.map((point) => ({
+    x: geometry.x + point.x * geometry.width,
+    y: geometry.y + point.y * geometry.height,
+  })) as [Point, Point, Point, Point];
+  const leftCorner = cornerIndex === 0 || cornerIndex === 3;
+  const topCorner = cornerIndex === 0 || cornerIndex === 1;
+  const minimumWidth = Math.min(geometry.width * .45, Math.max(24, geometry.width * .15));
+  const minimumHeight = Math.min(geometry.height * .45, Math.max(20, geometry.height * .15));
+  const moving = absolute[cornerIndex];
+  if (axis === "x") {
+    const opposite = leftCorner ? [absolute[1].x, absolute[2].x] : [absolute[0].x, absolute[3].x];
+    const minimum = leftCorner ? bounds.x : Math.max(...opposite) + minimumWidth;
+    const maximum = leftCorner ? Math.min(...opposite) - minimumWidth : bounds.x + bounds.width;
+    moving.x = Math.min(maximum, Math.max(minimum, moving.x + delta));
+  } else {
+    const opposite = topCorner ? [absolute[2].y, absolute[3].y] : [absolute[0].y, absolute[1].y];
+    const minimum = topCorner ? bounds.y : Math.max(...opposite) + minimumHeight;
+    const maximum = topCorner ? Math.min(...opposite) - minimumHeight : bounds.y + bounds.height;
+    moving.y = Math.min(maximum, Math.max(minimum, moving.y + delta));
+  }
+  const minX = Math.min(...absolute.map((point) => point.x));
+  const minY = Math.min(...absolute.map((point) => point.y));
+  const maxX = Math.max(...absolute.map((point) => point.x));
+  const maxY = Math.max(...absolute.map((point) => point.y));
+  const nextGeometry = { x: roundedCoordinate(minX), y: roundedCoordinate(minY), width: roundedCoordinate(maxX - minX), height: roundedCoordinate(maxY - minY) };
+  const nextPoints = absolute.map((point) => ({
+    x: roundedCoordinate((point.x - minX) / nextGeometry.width),
+    y: roundedCoordinate((point.y - minY) / nextGeometry.height),
+  })) as [Point, Point, Point, Point];
+  return { geometry: nextGeometry, shape: { kind: "polygon", points: nextPoints } };
+}
+
 export type LayerOverflow = "inherit" | "clip" | "visible";
 
 export type ArtElement = {
@@ -369,6 +440,7 @@ export type ComicFrameElement = CanvasViewBase & {
   linkedStoryboardBeatVersionId: string;
   readingOrder: number;
   border: BorderStyle;
+  shape: FrameShape;
   mask: { mode: "clip" | "none" | "bleed"; shape: "rect" };
   layerId?: undefined;
 };
@@ -432,7 +504,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
       surfaceScope: frame.surfaceScope,
       linkedStoryboardBeatId: primary?.storyboardBeatId ?? "unassigned",
       linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId ?? "unassigned-v1",
-      readingOrder: readingOrder.get(frame.id) ?? 0, border: frame.border,
+      readingOrder: readingOrder.get(frame.id) ?? 0, border: frame.border, shape: frame.shape,
       mask: { mode: frame.mask.mode === "visible" ? "none" : frame.mask.mode, shape: "rect" }, visible: frame.visible, name: frame.name,
     });
     frame.layers.forEach((layer) => layer.elements.forEach((element) => {

@@ -1315,7 +1315,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         } else {
           setSelection({ type: "image", id: cropImage.id, pageId: target.pageId, label: "格内主图" });
           setObjectInteractionMode("crop");
-          setToast("已进入裁切模式：拖动调整位置，滚轮缩放图片");
+          setToast("已进入裁切模式：拖动图片调整取景，拖动画格四角调整角度");
         }
         return;
       }
@@ -1361,9 +1361,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const pageView = workingPages.find((item) => item.id === unitId);
     const element = pageView?.elements.find((item) => item.id === elementId);
     if (!pageView || !element) return [];
-    if (element.type === "comic_frame" && patch.geometry) {
-      const geometry = patch.geometry as ComicFrameElement["geometry"];
-      return geometry.width === element.geometry.width && geometry.height === element.geometry.height
+    if (element.type === "comic_frame") {
+      const geometry = patch.geometry as ComicFrameElement["geometry"] | undefined;
+      const shape = patch.shape as ComicFrameElement["shape"] | undefined;
+      if (shape) return [{ id: "reshape_frame", input: { unitId, frameId: element.id, geometry: geometry ?? element.geometry, shape } }];
+      if (geometry) return geometry.width === element.geometry.width && geometry.height === element.geometry.height
         ? [{ id: "move_frame", input: { unitId, frameId: element.id, position: { x: geometry.x, y: geometry.y } } }]
         : [{ id: "resize_frame", input: { unitId, frameId: element.id, geometry } }];
     }
@@ -2020,7 +2022,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setSelection({ type: "image", id: image.id, pageId: selection.pageId, label: `${selection.label} · 格内图片裁切` });
     setInspectorOpen(false);
     setObjectInteractionMode("crop");
-    setToast("已进入裁切模式：拖动调整位置，滚轮缩放图片");
+    setToast("已进入裁切模式：拖动图片调整取景，拖动画格四角调整角度");
+  };
+
+  const resetFrameShape = () => {
+    if (!selection.pageId) return;
+    const { frame } = frameAndImageForSelection(selection);
+    if (!frame || frame.shape.kind === "rect") return;
+    commitCapability("reshape_frame", { unitId: selection.pageId, frameId: frame.id, geometry: frame.geometry, shape: { kind: "rect" } }, "重置画格角度");
   };
 
   const endCrop = () => {
@@ -2797,6 +2806,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
   });
   const frameImagePickerSelection = frameImageTarget ? frameAndImageForSelection(frameImageTarget.selection) : undefined;
+  const selectedCropFrame = objectInteractionMode === "crop" ? frameAndImageForSelection(selection).frame : undefined;
   const frameImageChoices = buildFrameImageChoices({
     assets: canvasAssetLibrary,
     canvasImages: canvasReferences,
@@ -3214,7 +3224,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         {isVerticalCanvas && canvasMode === "focus" ? <aside ref={verticalNavigatorRef} className="vertical-scroll-navigator" aria-hidden="true"><div className="vertical-scroll-map" style={verticalNavigatorPaperStyle}>{canvasUnits.map((unit) => <span key={unit.id} style={{ flexGrow: unit.canvas.height }} />)}<i /></div></aside> : null}
         {marquee && marqueeStyle ? <div className="canvas-marquee" style={marqueeStyle} aria-hidden="true" /> : null}
 
-        {canvasMode === "focus" && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("创作"); setAgentOpen(true); }}><Icon name="ai" /></button><button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : selection.type === "image" ? "开启或关闭纸面图片移动和缩放" : "开启或关闭移动画格"} disabled={selection.type !== "comic_frame" && selection.type !== "speech_balloon" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay") || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button><button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label="裁切当前画格的格内图片" disabled={(selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")) || objectInteractionMode === "move"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button><button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button><button type="button" aria-label="管理当前对象" aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button></ObjectToolbar> : null}
+        {canvasMode === "focus" && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("创作"); setAgentOpen(true); }}><Icon name="ai" /></button><button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : selection.type === "image" ? "开启或关闭纸面图片移动和缩放" : "开启或关闭移动画格"} disabled={selection.type !== "comic_frame" && selection.type !== "speech_balloon" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay") || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button><button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label="裁切格内图片并调整画格角度" disabled={(selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")) || objectInteractionMode === "move"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button><button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button><button type="button" aria-label="管理当前对象" aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button></ObjectToolbar> : null}
         {canvasCandidates.map((candidate, index) => {
           const expanded = previewCandidateId === candidate.id;
           const x = Number(candidate.metadata?.canvasX ?? 300 + (index % 2) * 210);
@@ -3237,7 +3247,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
         {inspectorOpen && editingStoryboardTarget && editorStyle ? <aside className="object-inspector near-selection" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{editingStoryboardBeat ? "编辑单格画面" : "创建单格画面"} · {editingStoryboardTarget.label}</span><button type="button" aria-label="关闭单格画面编辑" onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><label>标题<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder="例如：空站来信" onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>描述<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder="描述这一格的场景、人物、动作、情绪或叙事作用" onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? "保存" : "创建并绑定"}</button></aside> : null}
 
-        {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label="关闭对象编辑器" onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>正在编辑格内图片裁切。拖动画面调整位置，使用滚轮或下面动作缩放；缩小到画格边缘后会停止。</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>放大</button><button type="button" onClick={() => cropImage("out")}>缩小</button><button type="button" onClick={() => cropImage("left")}>左移</button><button type="button" onClick={() => cropImage("up")}>上移</button><button type="button" onClick={() => cropImage("down")}>下移</button><button type="button" onClick={() => cropImage("right")}>右移</button><button type="button" onClick={() => cropImage("reset")}>重置</button></div><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: `画格 ${selectedElement.comicFrameId.split("-").pop()}` })}>回到画格</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"}</button></> : null}</aside> : null}
+        {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label="关闭对象编辑器" onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>拖动图片调整取景，滚轮或下面动作缩放；拖动画格四角可沿横向或纵向调整边线角度。</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>放大</button><button type="button" onClick={() => cropImage("out")}>缩小</button><button type="button" onClick={() => cropImage("left")}>左移</button><button type="button" onClick={() => cropImage("up")}>上移</button><button type="button" onClick={() => cropImage("down")}>下移</button><button type="button" onClick={() => cropImage("right")}>右移</button><button type="button" onClick={() => cropImage("reset")}>重置取景</button></div><button className="text-edit-link" type="button" disabled={!selectedCropFrame || selectedCropFrame.shape.kind === "rect"} onClick={resetFrameShape}>重置画格角度</button><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: `画格 ${selectedElement.comicFrameId.split("-").pop()}` })}>回到画格</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"}</button></> : null}</aside> : null}
       </CanvasStage>
 
       {comicContextMenu && comicContextMenuStyle ? <FloatingMenu className="comic-context-menu reference-context-menu" style={comicContextMenuStyle} aria-label="对象管理菜单" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>

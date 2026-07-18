@@ -50,6 +50,10 @@
 .comic-page.interaction-move .selection-corners::after, .comic-page.interaction-crop .selection-corners::after { background: rgba(225,174,75,.07); }
 .comic-page.interaction-move .selection-label, .comic-page.interaction-crop .selection-label { border-color: rgba(225,174,75,.46); color: #8b641c; box-shadow: 0 8px 20px rgba(183,125,27,.1); }
 .resize-handle { position: absolute; z-index: 30; right: -7px; bottom: -7px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 5px; background: var(--cyan); box-shadow: 0 3px 10px rgba(36,127,130,.28); pointer-events: auto; cursor: nwse-resize; }
+.frame-corner-controls { position: absolute; z-index: 45; inset: 0; overflow: visible; pointer-events: none; }
+.frame-corner-handle { position: absolute; width: 15px; height: 15px; border: 2px solid #fff; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 2px rgba(36,127,130,.24), 0 4px 12px rgba(36,127,130,.34); translate: -50% -50%; pointer-events: auto; cursor: move; touch-action: none; transition: scale 120ms ease, box-shadow 120ms ease; }
+.frame-corner-handle:hover, .frame-corner-handle:focus-visible { box-shadow: 0 0 0 3px rgba(100,200,200,.28), 0 5px 14px rgba(36,127,130,.42); outline: 2px solid rgba(255,255,255,.94); outline-offset: 1px; scale: 1.12; }
+.frame-corner-handle:active { cursor: grabbing; scale: 1.06; }
 .overlay-image-resize { z-index: 35; }
 .lcd-balloon { display: grid; place-items: center; overflow: visible; isolation: isolate; padding: 5px 7px; border: 0; background: transparent; box-shadow: none; font-weight: 720; line-height: 1.25; text-align: center; cursor: pointer; }
 .balloon-order-anchor { position: absolute; pointer-events: none; }

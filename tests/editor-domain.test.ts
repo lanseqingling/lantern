@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
-import { createComicPageView, frameElements, normalizeStoryboardBeat, pageDisplayGroups, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
+import { createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
@@ -104,6 +104,46 @@ test("moving a frame changes only the frame while local art follows at render ti
   assert.deepEqual(resolveLocalTransform(movedFrame.geometry, movedImage.transform), movedFrame.geometry);
 });
 
+test("frame corner gestures lock to one axis and rebase an outward trapezoid", () => {
+  assert.equal(frameCornerDragAxis(8, 3), "x");
+  assert.equal(frameCornerDragAxis(3, -8), "y");
+  assert.equal(frameCornerDragAxis(2, 3), undefined);
+  assert.deepEqual(frameQuadrilateralPoints({ kind: "rect" }), [
+    { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 },
+  ]);
+
+  const reshaped = reshapeFrameCorner(
+    { x: 10, y: 20, width: 200, height: 100 },
+    { kind: "rect" },
+    2,
+    "x",
+    50,
+    { x: 0, y: 0, width: 400, height: 300 },
+  );
+  assert.deepEqual(reshaped, {
+    geometry: { x: 10, y: 20, width: 250, height: 100 },
+    shape: { kind: "polygon", points: [{ x: 0, y: 0 }, { x: .8, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] },
+  });
+});
+
+test("reshape frame capability applies geometry and four-corner shape atomically", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const shape = { kind: "polygon" as const, points: [{ x: 0, y: 0 }, { x: .92, y: 0 }, { x: 1, y: 1 }, { x: .08, y: 1 }] };
+  const result = dryRunEditorCapability("reshape_frame", { unitId: unit.id, frameId: frame.id, geometry: frame.geometry, shape }, {
+    fixture,
+    createId: (prefix) => `${prefix}-reshape`,
+    actor: "human",
+  });
+  const next = result.result.working.document.units[0].frames.find((candidate) => candidate.id === frame.id);
+  assert.deepEqual(result.commands.map((command) => command.type), ["resize_frame", "set_frame_style"]);
+  assert.deepEqual(next?.geometry, frame.geometry);
+  assert.deepEqual(next?.shape, shape);
+  const pageFrame = createComicPageView(result.result.working.document, result.result.working.document.units[0]).elements.find((element) => element.id === frame.id);
+  assert.deepEqual(pageFrame?.type === "comic_frame" ? pageFrame.shape : undefined, shape);
+});
+
 test("adding a presentation unit appends a valid blank page without changing existing frames", () => {
   const fixture = createInitialFixture();
   const previous = fixture.working.document.units.at(-1)!;
@@ -150,6 +190,7 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "set_frame_overlap_policy",
     "reorder_frame",
     "resize_frame",
+    "reshape_frame",
     "set_frame_cross_page",
     "set_element_transform",
     "update_balloon",

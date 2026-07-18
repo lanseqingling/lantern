@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
-import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@/packages/shared/src";
-import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, scaleImageCrop } from "@/packages/shared/src";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@/packages/shared/src";
+import { frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, reshapeFrameCorner, scaleImageCrop } from "@/packages/shared/src";
 import type { Selection } from "@/app/lib/workbench-state";
 
 type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
 export type ComicContextPoint = { clientX: number; clientY: number; canvasX: number; canvasY: number };
 type DragState = {
-  mode: "frame_move" | "frame_resize" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_tail";
+  mode: "frame_move" | "frame_resize" | "frame_corner" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_tail";
   elementId: string;
   frameId?: string;
   anchorGeometry?: Geometry;
@@ -18,6 +18,10 @@ type DragState = {
   startX: number;
   startY: number;
   startGeometry?: Geometry;
+  startShape?: FrameShape;
+  frameBounds?: Geometry;
+  cornerIndex?: FrameCornerIndex;
+  axis?: FrameCornerAxis;
   startTransform?: LocalTransform;
   startTailTarget?: Point;
   startCrop?: { x: number; y: number; width: number; height: number };
@@ -50,6 +54,18 @@ type ComicRendererProps = {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const rectsOverlap = (a: Geometry, b: Geometry) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 0.5 && Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > 0.5;
 const containsGeometry = (bounds: Geometry, geometry: Geometry) => geometry.x >= bounds.x && geometry.y >= bounds.y && geometry.x + geometry.width <= bounds.x + bounds.width && geometry.y + geometry.height <= bounds.y + bounds.height;
+const pointInPolygon = (point: Point, points: Point[]) => points.reduce((inside, current, index) => {
+  const previous = points[(index + points.length - 1) % points.length];
+  const crosses = (current.y > point.y) !== (previous.y > point.y)
+    && point.x < (previous.x - current.x) * (point.y - current.y) / ((previous.y - current.y) || Number.EPSILON) + current.x;
+  return crosses ? !inside : inside;
+}, false);
+const frameContainsPoint = (frame: Frame, point: Point) => {
+  const local = { x: (point.x - frame.geometry.x) / frame.geometry.width, y: (point.y - frame.geometry.y) / frame.geometry.height };
+  if (local.x < 0 || local.x > 1 || local.y < 0 || local.y > 1) return false;
+  if (frame.shape.kind === "ellipse") return ((local.x - .5) / .5) ** 2 + ((local.y - .5) / .5) ** 2 <= 1;
+  return frame.shape.kind !== "polygon" || pointInPolygon(local, frame.shape.points);
+};
 const geometryStyle = (geometry: Geometry, width: number, height: number): CSSProperties => ({
   left: `${geometry.x / width * 100}%`, top: `${geometry.y / height * 100}%`, width: `${geometry.width / width * 100}%`, height: `${geometry.height / height * 100}%`,
   transform: geometry.rotate ? `rotate(${geometry.rotate}deg)` : undefined,
@@ -132,6 +148,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const framesById = new Map(frames.map((frame) => [frame.id, frame]));
   const readingOrder = new Map(unit.readingSequence.map((entry, index) => [entry.frameId, index + 1]));
   const images = scene.elements.filter((node): node is ImageSceneNode => node.element.kind === "image");
+  const cropFrameId = interactionMode === "crop" && selection?.type === "image"
+    ? images.find((node) => node.element.id === selection.id && node.source === "frame")?.frame?.id
+    : interactionMode === "crop" && selection?.type === "comic_frame" ? selection.id : undefined;
   const texts = scene.elements.filter((node): node is TextSceneNode => node.element.kind === "text");
   const balloons = scene.elements.filter((node): node is BalloonSceneNode => node.element.kind === "balloon");
   const effects = scene.elements.filter((node): node is EffectSceneNode => node.element.kind === "effect");
@@ -162,7 +181,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     if (!bounds?.width || !bounds.height) return undefined;
     return { clientX: event.clientX, clientY: event.clientY, canvasX: (event.clientX - bounds.left) / bounds.width * unit.canvas.width, canvasY: (event.clientY - bounds.top) / bounds.height * unit.canvas.height };
   };
-  const frameAtPoint = (point: ComicContextPoint) => [...frames].sort((left, right) => right.zIndex - left.zIndex).find((frame) => point.canvasX >= frame.geometry.x && point.canvasX <= frame.geometry.x + frame.geometry.width && point.canvasY >= frame.geometry.y && point.canvasY <= frame.geometry.y + frame.geometry.height);
+  const frameAtPoint = (point: ComicContextPoint) => [...frames].sort((left, right) => right.zIndex - left.zIndex).find((frame) => frameContainsPoint(frame, { x: point.canvasX, y: point.canvasY }));
   const contextFor = (event: ReactMouseEvent, next: Selection) => {
     if (!editable || !onContextAction) return;
     const point = eventPoint(event);
@@ -211,11 +230,24 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     draftsRef.current = {}; setDrafts({}); event.currentTarget.setPointerCapture(event.pointerId);
   };
   const surfaceForGeometry = (geometry: Geometry) => unit.surfaces.find((surface) => containsGeometry(surface.geometry, geometry));
+  const editableBoundsForFrame = (frame: Frame) => frame.surfaceScope === "unit"
+    ? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height }
+    : surfaceForGeometry(frame.geometry)?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
   const frameGeometryAllowed = (frameId: string, geometry: Geometry) => {
     const current = unit.frames.find((frame) => frame.id === frameId);
     const surface = current?.surfaceScope === "unit" ? undefined : current ? surfaceForGeometry(current.geometry) : undefined;
     const bounds = surface?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
     return containsGeometry(bounds, geometry) && (unit.layoutPolicy.frameOverlap === "allow" || !unit.frames.some((frame) => frame.id !== frameId && rectsOverlap(geometry, frame.geometry)));
+  };
+  const nudgeFrameCorner = (event: ReactKeyboardEvent<HTMLButtonElement>, frame: Frame, cornerIndex: FrameCornerIndex) => {
+    const direction = ({ ArrowLeft: ["x", -1], ArrowRight: ["x", 1], ArrowUp: ["y", -1], ArrowDown: ["y", 1] } as const)[event.key as "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"];
+    if (!direction || !onCommitElements) return;
+    event.preventDefault(); event.stopPropagation();
+    const [axis, sign] = direction;
+    const step = (axis === "x" ? frame.geometry.width : frame.geometry.height) * (event.shiftKey ? .04 : .015) * sign;
+    const reshaped = reshapeFrameCorner(frame.geometry, frame.shape, cornerIndex, axis, step, editableBoundsForFrame(frame));
+    if (!reshaped || !frameGeometryAllowed(frame.id, reshaped.geometry)) return;
+    onCommitElements(unit.id, [{ elementId: frame.id, patch: reshaped }], "调整画格角度");
   };
   const nodeCoordinateBounds = (node: SceneElementNode, frame?: Frame) => {
     if (node.source === "overlay" && frame) return { minX: -frame.geometry.x / frame.geometry.width, minY: -frame.geometry.y / frame.geometry.height, maxX: (unit.canvas.width - frame.geometry.x) / frame.geometry.width, maxY: (unit.canvas.height - frame.geometry.y) / frame.geometry.height };
@@ -230,7 +262,14 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const dy = (event.clientY - drag.startY) / bounds.height * unit.canvas.height;
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.moved = true;
     let patch: ElementPatch | undefined;
-    if (drag.mode === "image_crop" && drag.startCrop) {
+    if (drag.mode === "frame_corner" && drag.startGeometry && drag.startShape && drag.frameBounds && drag.cornerIndex !== undefined) {
+      const axis = drag.axis ?? frameCornerDragAxis(event.clientX - drag.startX, event.clientY - drag.startY);
+      if (!axis) return;
+      drag.axis = axis;
+      const reshaped = reshapeFrameCorner(drag.startGeometry, drag.startShape, drag.cornerIndex, axis, axis === "x" ? dx : dy, drag.frameBounds);
+      if (!reshaped || !drag.frameId || !frameGeometryAllowed(drag.frameId, reshaped.geometry)) return;
+      patch = reshaped;
+    } else if (drag.mode === "image_crop" && drag.startCrop) {
       const frame = drag.frameId ? framesById.get(drag.frameId) : undefined; if (!frame) return;
       patch = { crop: { ...drag.startCrop, x: clamp(drag.startCrop.x - dx / frame.geometry.width * drag.startCrop.width, 0, 1 - drag.startCrop.width), y: clamp(drag.startCrop.y - dy / frame.geometry.height * drag.startCrop.height, 0, 1 - drag.startCrop.height) } };
     } else if ((drag.mode === "image_move" || drag.mode === "balloon_move") && drag.startTransform) {
@@ -289,9 +328,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const drag = dragRef.current; if (!drag) return;
     if (drag.moved) { suppressClick.current = true; window.setTimeout(() => { suppressClick.current = false; }, 0); }
     const patch = draftsRef.current[drag.elementId];
-    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : "移动画格";
+    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_corner" ? "调整画格角度" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : "移动画格";
     if (patch) {
-      if (drag.mode === "frame_move" || drag.mode === "frame_resize") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
+      if (drag.mode === "frame_move" || drag.mode === "frame_resize" || drag.mode === "frame_corner") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
       else onCommitElement?.(unit.id, drag.elementId, patch, label);
     }
     draftsRef.current = {}; setDrafts({}); dragRef.current = null;
@@ -358,14 +397,19 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     })}
     {scene.frames.map(({ frame, borderZIndex }) => {
       const selected = selection?.type === "comic_frame" && selection.id === frame.id;
-      return <div className={`lcd-frame ${selected ? "selected" : ""} ${multiSelectedIds?.has(frame.id) ? "multi-selected" : ""}`} data-element-id={frame.id} data-page-id={unit.id} key={frame.id}
+      const cropEditing = cropFrameId === frame.id;
+      const cornerPoints = cropEditing ? frameQuadrilateralPoints(frame.shape) : undefined;
+      const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
+      const retainedSelection = selection?.type === "image" && cropEditing ? selection : frameSelection;
+      return <div className={`lcd-frame ${selected ? "selected" : ""} ${cropEditing ? "crop-editing" : ""} ${multiSelectedIds?.has(frame.id) ? "multi-selected" : ""}`} data-element-id={frame.id} data-page-id={unit.id} key={frame.id}
         style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: borderZIndex }}
         onClick={(event) => { event.stopPropagation(); if (creationMode === "dialogue") { const point = eventPoint(event); if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
-        onDoubleClick={(event) => doubleClick(event, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) })}
-        onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) }); }}
-        onContextMenu={(event) => contextFor(event, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) })}>
+        onDoubleClick={(event) => doubleClick(event, frameSelection)}
+        onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection); }}
+        onContextMenu={(event) => contextFor(event, frameSelection)}>
         <FrameShapeVisual frame={frame} fill="none" stroke />
-        {selected && editable ? <><div className="selection-corners frame-corners" aria-hidden="true"><span className="selection-label">{frameLabel(frame)}</span></div>{interactionMode === "move" ? <button type="button" aria-label="调整画格大小" className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) })}/> : null}</> : null}
+        {cropEditing && editable && cornerPoints ? <div className="frame-corner-controls" aria-label="调整画格角度">{cornerPoints.map((point, index) => <button type="button" key={index} className={`frame-corner-handle corner-${index}`} style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }} aria-label={`调整画格${["左上", "右上", "右下", "左下"][index]}角；使用方向键单轴微调`} onKeyDown={(event) => nudgeFrameCorner(event, frame, index as FrameCornerIndex)} onPointerDown={(event) => startDrag(event, { mode: "frame_corner", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry, startShape: frame.shape, frameBounds: editableBoundsForFrame(frame), cornerIndex: index as FrameCornerIndex }, retainedSelection)} />)}</div> : null}
+        {selected && editable ? <><div className="selection-corners frame-corners" aria-hidden="true"><span className="selection-label">{frameLabel(frame)}</span></div>{interactionMode === "move" ? <button type="button" aria-label="调整画格大小" className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection)}/> : null}</> : null}
       </div>;
     })}
     {texts.map((node) => {
@@ -431,8 +475,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       {scene.frames.map(({ frame }, index) => {
         const order = readingOrder.get(frame.id) ?? index + 1;
         const crossPage = unit.kind === "spread" && frame.surfaceScope === "unit";
+        const cornerEditing = cropFrameId === frame.id;
         const nextSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
-        return <button type="button" className={`reading-order frame-order-button ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - 12px)` }} aria-label={`选择${frameLabel(frame)}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); if (interactionMode === "move") startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, nextSelection); }}>{crossPage ? frameLabel(frame) : order}</button>;
+        return <button type="button" className={`reading-order frame-order-button ${cornerEditing ? "corner-editing" : ""} ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - ${cornerEditing ? 34 : 12}px)` }} aria-label={`选择${frameLabel(frame)}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); if (interactionMode === "move") startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, nextSelection); }}>{crossPage ? frameLabel(frame) : order}</button>;
       })}
     </div> : null}
     <span className="page-watermark">{unit.kind === "vertical_segment" ? `SCROLL ${String(pageIndex + 1).padStart(2, "0")}` : unit.kind === "four_panel_unit" ? "4-KOMA" : `PAGE ${String(pageIndex + 1).padStart(2, "0")}`}</span>

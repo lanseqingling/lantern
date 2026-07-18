@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "../../shared/src";
-import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop } from "../../shared/src";
+import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "../../shared/src";
 import { prisma } from "./db";
 import { getObject, putObject } from "./object-storage";
 
@@ -43,19 +43,27 @@ function renderAppearance(appearance: { assetVersionId: string } | undefined, ge
 const textAnchor = (align: "left" | "center" | "right" | undefined) => align === "center" ? "middle" : align === "right" ? "end" : "start";
 const textX = (geometry: Geometry, align: "left" | "center" | "right" | undefined) => align === "center" ? geometry.x + geometry.width / 2 : align === "right" ? geometry.x + geometry.width : geometry.x;
 
-function renderTextContent(value: string, geometry: Geometry, style: TextElement["style"] | BalloonElement["style"], color: string, align: "left" | "center" | "right" | undefined = "center") {
+function renderTextContent(value: string, geometry: Geometry, style: TextElement["style"] | BalloonElement["style"], color: string, align: "left" | "center" | "right" | undefined = "center", projectedStrokeWidth?: number) {
   const vertical = style.writingMode === "vertical";
   const fontFamily = escapeXml(style.fontFamily);
   const fontWeight = "fontWeight" in style && style.fontWeight ? ` font-weight="${style.fontWeight}"` : "";
+  const strokeWidth = projectedStrokeWidth ?? ("strokeWidth" in style ? style.strokeWidth : undefined);
+  const textStroke = "stroke" in style && style.stroke && strokeWidth
+    ? ` stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill"`
+    : "";
   if (vertical) {
-    const chars = Array.from(value);
-    return `<text x="${geometry.x + geometry.width / 2}" y="${geometry.y + style.fontSize}" text-anchor="middle" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight} fill="${escapeXml(color)}">${chars.map((char, index) => `<tspan x="${geometry.x + geometry.width / 2}" dy="${index ? style.fontSize * 1.05 : 0}">${escapeXml(char)}</tspan>`).join("")}</text>`;
+    const maxRows = Math.max(1, Math.floor(geometry.height / Math.max(1, style.fontSize * 1.05)));
+    const columns = textLines(value, maxRows);
+    return columns.map((column, columnIndex) => {
+      const x = geometry.x + style.fontSize * .55 + columnIndex * style.fontSize * 1.2;
+      return `<text x="${x}" y="${geometry.y + style.fontSize}" text-anchor="middle" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${Array.from(column).map((char, index) => `<tspan x="${x}" dy="${index ? style.fontSize * 1.05 : 0}">${escapeXml(char)}</tspan>`).join("")}</text>`;
+    }).join("");
   }
   const maxChars = Math.max(1, Math.floor(geometry.width / Math.max(1, style.fontSize * 0.72)));
   const lines = textLines(value, maxChars);
   const x = textX(geometry, align);
   const startY = geometry.y + Math.max(style.fontSize, (geometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize);
-  return `<text x="${x}" y="${startY}" text-anchor="${textAnchor(align)}" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight} fill="${escapeXml(color)}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text>`;
+  return `<text x="${x}" y="${startY}" text-anchor="${textAnchor(align)}" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text>`;
 }
 
 function renderBalloonShell(element: BalloonElement, geometry: Geometry) {
@@ -87,7 +95,7 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>) {
     const shell = renderAppearance(element.appearance, geometry, assets) ?? renderBalloonShell(element, geometry);
     return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${shell}${renderTextContent(node.dialogueText ?? "", geometry, element.style, element.style.textColor, "center")}</g>`;
   }
-  if (element.kind === "text") return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, element.style.align)}</g>`;
+  if (element.kind === "text") return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, element.style.align, projectTextStrokeWidth(element))}</g>`;
   if (element.assetVersionId) {
     const data = assets.get(element.assetVersionId); if (!data) return "";
     return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" preserveAspectRatio="none" opacity="${element.opacity ?? 1}"${clip}${transform}/>`;

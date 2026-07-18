@@ -8,6 +8,7 @@ import type {
   OverlayElement,
   Point,
   PresentationUnit,
+  TextElement,
   UnitOverlayLayer,
 } from "./lcd/types";
 import { resolveLocalTransform } from "./lcd/types";
@@ -37,6 +38,11 @@ export type ComicRenderScene = {
   frames: SceneFrameNode[];
   elements: SceneElementNode[];
 };
+
+export function projectTextStrokeWidth(text: Pick<TextElement, "role" | "style">) {
+  const stored = text.style.stroke && text.style.strokeWidth ? text.style.strokeWidth : 0;
+  return text.role === "narration" && text.style.stroke ? Math.max(2, stored) : stored;
+}
 
 export type BalloonTailProjection = {
   tip: Point;
@@ -107,7 +113,9 @@ export function projectComicRenderScene(document: ComicDocument, unit: Presentat
           // Frame and overlay composition levels share the same numeric space.
           // An overlay at a given level sits above that frame's border; moving a
           // frame or an overlay layer changes their relative visual order.
-          zIndex: layer.zIndex * FRAME_STRIDE + FRAME_BORDER_OFFSET + 1 + index,
+          zIndex: layer.purpose === "narration"
+            ? 2_000_000_000 + index
+            : layer.zIndex * FRAME_STRIDE + FRAME_BORDER_OFFSET + 1 + index,
         source: "overlay",
         frame: anchorFrame,
         layerId: layer.id,

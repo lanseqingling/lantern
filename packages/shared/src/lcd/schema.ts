@@ -15,6 +15,7 @@ const artElementSchema = z.object({
 });
 const textStyleSchema = z.object({
   fontFamily: z.string(), fontSize: z.number().positive(), fontWeight: z.number().optional(), color: z.string(),
+  stroke: z.string().optional(), strokeWidth: z.number().nonnegative().optional(),
   align: z.enum(["left", "center", "right"]).optional(), writingMode: z.enum(["horizontal", "vertical"]).optional(),
 });
 export const visualAssetReferenceSchema = z.strictObject({
@@ -70,7 +71,7 @@ const overlayElementSchema = frameElementSchema;
 export const overlayLayerSchema = z.object({
   id: z.string().min(1), name: z.string(), zIndex: z.number().int(), visible: z.boolean(), locked: z.boolean().optional(),
   anchor: z.discriminatedUnion("type", [z.object({ type: z.literal("unit") }), z.object({ type: z.literal("frame"), frameId: z.string().min(1) })]),
-  surfaceId: z.string().min(1).optional(), purpose: z.enum(["breakout", "cross_frame", "cross_page", "cross_segment", "page_content", "page_effect", "decoration"]), elements: z.array(overlayElementSchema),
+  surfaceId: z.string().min(1).optional(), purpose: z.enum(["breakout", "cross_frame", "cross_page", "cross_segment", "page_content", "narration", "page_effect", "decoration"]), elements: z.array(overlayElementSchema),
 });
 export const surfaceSchema = z.object({
   id: z.string().min(1), name: z.string().min(1).max(80).optional(), role: z.enum(["single", "left", "right", "segment"]), geometry: rectSchema,

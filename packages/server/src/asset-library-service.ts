@@ -205,6 +205,34 @@ export async function deleteAssetImage(ownerUserId: string, assetId: string, ima
   return getAssetFamilyDetail(ownerUserId, assetId);
 }
 
+export async function archiveAssetFamily(ownerUserId: string, assetId: string) {
+  return prisma.$transaction(async (tx) => {
+    const requested = await tx.asset.findFirst({
+      where: { id: assetId, ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY },
+      select: { id: true, variantOfAssetId: true },
+    });
+    if (!requested) throw new AppError("not_found", "资产不存在。", 404);
+
+    const rootId = requested.variantOfAssetId ?? requested.id;
+    const family = await tx.asset.findMany({
+      where: {
+        ownerUserId,
+        archivedAt: null,
+        libraryStatus: AssetLibraryStatus.LIBRARY,
+        OR: [{ id: rootId, variantOfAssetId: null }, { variantOfAssetId: rootId }],
+      },
+      select: { id: true },
+    });
+    if (!family.some((asset) => asset.id === rootId)) throw new AppError("not_found", "资产不存在。", 404);
+
+    const familyIds = family.map((asset) => asset.id);
+    const archivedAt = new Date();
+    await tx.asset.updateMany({ where: { id: { in: familyIds }, ownerUserId, archivedAt: null }, data: { archivedAt } });
+    await tx.canvasAssetListItem.updateMany({ where: { assetId: { in: familyIds }, ownerUserId }, data: { hiddenAt: archivedAt } });
+    return { id: rootId, deleted: true, archivedAssetIds: familyIds };
+  });
+}
+
 function detailEntry(asset: AssetWithGallery, fallbackLabel: string) {
   return {
     id: asset.id,

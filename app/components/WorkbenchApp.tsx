@@ -22,6 +22,7 @@ import type {
   PresentationUnit,
   ReferencePlacement,
   SpeechBalloonElement,
+  TextCanvasElement,
   WorkspaceChangeSet,
   WorkspaceOperation,
 } from "@/packages/shared/src";
@@ -80,9 +81,9 @@ type ToolbarSide = "top" | "bottom" | "left" | "right";
 type ToolbarPlacement = { x: number; y: number; side: ToolbarSide };
 type CanvasMode = "focus" | "free";
 type CanvasObjectInteractionMode = "select" | "move" | "crop";
-type CanvasCreationMode = "dialogue" | null;
+type CanvasCreationMode = "dialogue" | "narration" | null;
 type ComicContextMenuState = { target: Selection; point: ComicContextPoint };
-type ComicDeleteTarget = { kind: "frame" | "image" | "dialogue"; selection: Selection };
+type ComicDeleteTarget = { kind: "frame" | "image" | "dialogue" | "narration"; selection: Selection };
 type FrameImageTarget = { selection: Selection; left: number; top: number; position?: { x: number; y: number }; placement?: "cross_page" | "cross_segment" };
 type CanvasAssetSaveKind = "character" | "scene" | "prop" | "reference_image";
 type MarqueeState = { startX: number; startY: number; currentX: number; currentY: number; moved: boolean };
@@ -145,7 +146,7 @@ const canvasAssetSaveTypeOptions: Array<{ value: CanvasAssetSaveKind; label: str
 const balloonStyleOptions = [
   { value: "normal", label: "对话气泡" },
   { value: "thought", label: "无尾气泡" },
-  { value: "caption_box", label: "旁白框" },
+  { value: "caption_box", label: "方框对白" },
   { value: "thought_balloon", label: "思考气泡", disabled: true },
   { value: "burst_balloon", label: "喊叫气泡", disabled: true },
   { value: "whisper_balloon", label: "低语气泡", disabled: true },
@@ -629,6 +630,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (selection.type !== "speech_balloon" || !selection.id) return 0;
     return workingPages.flatMap((comicPage) => comicPage.elements.filter((element): element is SpeechBalloonElement => element.type === "speech_balloon")).findIndex((balloon) => balloon.id === selection.id) + 1;
   }, [selection.id, selection.type, workingPages]);
+  const selectedNarrationNumber = useMemo(() => {
+    if (selection.type !== "text" || !selection.id || !selection.pageId) return 0;
+    const page = workingPages.find((item) => item.id === selection.pageId);
+    return (page?.elements.filter((element): element is TextCanvasElement => element.type === "text" && element.content.role === "narration").findIndex((text) => text.id === selection.id) ?? -1) + 1;
+  }, [selection.id, selection.pageId, selection.type, workingPages]);
   const selectedFrameImage = useMemo(() => {
     const selectedPage = selection.pageId ? workingPages.find((item) => item.id === selection.pageId) : undefined;
     if (!selectedPage || selectedElement?.type !== "comic_frame") return undefined;
@@ -767,7 +773,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }, [agentOpen, canvasMode, canvasOffset.x, canvasOffset.y, inspectorOpen, leftOpen, objectInteractionMode, selectedElement?.type === "speech_balloon" ? selectedElement.content.tailTarget : undefined, selectedElement?.geometry, selection.id, selection.pageId, selection.type]);
 
   useLayoutEffect(() => {
-    if (canvasMode !== "focus" || !inspectorOpen || selection.type !== "speech_balloon" || !selection.id || !stageRef.current) {
+    if (canvasMode !== "focus" || !inspectorOpen || (selection.type !== "speech_balloon" && selection.type !== "text") || !selection.id || !stageRef.current) {
       setBalloonEditorPlacement(null);
       return;
     }
@@ -778,7 +784,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const stageRect = stage.getBoundingClientRect();
       const elementRect = element.getBoundingClientRect();
       const width = 226;
-      const height = 228;
+      const height = selection.type === "text" ? 214 : 228;
       const gap = 12;
       const candidates = [
         { x: elementRect.right - stageRect.left + gap, y: elementRect.top - stageRect.top },
@@ -1032,14 +1038,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     return { comicPage, frame, image };
   };
 
-  const selectCreatedObject = (next: Selection, editBalloon = false) => {
+  const selectCreatedObject = (next: Selection, editImmediately = false) => {
     setSelection(next);
     setObjectInteractionMode("select");
     setEditingStoryboardBeatId(null);
     setEditingStoryboardTarget(null);
-    setEditDraft(editBalloon ? { dialogue: "" } : {});
-    setInspectorOpen(editBalloon);
-    setScope(next.type === "speech_balloon" ? "当前气泡" : next.type === "image" ? "格内图片裁切" : "当前漫画格");
+    setEditDraft(editImmediately && next.type === "speech_balloon" ? { dialogue: "" } : {});
+    setInspectorOpen(editImmediately);
+    setScope(next.type === "speech_balloon" ? "当前气泡" : next.type === "text" ? "当前旁白" : next.type === "image" ? "格内图片裁切" : "当前漫画格");
   };
 
   const createFrameAt = (unitId: string, position: { x: number; y: number }) => {
@@ -1181,6 +1187,21 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
+  const createNarration = (unitId: string, position: { x: number; y: number }) => {
+    try {
+      const plan = planCapabilities([{ id: "create_narration", input: { unitId, position } }]);
+      const command = plan.commands.find((operation) => operation.type === "add_overlay_element" && operation.element.kind === "text");
+      if (!command || command.type !== "add_overlay_element") return;
+      setCreationMode(null);
+      setCreationPointer(null);
+      setComicContextMenu(null);
+      const order = (workingPages.find((page) => page.id === unitId)?.elements.filter((element) => element.type === "text" && element.content.role === "narration").length ?? 0) + 1;
+      commitOperations(plan.commands, "新增旁白", "manual", undefined, undefined, () => selectCreatedObject({ type: "text", id: command.element.id, pageId: unitId, label: `旁白 ${String(order).padStart(2, "0")}` }, true));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "无法新增旁白");
+    }
+  };
+
   const createDialogueFromContext = (target: Selection, point?: ComicContextPoint) => {
     const { frame } = frameAndImageForSelection(target);
     if (!target.pageId || !frame) return;
@@ -1211,6 +1232,32 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setComicDeleteTarget(null);
       setComicContextMenu(null);
       setSelection(element.comicFrameId ? { type: "comic_frame", id: element.comicFrameId, pageId: target.pageId, label: "当前画格" } : { type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: "当前页面" });
+      setInspectorOpen(false);
+    }
+  };
+
+  const duplicateNarration = (target: Selection) => {
+    const element = elementForSelection(target);
+    if (!target.pageId || element?.type !== "text" || element.location.space !== "overlay") return;
+    try {
+      const plan = planCapabilities([{ id: "duplicate_narration", input: { unitId: target.pageId, layerId: element.layerId, elementId: element.id } }]);
+      const command = plan.commands.find((operation) => operation.type === "add_overlay_element" && operation.element.kind === "text");
+      if (!command || command.type !== "add_overlay_element") return;
+      setComicContextMenu(null);
+      const order = (workingPages.find((page) => page.id === target.pageId)?.elements.filter((item) => item.type === "text" && item.content.role === "narration").length ?? 0) + 1;
+      commitOperations(plan.commands, "复制旁白", "manual", undefined, undefined, () => selectCreatedObject({ type: "text", id: command.element.id, pageId: target.pageId, label: `旁白 ${String(order).padStart(2, "0")}` }));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "无法复制旁白");
+    }
+  };
+
+  const deleteNarration = (target: Selection) => {
+    const element = elementForSelection(target);
+    if (!target.pageId || element?.type !== "text" || element.location.space !== "overlay") return;
+    if (commitCapability("delete_narration", { unitId: target.pageId, layerId: element.layerId, elementId: element.id }, "删除旁白")) {
+      setComicDeleteTarget(null);
+      setComicContextMenu(null);
+      setSelection({ type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: "当前页面" });
       setInspectorOpen(false);
     }
   };
@@ -1334,6 +1381,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       ? target
       : element.type === "speech_balloon"
         ? target
+        : element.type === "text"
+          ? target
         : element.type === "image" && element.location.space === "overlay"
           ? target
           : element.type === "image" && element.comicFrameId
@@ -1394,6 +1443,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       if (content && content.text !== element.content.text) requests.push({ id: "update_dialogue", input: { dialogueId: element.dialogueId, content: content.text } });
       if (typeof patch.zIndex === "number" && element.location.space === "frame") requests.push({ id: "reorder_layer", input: { unitId, frameId: element.location.frameId, layerId: element.layerId, zIndex: patch.zIndex } });
       return requests;
+    }
+    if (element.type === "text") {
+      if (patch.transform) return [{ id: "set_element_transform", input: { unitId, layerId: element.layerId, elementId, transform: patch.transform } }];
+      if (patch.geometry) return [{ id: "set_element_transform", input: { unitId, layerId: element.layerId, elementId, transform: patch.geometry } }];
+      const content = patch.content as TextCanvasElement["content"] | undefined;
+      const style = patch.style as TextCanvasElement["style"] | undefined;
+      const changes = {
+        ...(content && content.text !== element.content.text ? { content: content.text } : {}),
+        ...(style?.fontSize !== undefined && style.fontSize !== element.style.fontSize ? { fontSize: style.fontSize } : {}),
+        ...(style?.writingMode && style.writingMode !== element.style.writingMode ? { writingMode: style.writingMode } : {}),
+      };
+      return Object.keys(changes).length ? [{ id: "update_narration", input: { unitId, layerId: element.layerId, elementId, changes } }] : [];
     }
     return [];
   };
@@ -1956,6 +2017,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const balloon = selectedElement as SpeechBalloonElement | undefined;
       const value = editDraft.dialogue ?? balloon?.content.text ?? "";
       if (balloon?.dialogueId) commitCapability("update_dialogue", { dialogueId: balloon.dialogueId, content: value }, "编辑气泡对白");
+    } else if (selection.type === "text" && selectedElement?.type === "text" && selection.pageId) {
+      const content = editDraft.narration ?? selectedElement.content.text;
+      const parsedSize = Number(editDraft.fontSize ?? selectedElement.style.fontSize);
+      const fontSize = Number.isFinite(parsedSize) ? clampValue(parsedSize, 6, 240) : selectedElement.style.fontSize;
+      commitCapabilities(capabilitiesForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, text: content }, style: { ...selectedElement.style, fontSize } }), "编辑旁白");
     } else if (editingStoryboardTarget) {
       const title = (editDraft.title ?? editingStoryboardBeat?.title ?? "").trim();
       const description = (editDraft.description ?? editingStoryboardBeat?.description ?? "").trim();
@@ -1981,11 +2047,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       }
     }
     setEditDraft({});
-    if (selection.type === "speech_balloon" || editingStoryboardTarget) {
+    if (selection.type === "speech_balloon" || selection.type === "text" || editingStoryboardTarget) {
       setEditingStoryboardBeatId(null);
       setEditingStoryboardTarget(null);
       setInspectorOpen(false);
     }
+  };
+
+  const adjustNarrationFontSize = (delta: number) => {
+    if (selectedElement?.type !== "text") return;
+    const current = Number(editDraft.fontSize ?? selectedElement.style.fontSize);
+    const next = clampValue(Number.isFinite(current) ? current + delta : selectedElement.style.fontSize + delta, 6, 240);
+    setEditDraft((draft) => ({ ...draft, fontSize: String(next) }));
   };
 
   const cropImage = (direction: "in" | "out" | "left" | "right" | "up" | "down" | "reset") => {
@@ -2010,8 +2083,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const beginCrop = () => {
-    if (selection.type === "speech_balloon") {
-      setToast("对白气泡不支持裁切；请使用移动模式调整位置、大小和尖尾");
+    if (selection.type === "speech_balloon" || selection.type === "text") {
+      setToast(selection.type === "text" ? "旁白不支持裁切；请使用移动模式调整位置和换行宽度" : "对白气泡不支持裁切；请使用移动模式调整位置、大小和尖尾");
       return;
     }
     const image = selectedElement?.type === "image" ? selectedElement : selectedFrameImage;
@@ -2067,6 +2140,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const openSelectionEditor = () => {
     setObjectInteractionMode("select");
     if (selection.type === "speech_balloon") {
+      setEditDraft({});
+      setInspectorOpen(true);
+      return;
+    }
+    if (selection.type === "text") {
       setEditDraft({});
       setInspectorOpen(true);
       return;
@@ -2616,7 +2694,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const handleStageClick = () => {
-    if (creationMode) return;
+    if (creationMode) {
+      setCreationMode(null);
+      setCreationPointer(null);
+      return;
+    }
     if (objectInteractionMode !== "select") return;
     if (suppressStageClickRef.current) {
       suppressStageClickRef.current = false;
@@ -2788,7 +2870,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setEditingStoryboardTarget(null);
     setInspectorOpen(false);
     const element = workingPages.find((item) => item.id === next.pageId)?.elements.find((item) => item.id === next.id);
-    setScope(next.type === "presentation_unit" ? "当前页" : next.type === "reference_card" ? "仅参考" : next.type === "comic_frame" ? "当前漫画格" : next.type === "image" ? "格内图片裁切" : next.type === "speech_balloon" ? "当前气泡" : "当前格");
+    setScope(next.type === "presentation_unit" ? "当前页" : next.type === "reference_card" ? "仅参考" : next.type === "comic_frame" ? "当前漫画格" : next.type === "image" ? "格内图片裁切" : next.type === "speech_balloon" ? "当前气泡" : next.type === "text" ? "当前旁白" : "当前格");
     if (element?.linkedStoryboardBeatId) setEditDraft({});
   };
   const availableCandidates = state.candidates.filter((candidate) => candidate.status === "available" || candidate.status === "stale");
@@ -2838,6 +2920,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const contextTargetUnit = comicContextMenu?.target.pageId ? state.fixture.working.document.units.find((unit) => unit.id === comicContextMenu.target.pageId) : undefined;
   const objectLocationLabel = (element?: CanvasElement) => !element
     ? undefined
+    : element.type === "text"
+      ? undefined
     : element.type === "comic_frame"
       ? element.surfaceScope === "unit" ? "跨页" : undefined
     : element.location.space === "frame"
@@ -2872,8 +2956,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (target.type === "speech_balloon") {
       const isCrossPage = contextTargetElement?.type === "speech_balloon" && contextTargetElement.location.space === "overlay" && contextTargetElement.location.purpose === "cross_page";
       const siblingBalloons = contextTargetPage?.elements.filter((element) => element.type === "speech_balloon" && (isCrossPage ? element.location.space === "overlay" && element.location.purpose === "cross_page" : !(element.location.space === "overlay" && element.location.purpose === "cross_page"))) ?? [];
-      const balloonLabel = isCrossPage ? "跨页泡" : contextTargetElement?.type === "speech_balloon" && contextTargetElement.content.shape === "caption_box" ? "旁白框" : "对白";
+      const balloonLabel = isCrossPage ? "跨页泡" : "对白";
       return { icon: "message" as IconName, label: `${balloonLabel} ${contextObjectNumber(siblingBalloons, target.id)}` };
+    }
+    if (target.type === "text") {
+      const siblingNarrations = contextTargetPage?.elements.filter((element) => element.type === "text" && element.content.role === "narration") ?? [];
+      return { icon: "text" as IconName, label: `旁白 ${contextObjectNumber(siblingNarrations, target.id)}` };
     }
     return { icon: "layout" as IconName, label: target.label };
   })();
@@ -2915,11 +3003,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       : "这是一个空画格。关联分镜会保留为未编排内容。"
     : comicDeleteTarget?.kind === "image"
       ? `${comicDeleteLocation === "跨页" ? "跨页图片会从当前双页中移除" : comicDeleteLocation === "跨段" ? "跨段图片会从当前复合滚动段中移除" : comicDeleteLocation === "纸面" ? "图片会从当前纸面中移除" : "图片会从当前画格中移除"}，资产库中的原图和其他引用保持不变。`
+      : comicDeleteTarget?.kind === "narration"
+        ? "旁白文字会从当前页面中移除。该操作可以撤销。"
       : `对白文字和对应气泡会从${comicDeleteLocation === "纸面" ? "纸面" : "画格"}中移除。`;
   const confirmComicDelete = () => {
     if (!comicDeleteTarget) return;
     if (comicDeleteTarget.kind === "frame") deleteFrame(comicDeleteTarget.selection);
     else if (comicDeleteTarget.kind === "image") removeFrameImage(comicDeleteTarget.selection);
+    else if (comicDeleteTarget.kind === "narration") deleteNarration(comicDeleteTarget.selection);
     else deleteDialogueBalloon(comicDeleteTarget.selection);
   };
   const editingStoryboardBeat = editingStoryboardBeatId ? state.fixture.storyboardBeats.find((beat) => beat.id === editingStoryboardBeatId) : undefined;
@@ -3211,7 +3302,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅参考"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动参考图「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放参考图「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} />)}
           <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : showingSpread ? "spread" : ""} ${currentDisplayGroup?.trueSpread ? "true-spread" : ""}`} style={verticalStageWrapStyle}>
             <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : "滚动段 01") : showingSpread ? `PAGES ${displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0")}`}</span>
-            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} creationMode={creationMode ?? undefined} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onContextAction={handleComicContextAction} onObjectDoubleClick={handleComicObjectDoubleClick} onPlaceDialogue={createDialogueBalloon} onPlacePageDialogue={createPageDialogueBalloon} onCommitElement={(unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
+            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} creationMode={creationMode ?? undefined} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onContextAction={handleComicContextAction} onObjectDoubleClick={handleComicObjectDoubleClick} onPlaceDialogue={createDialogueBalloon} onPlacePageDialogue={createPageDialogueBalloon} onPlaceNarration={createNarration} onCommitElement={(unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
           </div>
           {candidateDocument && (previewingCandidate || previewingVariant) ? <nav className="candidate-compare-toolbar" aria-label="页面方案对比">
             <div className="candidate-version-switch"><button type="button" className={candidatePreviewMode === "original" ? "active" : ""} onClick={() => setCandidatePreviewMode("original")}>原稿</button><button type="button" className={candidatePreviewMode === "candidate" ? "active" : ""} onClick={() => setCandidatePreviewMode("candidate")}>新方案</button></div>
@@ -3224,7 +3315,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         {isVerticalCanvas && canvasMode === "focus" ? <aside ref={verticalNavigatorRef} className="vertical-scroll-navigator" aria-hidden="true"><div className="vertical-scroll-map" style={verticalNavigatorPaperStyle}>{canvasUnits.map((unit) => <span key={unit.id} style={{ flexGrow: unit.canvas.height }} />)}<i /></div></aside> : null}
         {marquee && marqueeStyle ? <div className="canvas-marquee" style={marqueeStyle} aria-hidden="true" /> : null}
 
-        {canvasMode === "focus" && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("创作"); setAgentOpen(true); }}><Icon name="ai" /></button><button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : selection.type === "image" ? "开启或关闭纸面图片移动和缩放" : "开启或关闭移动画格"} disabled={selection.type !== "comic_frame" && selection.type !== "speech_balloon" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay") || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button><button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label="裁切格内图片并调整画格角度" disabled={(selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")) || objectInteractionMode === "move"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button><button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button><button type="button" aria-label="管理当前对象" aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button></ObjectToolbar> : null}
+        {canvasMode === "focus" && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("创作"); setAgentOpen(true); }}><Icon name="ai" /></button>
+          <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : selection.type === "text" ? "开启或关闭旁白移动和换行宽度调整" : selection.type === "image" ? "开启或关闭纸面图片移动和缩放" : "开启或关闭移动画格"} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay")) || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
+          <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? "旁白不支持裁切" : "裁切格内图片并调整画格角度"} disabled={selection.type === "text" || (selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")) || objectInteractionMode === "move"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
+          <button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selection.type === "text" ? "编辑旁白文字和字号" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button>
+          <button type="button" aria-label="管理当前对象" aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
+        </ObjectToolbar> : null}
         {canvasCandidates.map((candidate, index) => {
           const expanded = previewCandidateId === candidate.id;
           const x = Number(candidate.metadata?.canvasX ?? 300 + (index % 2) * 210);
@@ -3278,6 +3375,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           {contextTargetElement.location.space === "overlay" ? <><ComicMenuGroup label="层级"><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "front")}><span><Icon name="layers" />置于顶层</span></button><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "back")}><span><Icon name="layers" />置于底层</span></button></ComicMenuGroup><MenuDivider /></> : null}
           <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "dialogue", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />删除对白</span></button></ComicMenuGroup>
         </> : null}
+        {comicContextMenu.target.type === "text" && contextTargetElement?.type === "text" ? <>
+          <ComicMenuGroup label="对象"><button type="button" onClick={() => duplicateNarration(comicContextMenu.target)}><span><Icon name="copy" />复制旁白</span></button><button type="button" onClick={() => { if (!comicContextMenu.target.pageId) return; commitCapabilities(capabilitiesForElementPatch(comicContextMenu.target.pageId, contextTargetElement.id, { style: { ...contextTargetElement.style, writingMode: contextTargetElement.style.writingMode === "vertical" ? "horizontal" : "vertical" } }), contextTargetElement.style.writingMode === "vertical" ? "转为横向旁白" : "转为竖向旁白"); setComicContextMenu(null); }}><span><Icon name="text" />{contextTargetElement.style.writingMode === "vertical" ? "转为横向" : "转为竖向"}</span></button></ComicMenuGroup>
+          <MenuDivider />
+          <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "narration", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />删除旁白</span></button></ComicMenuGroup>
+        </> : null}
       </FloatingMenu> : null}
 
       {frameImageTarget && frameImagePickerStyle ? <FloatingMenu role="dialog" className="frame-image-picker" style={frameImagePickerStyle} aria-label="选择漫画图片" onPointerDown={(event) => event.stopPropagation()}>
@@ -3289,8 +3391,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {comicDeleteTarget && comicDeleteSelection ? <DeleteConfirmDialog dialogId="comic-delete" title={comicDeleteTitle} description={comicDeleteDescription} confirmLabel={comicDeleteTarget.kind === "image" ? "确认移除" : "确认删除"} onCancel={() => setComicDeleteTarget(null)} onConfirm={confirmComicDelete} /> : null}
 
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
+      {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>请输入文本</div> : null}
 
       {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />对白 {String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭对白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>对白<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft({ dialogue: event.target.value })} /></label><label>文字样式<CustomSelect ariaLabel="文字样式" className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
+      {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />旁白 {String(selectedNarrationNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭旁白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>文字<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>字号<div className="font-size-stepper"><input type="text" inputMode="numeric" aria-label="旁白字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(event) => setEditDraft((current) => ({ ...current, fontSize: event.target.value.replace(/[^0-9]/g, "") }))} /><span><button type="button" aria-label="字号加一" onClick={() => adjustNarrationFontSize(1)}>＋</button><button type="button" aria-label="字号减一" onClick={() => adjustNarrationFontSize(-1)}>−</button></span></div></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
 
       <div className="canvas-global-actions" aria-label="全局入口"><button type="button" className="global-icon-button" aria-label="用户页" onClick={() => setToast("个人中心即将支持")}><Icon name="user" /></button><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => setToast("全局设置即将支持")}><Icon name="settings" /></button></div>
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label="Agent 对话">
@@ -3331,7 +3435,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <CreationDock className={[multiSelection ? "multi-hidden" : "", dockEntering ? "mode-entering" : "", modeSwitching ? "mode-exiting" : ""].filter(Boolean).join(" ")} aria-label="创作工具">
-        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布参考层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" aria-label="画格和页面编排" onClick={() => { setIntent("创作"); setComposer("重新编排当前漫画页，突出最后一个画格"); }}><Icon name="layout" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 修改当前焦点" onClick={() => { setComposer("只精修当前画格的格内成稿图，让动作更自然，不改其他画格"); setIntent("创作"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
+        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布参考层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" aria-label="画格和页面编排" onClick={() => { setIntent("创作"); setComposer("重新编排当前漫画页，突出最后一个画格"); }}><Icon name="layout" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? "取消放置旁白" : "在纸面放置旁白"} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 修改当前焦点" onClick={() => { setComposer("只精修当前画格的格内成稿图，让动作更自然，不改其他画格"); setIntent("创作"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
       </CreationDock>
       <nav className={`multi-selection-dock ${multiSelection ? "active" : ""}`} aria-label="多选工具">
         <button type="button" aria-label="将选中对象引用到对话" disabled={!multiComicActive && !multiCanvasActive} onClick={addMultiSelectionToDialogue}><Icon name="ai" /></button>

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { AssetKind, AssetLibraryStatus } from "@prisma/client";
 import { z } from "zod";
 import { createUploadedAsset, readUploadedImage } from "../../../../packages/server/src/asset-service";
-import { appendAssetImage, deleteAssetImage, getAssetFamilyDetail, renameAssetImage, setPrimaryAssetImage } from "../../../../packages/server/src/asset-library-service";
+import { appendAssetImage, archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, renameAssetImage, setPrimaryAssetImage } from "../../../../packages/server/src/asset-library-service";
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
 import { getOwnedProject } from "../../../../packages/server/src/workbench-service";
@@ -19,6 +19,11 @@ export function registerAssetRoutes(app: FastifyInstance) {
   app.get<{ Params: { assetId: string } }>("/v1/assets/:assetId", async (request) => {
     const user = await currentUser(request);
     return ok(request, await getAssetFamilyDetail(user.id, request.params.assetId));
+  });
+
+  app.delete<{ Params: { assetId: string } }>("/v1/assets/:assetId", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await archiveAssetFamily(user.id, request.params.assetId));
   });
 
   app.post<{ Params: { projectId: string }; Querystring: { place?: string } }>("/v1/projects/:projectId/assets", async (request) => {

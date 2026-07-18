@@ -23,6 +23,7 @@ export function AssetDetailDialog({
   onSetPrimaryImage,
   onRenameImage,
   onDeleteImage,
+  onDeleteAsset,
   returnFocus,
 }: {
   detail: ComicAssetDetail | null;
@@ -35,6 +36,7 @@ export function AssetDetailDialog({
   onSetPrimaryImage: (entryId: string, imageId: string) => Promise<void>;
   onRenameImage: (entryId: string, imageId: string, label: string) => Promise<void>;
   onDeleteImage: (entryId: string, imageId: string) => Promise<void>;
+  onDeleteAsset: (assetId: string) => Promise<void>;
   returnFocus: HTMLElement | null;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
@@ -47,6 +49,9 @@ export function AssetDetailDialog({
   const imageMenuRef = useRef(false);
   const deleteConfirmRef = useRef(false);
   const renameDialogRef = useRef(false);
+  const assetMenuRef = useRef(false);
+  const assetDeleteConfirmRef = useRef(false);
+  const assetDeletingRef = useRef(false);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -64,6 +69,9 @@ export function AssetDetailDialog({
   const [imageNameError, setImageNameError] = useState("");
   const [imageMutating, setImageMutating] = useState(false);
   const [imageError, setImageError] = useState("");
+  const [assetMenuOpen, setAssetMenuOpen] = useState(false);
+  const [pendingDeleteAsset, setPendingDeleteAsset] = useState(false);
+  const [assetDeleting, setAssetDeleting] = useState(false);
 
   const entries = useMemo(() => detail ? [detail.root, ...detail.variants] : [], [detail]);
   const activeEntry = entries.find((entry) => entry.id === activeEntryId) ?? entries[0];
@@ -84,6 +92,9 @@ export function AssetDetailDialog({
   useEffect(() => { imageMenuRef.current = Boolean(imageMenu); }, [imageMenu]);
   useEffect(() => { deleteConfirmRef.current = Boolean(pendingDeleteImageId); }, [pendingDeleteImageId]);
   useEffect(() => { renameDialogRef.current = Boolean(pendingRenameImageId); }, [pendingRenameImageId]);
+  useEffect(() => { assetMenuRef.current = assetMenuOpen; }, [assetMenuOpen]);
+  useEffect(() => { assetDeleteConfirmRef.current = pendingDeleteAsset; }, [pendingDeleteAsset]);
+  useEffect(() => { assetDeletingRef.current = assetDeleting; }, [assetDeleting]);
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -91,6 +102,10 @@ export function AssetDetailDialog({
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        if (assetDeleteConfirmRef.current) {
+          if (!assetDeletingRef.current) setPendingDeleteAsset(false);
+          return;
+        }
         if (renameDialogRef.current) {
           setPendingRenameImageId(null);
           setImageNameError("");
@@ -102,6 +117,10 @@ export function AssetDetailDialog({
         }
         if (imageMenuRef.current) {
           setImageMenu(null);
+          return;
+        }
+        if (assetMenuRef.current) {
+          setAssetMenuOpen(false);
           return;
         }
         if (editingTitleRef.current) {
@@ -148,6 +167,7 @@ export function AssetDetailDialog({
     setEditError("");
     setTitleError("");
     setImageMenu(null);
+    setAssetMenuOpen(false);
     setPendingRenameImageId(null);
     setImageError("");
   };
@@ -278,6 +298,21 @@ export function AssetDetailDialog({
     }
   };
 
+  const deleteAsset = async () => {
+    if (!detail || assetDeleting) return;
+    setAssetDeleting(true);
+    setImageError("");
+    try {
+      await onDeleteAsset(detail.root.id);
+      setPendingDeleteAsset(false);
+      setAssetDeleting(false);
+    } catch (reason) {
+      setPendingDeleteAsset(false);
+      setImageError(reason instanceof Error ? reason.message : "资产删除失败，请稍后重试。");
+      setAssetDeleting(false);
+    }
+  };
+
   return <div className="asset-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section ref={dialogRef} className="asset-detail-dialog" role="dialog" aria-modal="true" aria-label={loading ? "正在加载资产详情" : error ? "资产详情加载失败" : activeEntry?.name} onMouseDown={(event) => event.stopPropagation()}>
       <button ref={closeButtonRef} type="button" className="asset-detail-close" aria-label="关闭资产详情" onClick={onClose}><Icon name="x" /></button>
@@ -296,7 +331,7 @@ export function AssetDetailDialog({
             <label><small>详细描述</small><textarea aria-label="详细描述" value={descriptionDraft} maxLength={4000} onChange={(event) => setDescriptionDraft(event.target.value)} /></label>
             {editError ? <em role="alert">{editError}</em> : null}
           </form> : <section className="asset-detail-copy" aria-label="资产文字资料">
-            <div className="asset-detail-copy-actions"><button type="button" aria-label="编辑资产资料" onClick={startEditing}><Icon name="edit" /></button><button type="button" aria-label="上传资产图片" disabled={imageMutating} onClick={() => uploadInputRef.current?.click()}><Icon name="add" /></button><input ref={uploadInputRef} className="asset-image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} /></div>
+            <div className="asset-detail-copy-actions"><button type="button" aria-label="编辑资产资料" onClick={startEditing}><Icon name="edit" /></button><button type="button" aria-label="上传资产图片" disabled={imageMutating} onClick={() => uploadInputRef.current?.click()}><Icon name="add" /></button><div className="asset-detail-more" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAssetMenuOpen(false); }}><button type="button" aria-label="更多选项" aria-haspopup="menu" aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((open) => !open)}><Icon name="moreVertical" /></button>{assetMenuOpen ? <div className="asset-detail-more-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAssetMenuOpen(false); setPendingDeleteAsset(true); }}><Icon name="trash" />删除资产</button></div> : null}</div><input ref={uploadInputRef} className="asset-image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} /></div>
             <div className="asset-detail-section"><small>详细描述</small><p>{activeEntry.description || "暂无描述"}</p></div>
             {imageError ? <em className="asset-image-error" role="alert">{imageError}</em> : null}
           </section>}
@@ -310,6 +345,7 @@ export function AssetDetailDialog({
       </> : null}
       {pendingRenameImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) { setPendingRenameImageId(null); setImageNameError(""); } }}><form className="asset-image-confirm asset-image-rename" role="dialog" aria-modal="true" aria-labelledby="asset-image-rename-title" onSubmit={(event) => { event.preventDefault(); void renameImage(); }}><span><Icon name="edit" /></span><h3 id="asset-image-rename-title">修改图片名称</h3><p>名称用于区分同一资产中的不同图片。</p><label><small>图片名称</small><input autoFocus value={imageNameDraft} maxLength={80} disabled={imageMutating} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setImageNameDraft(event.target.value)} /></label>{imageNameError ? <em role="alert">{imageNameError}</em> : null}<footer><button type="button" disabled={imageMutating} onClick={() => { setPendingRenameImageId(null); setImageNameError(""); }}>取消</button><button type="submit" className="primary" disabled={imageMutating}>{imageMutating ? "保存中…" : "保存"}</button></footer></form></div> : null}
       {pendingDeleteImageId ? <DeleteConfirmDialog dialogId="asset-image-delete" title="删除这张图片？" description="图片会从当前资产中移除，已经放到画布上的内容不会被打断。" confirmLabel={imageMutating ? "删除中…" : "确认删除"} disabled={imageMutating} onCancel={() => setPendingDeleteImageId(null)} onConfirm={deleteImage} /> : null}
+      {pendingDeleteAsset && detail ? <DeleteConfirmDialog dialogId="asset-delete" title={`删除资产“${detail.root.name}”？`} description={detail.variants.length ? `资产及其 ${detail.variants.length} 个派生形态会从资产空间和画布资产列表移除，已经放到页面或画布上的内容不会被打断。` : "资产会从资产空间和画布资产列表移除，已经放到页面或画布上的内容不会被打断。"} confirmLabel={assetDeleting ? "删除中…" : "确认删除"} disabled={assetDeleting} onCancel={() => setPendingDeleteAsset(false)} onConfirm={deleteAsset} /> : null}
     </section>
   </div>;
 }

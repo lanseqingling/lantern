@@ -13,7 +13,7 @@ import {
 } from "@prisma/client";
 import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
 import { prisma } from "../../packages/server/src/db";
-import { deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
+import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
 import { duplicateComic } from "../../packages/server/src/comic-service";
 import { applyPageVariant, commitChangeSet, deletePageVariant, revertCandidateApplication, saveCandidateAsPageVariant } from "../../packages/server/src/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
@@ -281,6 +281,18 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(variantApplied.working.document.units[0].frames[0].geometry.x, comicFrame.geometry.x + 1);
     await deletePageVariant(ids.user, variant.id);
     assert.ok((await prisma.pageVariant.findUniqueOrThrow({ where: { id: variant.id } })).archivedAt);
+
+    await prisma.canvasAssetListItem.create({ data: { ownerUserId: ids.user, projectId: ids.project, assetId: ids.asset, displayName: "测试角色", displayKind: AssetKind.CHARACTER } });
+    const placement = await prisma.canvasReferencePlacement.create({ data: { ownerUserId: ids.user, projectId: ids.project, assetId: ids.asset, assetVersionId: ids.assetV1, x: 120, y: 80 } });
+    const archived = await archiveAssetFamily(ids.user, ids.assetVariant);
+    assert.equal(archived.id, ids.asset);
+    assert.deepEqual(new Set(archived.archivedAssetIds), new Set([ids.asset, ids.assetVariant]));
+    assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: ids.asset } })).archivedAt instanceof Date, true);
+    assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: ids.assetVariant } })).archivedAt instanceof Date, true);
+    assert.equal((await prisma.canvasAssetListItem.findUniqueOrThrow({ where: { projectId_assetId: { projectId: ids.project, assetId: ids.asset } } })).hiddenAt instanceof Date, true);
+    assert.equal((await prisma.canvasReferencePlacement.findUnique({ where: { id: placement.id } }))?.assetVersionId, ids.assetV1);
+    assert.deepEqual(await listComicAssetCards(ids.user, ids.comic), []);
+    await assert.rejects(() => getAssetFamilyDetail(ids.user, ids.asset), /资产不存在/);
   } finally {
     if (copiedComicId) {
       const copiedProjects = await prisma.project.findMany({ where: { chapter: { comicId: copiedComicId } }, select: { id: true } });
@@ -305,6 +317,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.generationTask.deleteMany({ where: { projectId: ids.project } });
     await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: ids.project } } });
     await prisma.storyboardBeat.deleteMany({ where: { projectId: ids.project } });
+    await prisma.canvasReferencePlacement.deleteMany({ where: { projectId: ids.project } });
     await prisma.canvasAssetListItem.deleteMany({ where: { projectId: ids.project } });
     await prisma.assetImage.deleteMany({ where: { asset: { projectId: ids.project } } });
     await prisma.assetVersion.deleteMany({ where: { asset: { projectId: ids.project } } });

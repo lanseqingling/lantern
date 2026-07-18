@@ -78,6 +78,7 @@
 .dialogue-cursor-preview { position: fixed; z-index: 110; display: grid; width: 48px; height: 34px; place-items: center; border: 2px solid rgba(36,127,130,.7); border-radius: 50%; background: rgba(255,255,255,.88); color: var(--cyan-deep); box-shadow: 0 8px 24px rgba(23,32,38,.16); pointer-events: none; transform: translate(12px, 10px); }
 .dialogue-cursor-preview::after { content: ""; position: absolute; right: 2px; bottom: -8px; width: 12px; height: 12px; border-right: 2px solid rgba(36,127,130,.7); background: rgba(255,255,255,.88); transform: skewY(35deg); }
 .dialogue-cursor-preview i { position: absolute; right: -5px; top: -7px; display: grid; width: 17px; height: 17px; place-items: center; border-radius: 50%; background: var(--cyan); color: #fff; font-size: 12px; font-style: normal; font-weight: 900; }
+.narration-cursor-preview { position: fixed; z-index: 110; width: 144px; min-height: 60px; box-sizing: border-box; border: 1px dashed rgba(36,127,130,.72); border-radius: 5px; background: transparent; color: #172026; padding: 0; font-size: 24px; font-weight: 750; line-height: 1.25; pointer-events: none; transform: translate(12px, 10px); -webkit-text-stroke: 2px #fff; paint-order: stroke fill; }
 .canvas-candidate-card { position: absolute; z-index: 37; width: 198px; overflow: hidden; padding: 8px; border: 1px solid rgba(100,200,200,.3); border-radius: 20px; background: rgba(255,255,255,.92); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
 .canvas-candidate-card > img, .candidate-storyboard-preview { display: block; width: 100%; height: 92px; object-fit: cover; border-radius: 14px; background: linear-gradient(135deg, rgba(100,200,200,.14), rgba(242,184,75,.12)); }
 .candidate-storyboard-preview { position: relative; }
@@ -124,6 +125,15 @@
 .balloon-editor-popover label { display: grid; gap: 4px; color: #728089; font-size: 8px; font-weight: 850; }
 .balloon-editor-popover textarea { width: 100%; min-height: 58px; max-height: 108px; border: 1px solid rgba(36,127,130,.16); border-radius: 13px; background: rgba(255,255,255,.9); padding: 8px; color: var(--ink); font: 10px/1.5 var(--font); outline: 0; resize: vertical; }
 .balloon-editor-popover textarea:focus { border-color: rgba(100,200,200,.62); box-shadow: 0 0 0 4px rgba(100,200,200,.13); }
+.balloon-editor-popover input { width: 100%; height: 34px; border: 1px solid rgba(36,127,130,.16); border-radius: 11px; background: rgba(255,255,255,.9); padding: 0 9px; color: var(--ink); font: 850 10px var(--font); outline: 0; }
+.balloon-editor-popover input:focus { border-color: rgba(100,200,200,.62); box-shadow: 0 0 0 4px rgba(100,200,200,.13); }
+.font-size-stepper { display: grid; grid-template-columns: minmax(0, 1fr) 25px; overflow: hidden; border: 1px solid rgba(36,127,130,.16); border-radius: 11px; background: rgba(255,255,255,.9); }
+.balloon-editor-popover .font-size-stepper input { height: 34px; border: 0; border-radius: 0; background: transparent; padding: 0 9px; box-shadow: none; }
+.font-size-stepper > span { display: grid; grid-template-rows: repeat(2, 1fr); border-left: 1px solid rgba(36,127,130,.13); }
+.font-size-stepper button { display: grid; min-width: 0; min-height: 0; place-items: center; border: 0; background: rgba(100,200,200,.07); color: #587076; padding: 0; font: 800 10px/1 var(--font); cursor: pointer; }
+.font-size-stepper button + button { border-top: 1px solid rgba(36,127,130,.13); }
+.font-size-stepper button:hover, .font-size-stepper button:focus-visible { background: var(--cyan-soft); color: var(--cyan-deep); outline: 0; }
+.font-size-stepper:focus-within { border-color: rgba(100,200,200,.62); box-shadow: 0 0 0 4px rgba(100,200,200,.13); }
 .balloon-editor-popover label + label { margin-top: 8px; }
 .balloon-editor-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 7px; }
 .balloon-editor-actions button { min-width: 88px; min-height: 28px; border: 0; border-radius: 999px; background: var(--cyan); color: #fff; padding: 0 16px; font-size: 8px; font-weight: 900; cursor: pointer; box-shadow: 0 0 0 4px rgba(100,200,200,.14), 0 8px 18px rgba(36,127,130,.18); }

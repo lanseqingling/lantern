@@ -189,6 +189,8 @@ export type TextElement = {
     fontSize: number;
     fontWeight?: number;
     color: string;
+    stroke?: string;
+    strokeWidth?: number;
     align?: "left" | "center" | "right";
     writingMode?: "horizontal" | "vertical";
   };
@@ -284,7 +286,7 @@ export type UnitOverlayLayer = {
   anchor: OverlayAnchor;
   /** Optional physical-page constraint inside a true spread. */
   surfaceId?: string;
-  purpose: "breakout" | "cross_frame" | "cross_page" | "cross_segment" | "page_content" | "page_effect" | "decoration";
+  purpose: "breakout" | "cross_frame" | "cross_page" | "cross_segment" | "page_content" | "narration" | "page_effect" | "decoration";
   elements: OverlayElement[];
 };
 
@@ -538,7 +540,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
     layer.elements.forEach((element, index) => {
       const geometry = anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform;
       const location: ElementLocation = { space: "overlay", layerId: layer.id, anchor: layer.anchor, ...(layer.surfaceId ? { surfaceId: layer.surfaceId } : {}), purpose: layer.purpose };
-      const zIndex = 1_000_000 + layer.zIndex * 10 + index;
+      const zIndex = layer.purpose === "narration" ? 2_000_000_000 + index : 1_000_000 + layer.zIndex * 10 + index;
       if (element.kind === "image") elements.push({
         id: element.id, type: "image", geometry, zIndex, layerId: layer.id,
         linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
@@ -554,6 +556,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
       });
       else if (element.kind === "text") elements.push({
         id: element.id, type: "text", geometry, zIndex, layerId: layer.id, comicFrameId: anchorFrame?.id,
+        readingOrder: layer.purpose === "narration" ? index + 1 : undefined,
         linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
         content: { text: element.content, role: element.role }, style: element.style, appearance: element.appearance, visible: element.visible, name: element.name, location,
       });

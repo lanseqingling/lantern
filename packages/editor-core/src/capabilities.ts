@@ -17,6 +17,7 @@ import {
   type PageSurface,
   type Point,
   type PresentationUnit,
+  type TextElement,
   type UnitOverlayLayer,
   type WorkbenchFixture,
   type WorkspaceCommand,
@@ -510,6 +511,171 @@ const createPageDialogueBalloonCapability = defineCapability({
       { type: "add_dialogue", dialogue: { id: dialogueId, content: input.content ?? "新对白" } },
       ...(overlay.command ? [overlay.command] : []),
       { type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element: balloon },
+    ];
+  },
+});
+
+export const narrationDefaults = {
+  fontSize: 24,
+  strokeWidth: 2,
+  horizontal: { width: 144, height: 60 },
+  vertical: { width: 60, height: 144 },
+} as const;
+
+const createNarrationCapability = defineCapability({
+  id: "create_narration",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    position: z.strictObject({ x: z.number(), y: z.number() }),
+    content: z.string().max(4000).optional(),
+  }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["presentation_unit_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["add_overlay_layer", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    const overlay = overlayLayerFor(context, unit, { type: "unit" }, "narration", "旁白");
+    const width = Math.min(narrationDefaults.horizontal.width, unit.canvas.width);
+    const height = Math.min(narrationDefaults.horizontal.height, unit.canvas.height);
+    const element: TextElement = {
+      id: context.createId("narration"),
+      kind: "text",
+      transform: {
+        x: clamp(input.position.x - width / 2, 0, unit.canvas.width - width),
+        y: clamp(input.position.y - height / 2, 0, unit.canvas.height - height),
+        width,
+        height,
+      },
+      content: input.content ?? "请输入文本",
+      role: "narration",
+      name: "旁白",
+      style: {
+        fontFamily: "ui-sans-serif",
+        fontSize: narrationDefaults.fontSize,
+        fontWeight: 700,
+        color: "#111111",
+        stroke: "#ffffff",
+        strokeWidth: narrationDefaults.strokeWidth,
+        align: "left",
+        writingMode: "horizontal",
+      },
+    };
+    return [
+      ...(overlay.command ? [overlay.command] : []),
+      { type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element },
+    ];
+  },
+});
+
+function findNarration(context: EditorCapabilityContext, input: { unitId: string; layerId: string; elementId: string }) {
+  const located = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+  if (located.layer.purpose !== "narration" || located.layer.anchor.type !== "unit" || located.element.kind !== "text" || located.element.role !== "narration") {
+    throw new Error(`missing Narration TextElement: ${input.elementId}`);
+  }
+  return { ...located, element: located.element as TextElement & { transform: Geometry } };
+}
+
+const updateNarrationCapability = defineCapability({
+  id: "update_narration",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1),
+    changes: z.strictObject({
+      content: z.string().max(4000).optional(),
+      fontSize: z.number().min(6).max(240).optional(),
+      writingMode: z.enum(["horizontal", "vertical"]).optional(),
+    }).refine((value) => Object.keys(value).length > 0),
+  }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["narration_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["update_text_element", "set_element_transform"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, element } = findNarration(context, input);
+    const commands: WorkspaceCommand[] = [{ type: "update_text_element", ...input }];
+    const nextWritingMode = input.changes.writingMode;
+    const currentWritingMode = element.style.writingMode ?? "horizontal";
+    if (nextWritingMode && nextWritingMode !== currentWritingMode) {
+      const source = narrationDefaults[currentWritingMode];
+      const target = narrationDefaults[nextWritingMode];
+      const width = Math.min(unit.canvas.width, element.transform.width > source.width + .5 ? element.transform.width : target.width);
+      const height = Math.min(unit.canvas.height, element.transform.height > source.height + .5 ? element.transform.height : target.height);
+      const centerX = element.transform.x + element.transform.width / 2;
+      const centerY = element.transform.y + element.transform.height / 2;
+      commands.push({
+        type: "set_element_transform",
+        unitId: unit.id,
+        layerId: input.layerId,
+        elementId: input.elementId,
+        transform: {
+          ...element.transform,
+          x: clamp(centerX - width / 2, 0, unit.canvas.width - width),
+          y: clamp(centerY - height / 2, 0, unit.canvas.height - height),
+          width,
+          height,
+        },
+      });
+    }
+    return commands;
+  },
+});
+
+const duplicateNarrationCapability = defineCapability({
+  id: "duplicate_narration",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["narration_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, element } = findNarration(context, input);
+    const duplicate: TextElement = {
+      ...structuredClone(element),
+      id: context.createId("narration"),
+      name: "旁白 副本",
+      transform: {
+        ...element.transform,
+        x: clamp(element.transform.x + 18, 0, unit.canvas.width - element.transform.width),
+        y: clamp(element.transform.y + 18, 0, unit.canvas.height - element.transform.height),
+      },
+    };
+    return [{ type: "add_overlay_element", unitId: unit.id, layerId: input.layerId, element: duplicate }];
+  },
+});
+
+const deleteNarrationCapability = defineCapability({
+  id: "delete_narration",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["narration_exists"],
+  outputCommandTypes: ["remove_overlay_element", "remove_overlay_layer"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, layer } = findNarration(context, input);
+    return [
+      { type: "remove_overlay_element", unitId: unit.id, layerId: layer.id, elementId: input.elementId },
+      ...(layer.elements.length === 1 ? [{ type: "remove_overlay_layer" as const, unitId: unit.id, layerId: layer.id }] : []),
     ];
   },
 });
@@ -1103,7 +1269,7 @@ function compositeSource(unit: PresentationUnit, surface: PageSurface, dx: numbe
     frames: unit.frames.map((frame) => ({ ...structuredClone(frame), geometry: shiftedGeometry(frame.geometry, dx, dy) })),
     overlayLayers: unit.overlayLayers.map((layer) => ({
       ...structuredClone(layer),
-      ...(layer.anchor.type === "unit" && layer.purpose !== "cross_page" && layer.purpose !== "cross_segment" ? { surfaceId: surface.id } : {}),
+      ...(layer.anchor.type === "unit" && layer.purpose !== "cross_page" && layer.purpose !== "cross_segment" && layer.purpose !== "narration" ? { surfaceId: surface.id } : {}),
       elements: layer.anchor.type === "unit" ? layer.elements.map((element) => shiftedOverlayElement(element, dx, dy)) : structuredClone(layer.elements),
     })),
   };
@@ -1486,6 +1652,10 @@ const capabilityRegistry = {
   create_dialogue_balloon: createDialogueBalloonCapability,
   create_page_image: createPageImageCapability,
   create_page_dialogue_balloon: createPageDialogueBalloonCapability,
+  create_narration: createNarrationCapability,
+  update_narration: updateNarrationCapability,
+  duplicate_narration: duplicateNarrationCapability,
+  delete_narration: deleteNarrationCapability,
   promote_element_to_overlay: promoteElementToOverlayCapability,
   convert_element_to_page: convertElementToPageCapability,
   return_element_to_frame: returnElementToFrameCapability,

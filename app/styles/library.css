@@ -249,6 +249,11 @@
 .asset-detail-copy-actions button:hover, .asset-detail-copy-actions button:focus-visible { border-color: rgba(36,127,130,.36); background: #fff; color: var(--cyan-deep); outline: 0; box-shadow: 0 6px 16px rgba(23,72,76,.08); }
 .asset-detail-copy-actions button svg { width: 16px; height: 16px; }
 .asset-detail-copy-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.asset-detail-more { position: relative; }
+.asset-detail-more-menu { position: absolute; z-index: 8; top: calc(100% + 6px); right: 0; width: 142px; overflow: hidden; border: 1px solid rgba(255,255,255,.92); border-radius: 12px; background: rgba(255,255,255,.98); box-shadow: 0 14px 32px rgba(23,32,38,.16); padding: 5px; backdrop-filter: blur(18px); }
+.asset-detail-copy-actions .asset-detail-more-menu button { display: flex; width: 100%; min-height: 34px; height: auto; align-items: center; justify-content: flex-start; gap: 8px; border: 0; border-radius: 8px; background: transparent; color: #52616a; padding: 7px 9px; font: inherit; font-size: 10px; font-weight: 820; white-space: nowrap; }
+.asset-detail-copy-actions .asset-detail-more-menu button:hover, .asset-detail-copy-actions .asset-detail-more-menu button:focus-visible { background: var(--cyan-soft); color: var(--cyan-deep); box-shadow: none; }
+.asset-detail-copy-actions .asset-detail-more-menu button svg { width: 14px; height: 14px; color: #688087; }
 .asset-image-upload-input { display: none; }
 .asset-image-error { display: block; color: #b14f49; font-size: 9px; font-style: normal; font-weight: 750; line-height: 1.5; }
 .asset-detail-section { display: grid; gap: 7px; margin-bottom: 25px; }

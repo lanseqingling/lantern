@@ -69,6 +69,10 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("set_art_crop"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), crop: normalizedRectSchema }),
   z.strictObject({ type: z.literal("set_element_transform"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), transform: geometrySchema }),
   z.strictObject({ type: z.literal("set_element_appearance"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), appearance: visualAssetReferenceSchema.nullable() }),
+  z.strictObject({
+    type: z.literal("update_text_element"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1),
+    changes: z.strictObject({ content: z.string().max(4000).optional(), fontSize: z.number().min(6).max(240).optional(), writingMode: z.enum(["horizontal", "vertical"]).optional() }).refine((value) => Object.keys(value).length > 0),
+  }),
   z.strictObject({ type: z.literal("add_frame_layer"), unitId: z.string().min(1), frameId: z.string().min(1), layer: frameLayerSchema }),
   z.strictObject({ type: z.literal("add_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), element: frameElementSchema }),
   z.strictObject({ type: z.literal("remove_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1) }),

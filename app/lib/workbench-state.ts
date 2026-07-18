@@ -2,7 +2,7 @@ import { normalizeStoryboardBeats, type AssetSummary, type Candidate, type PageV
 import { createInitialFixture } from "@/packages/demo-runtime/src";
 
 export type Selection = {
-  type: "none" | "presentation_unit" | "comic_frame" | "image" | "speech_balloon" | "reference_card" | "storyboard_beat";
+  type: "none" | "presentation_unit" | "comic_frame" | "image" | "text" | "speech_balloon" | "reference_card" | "storyboard_beat";
   id?: string;
   pageId?: string;
   label: string;

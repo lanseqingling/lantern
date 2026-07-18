@@ -173,6 +173,10 @@ export async function apiDeleteAssetImage(assetId: string, imageId: string) {
   return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/assets/${encodeURIComponent(assetId)}/images/${encodeURIComponent(imageId)}`, { method: "DELETE", body: "{}" }));
 }
 
+export function apiDeleteAsset(assetId: string) {
+  return api<{ id: string; deleted: boolean; archivedAssetIds: string[] }>(`/v1/assets/${encodeURIComponent(assetId)}`, { method: "DELETE" });
+}
+
 export function apiCreateComic(input: { title: string; summary?: string; worldSummary?: string; styleSummary?: string; format?: "page" | "vertical" | "four_panel"; canvasPageMode?: "single" | "spread" }) {
   return api<{ comic: { id: string; title: string } }>("/v1/comics", { method: "POST", body: JSON.stringify(input) });
 }

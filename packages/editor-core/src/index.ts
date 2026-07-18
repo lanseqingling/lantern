@@ -257,6 +257,18 @@ export function applyWorkspaceChangeSet(
       }
       continue;
     }
+    if (operation.type === "update_text_element") {
+      const unit = findUnit(operation.unitId);
+      const layer = operation.frameId
+        ? findLayer(operation.unitId, operation.frameId, operation.layerId).layer
+        : unit.overlayLayers.find((item) => item.id === operation.layerId);
+      const element = layer?.elements.find((item) => item.id === operation.elementId);
+      if (!element || element.kind !== "text") throw new Error(`missing TextElement: ${operation.elementId}`);
+      if (operation.changes.content !== undefined) element.content = operation.changes.content;
+      if (operation.changes.fontSize !== undefined) element.style.fontSize = operation.changes.fontSize;
+      if (operation.changes.writingMode !== undefined) element.style.writingMode = operation.changes.writingMode;
+      continue;
+    }
     if (operation.type === "add_frame_layer") {
       const { frame } = findFrame(operation.unitId, operation.frameId);
       if (frame.layers.some((layer) => layer.id === operation.layer.id)) throw new Error(`duplicate FrameLayer id: ${operation.layer.id}`);

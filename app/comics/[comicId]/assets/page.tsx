@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@/packages/ui/src";
 import { AssetDetailDialog } from "@/app/components/AssetDetailDialog";
 import { ComicBriefDialog } from "@/app/components/ComicBriefDialog";
-import { apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
+import { apiDeleteAsset, apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
 
 type AssetFilter = "all" | "character" | "scene" | "prop" | "reference";
 type BriefId = "story" | "world" | "style";
@@ -192,6 +192,14 @@ export default function ComicAssetsPage() {
   const setPrimaryImage = async (entryId: string, imageId: string) => applyImageMutation(await apiSetPrimaryAssetImage(entryId, imageId));
   const renameImage = async (entryId: string, imageId: string, label: string) => applyImageMutation(await apiRenameAssetImage(entryId, imageId, label));
   const deleteImage = async (entryId: string, imageId: string) => applyImageMutation(await apiDeleteAssetImage(entryId, imageId));
+  const deleteAsset = async (assetId: string) => {
+    const assetName = currentDetailResult?.detail?.root.name ?? "资产";
+    const deleted = await apiDeleteAsset(assetId);
+    setAssets((current) => current.filter((asset) => asset.id !== deleted.id));
+    setDetailResult(null);
+    closeAssetDetail();
+    setNotice(`已删除资产“${assetName}”`);
+  };
 
   return <main className="comic-asset-studio-page">
     <header className="asset-studio-page-head">
@@ -222,7 +230,7 @@ export default function ComicAssetsPage() {
         </div>
       </div>
     </section>
-    {selectedId ? <AssetDetailDialog key={selectedId} detail={currentDetailResult?.detail ?? null} loading={detailLoading} error={currentDetailResult?.error ?? ""} onClose={closeAssetDetail} onRetry={() => setDetailRequestKey((key) => key + 1)} onSaveEntry={saveAssetEntry} onUploadImage={uploadAssetImage} onSetPrimaryImage={setPrimaryImage} onRenameImage={renameImage} onDeleteImage={deleteImage} returnFocus={detailReturnFocus} /> : null}
+    {selectedId ? <AssetDetailDialog key={selectedId} detail={currentDetailResult?.detail ?? null} loading={detailLoading} error={currentDetailResult?.error ?? ""} onClose={closeAssetDetail} onRetry={() => setDetailRequestKey((key) => key + 1)} onSaveEntry={saveAssetEntry} onUploadImage={uploadAssetImage} onSetPrimaryImage={setPrimaryImage} onRenameImage={renameImage} onDeleteImage={deleteImage} onDeleteAsset={deleteAsset} returnFocus={detailReturnFocus} /> : null}
     {activeBrief ? <ComicBriefDialog title={activeBrief.title} eyebrow={activeBrief.eyebrow} description={activeBrief.description} value={activeBrief.value} placeholder={activeBrief.placeholder} maxLength={activeBrief.maxLength} required={activeBrief.required} referenceImages={activeBrief.id === "style" ? visualStyle.images : undefined} onUploadReference={activeBrief.id === "style" ? uploadVisualStyleReference : undefined} onRenameReference={activeBrief.id === "style" ? renameVisualStyleReference : undefined} onDeleteReference={activeBrief.id === "style" ? deleteVisualStyleReference : undefined} onSave={saveBrief} onClose={closeBrief} /> : null}
     {error || notice ? <div className="asset-studio-toast" role="status">{error || notice}</div> : null}
   </main>;

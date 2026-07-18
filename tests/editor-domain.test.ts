@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
-import { createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
+import { createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
@@ -176,6 +176,10 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "create_dialogue_balloon",
     "create_page_image",
     "create_page_dialogue_balloon",
+    "create_narration",
+    "update_narration",
+    "duplicate_narration",
+    "delete_narration",
     "promote_element_to_overlay",
     "convert_element_to_page",
     "return_element_to_frame",
@@ -213,6 +217,43 @@ test("editor capabilities are registered but remain unavailable to Agent executi
   ]);
   assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
+});
+
+test("paper narration stays frame-free, topmost, editable and independently removable", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-narration-${++sequence}`, actor: "human" as const });
+  const created = dryRunEditorCapability("create_narration", { unitId: unit.id, position: { x: 360, y: 120 } }, context());
+  fixture.working = created.result.working;
+  const narrationLayer = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "narration")!;
+  const narration = narrationLayer.elements.find((element) => element.kind === "text")!;
+  assert.equal(narration.kind === "text" ? narration.content : "", "请输入文本");
+  assert.deepEqual(narrationLayer.anchor, { type: "unit" });
+  assert.equal(narrationLayer.surfaceId, undefined);
+  assert.equal(narration.kind === "text" ? narration.style.fontSize : 0, 24);
+  assert.equal(narration.kind === "text" ? narration.style.strokeWidth : 0, 2);
+  assert.equal(narration.kind === "text" ? projectTextStrokeWidth({ ...narration, style: { ...narration.style, strokeWidth: 1.25 } }) : 0, 2);
+  assert.deepEqual(narration.transform, { x: 288, y: 90, width: 144, height: 60 });
+  const view = createComicPageView(fixture.working.document, fixture.working.document.units[0]).elements.find((element) => element.id === narration.id);
+  assert.equal(view?.type, "text");
+  assert.equal(view?.type === "text" ? view.location.space : "", "overlay");
+  assert.ok((view?.zIndex ?? 0) > Math.max(...fixture.working.document.units[0].frames.map((frame) => frame.zIndex)));
+
+  const updated = dryRunEditorCapability("update_narration", { unitId: unit.id, layerId: narrationLayer.id, elementId: narration.id, changes: { content: "残响。", fontSize: 22, writingMode: "vertical" } }, context());
+  fixture.working = updated.result.working;
+  const updatedText = fixture.working.document.units[0].overlayLayers.flatMap((layer) => layer.elements).find((element) => element.id === narration.id);
+  assert.equal(updatedText?.kind === "text" ? updatedText.content : "", "残响。");
+  assert.equal(updatedText?.kind === "text" ? updatedText.style.fontSize : 0, 22);
+  assert.equal(updatedText?.kind === "text" ? updatedText.style.writingMode : "", "vertical");
+  assert.deepEqual(updatedText?.transform, { x: 330, y: 48, width: 60, height: 144 });
+
+  const duplicated = dryRunEditorCapability("duplicate_narration", { unitId: unit.id, layerId: narrationLayer.id, elementId: narration.id }, context());
+  fixture.working = duplicated.result.working;
+  assert.equal(fixture.working.document.units[0].overlayLayers.find((layer) => layer.id === narrationLayer.id)?.elements.length, 2);
+  const removed = dryRunEditorCapability("delete_narration", { unitId: unit.id, layerId: narrationLayer.id, elementId: narration.id }, context());
+  assert.equal(removed.result.working.document.units[0].overlayLayers.flatMap((layer) => layer.elements).some((element) => element.id === narration.id), false);
+  assert.throws(() => planEditorCapability("create_narration", { unitId: unit.id, position: { x: 20, y: 20 } }, { ...context(), actor: "agent" }), /disabled for Agent/);
 });
 
 test("true spreads stay indivisible, preserve physical surfaces and block unsafe splitting", () => {

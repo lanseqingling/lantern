@@ -46,6 +46,7 @@ const imageFiles = [
   "breakout-rendezvous-v2.png",
   "breakout-rendezvous-crown-v2.png",
   "spread-rendezvous-girls-v3.png",
+  "rendezvous-running-step.png",
   "rendezvous-friend-closeup-v3.png",
   "spread-birds-v3.png",
 ] as const;
@@ -62,6 +63,7 @@ const assetByFile: Readonly<Record<CampusImageFile, { id: string; kind: AssetKin
   "breakout-rendezvous-v2.png": { id: "campus-asset-breakout-panel", kind: AssetKind.GENERATED_IMAGE, name: "风里的决定", description: "腰部以上的夏葵抬手理发，背着书包；人物画风和构图接近首页宣传图。" },
   "breakout-rendezvous-crown-v2.png": { id: "campus-asset-breakout-crown", kind: AssetKind.GENERATED_IMAGE, name: "风里的决定 · 发冠层", description: "从主画面同源提取的发冠遮线层，只让完整头顶越过画格上沿，不处理整个人物或细碎发梢。" },
   "spread-rendezvous-girls-v3.png": { id: "campus-asset-playground-rendezvous", kind: AssetKind.SCENE, name: "旧看台的约定", description: "Page 03–04 真双页操场；夏葵从左页跑向右页旧看台旁等待的女同学，中缝只经过天空与跑道。" },
+  "rendezvous-running-step.png": { id: "campus-asset-rendezvous-running-step", kind: AssetKind.GENERATED_IMAGE, name: "赴约的脚步", description: "低机位跑道特写。夏葵穿黑色长袜与黑色校鞋踏上跑道线，书包随步伐摆动，以轻网点和疏朗速度线承接跨页赴约。" },
   "rendezvous-friend-closeup-v3.png": { id: "campus-asset-rendezvous-friend", kind: AssetKind.CHARACTER, name: "旧看台旁的同学", description: "扎短马尾的女同学在旧看台旁回头，神情只保留轻微的确认。" },
   "spread-birds-v3.png": { id: "campus-asset-spread-birds", kind: AssetKind.GENERATED_IMAGE, name: "越过中缝的飞鸟", description: "五只疏朗飞鸟组成跨页弧线，以正片叠底方式落在双页天空。" },
 };
@@ -147,11 +149,13 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
 
   const page2Frames = [
     buildFrame({ number: 5, beatIndex: 3, assetId: "campus-asset-after-bell", geometry: { x: 40, y: 40, width: 640, height: 330 }, zIndex: 1 }, dialogues),
-    buildFrame({ number: 6, beatIndex: 4, assetId: "campus-asset-letter-in-hand", geometry: { x: 40, y: 390, width: 300, height: 210 }, zIndex: 2, dialogue: { content: "旧看台。\n放学后。", transform: { x: .58, y: .1, width: .38, height: .44 }, shape: "caption_box", fontSize: 14 } }, dialogues),
-    buildFrame({ number: 7, beatIndex: 4, assetId: "campus-asset-window-shadow", geometry: { x: 360, y: 390, width: 320, height: 210 }, zIndex: 3 }, dialogues),
+    buildFrame({ number: 6, beatIndex: 4, assetId: "campus-asset-letter-in-hand", geometry: { x: 40, y: 390, width: 300, height: 210 }, zIndex: 2, crop: { x: 0.0563387056958035, y: 0, width: 0.8038186387529933, height: 0.8038186387529933 } }, dialogues),
+    buildFrame({ number: 7, beatIndex: 4, assetId: "campus-asset-window-shadow", geometry: { x: 360, y: 390, width: 320, height: 210 }, zIndex: 3, crop: { x: 0.1772824494643256, y: 0.2211066844855711, width: 0.6669768108584753, height: 0.6669768108584753 } }, dialogues),
     buildFrame({ number: 8, beatIndex: 5, assetId: "campus-asset-breakout-panel", geometry: { x: 40, y: 625, width: 640, height: 420 }, zIndex: 4 }, dialogues),
   ];
   page2Frames[3].layers[0].elements[0].transform = { x: 0, y: -.2, width: 1, height: 1.2 };
+  const page2CaptionId = "campus-dialogue-06";
+  dialogues.push({ id: page2CaptionId, storyboardBeatId: storyboardBeats[3].id, storyboardBeatVersionId: storyboardBeats[3].versionId, content: "旧看台。\n放学后。" });
   const page2: PresentationUnit = {
     id: "campus-page-02", name: "Page 02", kind: "single_page",
     canvas: { width: 720, height: 1080, background: { color: "#ffffff" } },
@@ -162,20 +166,21 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
         id: "campus-page-02-breakout", name: "发冠破格", zIndex: 5, visible: true, anchor: { type: "frame", frameId: "campus-frame-08" }, purpose: "breakout",
         elements: [{ id: "campus-breakout-crown", kind: "image", assetId: "campus-asset-breakout-crown", assetVersionId: "campus-asset-breakout-crown-v1", transform: { x: 0, y: -.2, width: 1, height: 1.2 }, crop: fullCrop, overflow: "visible", name: "破格图 01" }],
       },
+      {
+        id: "campus-page-02-caption", name: "纸面内容", zIndex: 7, visible: true, anchor: { type: "unit" }, purpose: "page_content", surfaceId: "campus-page-02-surface",
+        elements: [{ id: "campus-balloon-06", kind: "balloon", dialogueId: page2CaptionId, transform: { x: 380.986451048951, y: 413.5786713286714, width: 155.0887237762238, height: 51.51800699300699 }, shape: "caption_box", style: balloonStyle(14), name: "旁白框" }],
+      },
     ],
     readingSequence: page2Frames.map((frame) => ({ frameId: frame.id })),
     layoutPolicy: { frameOverlap: "allow", gutter: 20, defaultOverflow: "clip" },
   };
 
   const crossRightId = "campus-dialogue-spread-right";
-  const crossLeftId = "campus-dialogue-spread-left";
-  dialogues.push(
-    { id: crossRightId, storyboardBeatId: storyboardBeats[7].id, storyboardBeatVersionId: storyboardBeats[7].versionId, speakerAssetId: "campus-asset-rendezvous-friend", content: "你来了。" },
-    { id: crossLeftId, storyboardBeatId: storyboardBeats[7].id, storyboardBeatVersionId: storyboardBeats[7].versionId, speakerAssetId: "campus-asset-xiakui", content: "嗯。" },
-  );
+  dialogues.push({ id: crossRightId, storyboardBeatId: storyboardBeats[7].id, storyboardBeatVersionId: storyboardBeats[7].versionId, speakerAssetId: "campus-asset-rendezvous-friend", content: "你来了。" });
   const spreadFrames = [
-    buildFrame({ number: 9, beatIndex: 6, assetId: "campus-asset-playground-rendezvous", geometry: { x: 35, y: 35, width: 1370, height: 1010 }, zIndex: 1, surfaceScope: "unit" }, dialogues),
-    buildFrame({ number: 11, beatIndex: 7, assetId: "campus-asset-rendezvous-friend", geometry: { x: 1030, y: 785, width: 290, height: 200 }, zIndex: 4 }, dialogues),
+    buildFrame({ number: 9, beatIndex: 6, assetId: "campus-asset-playground-rendezvous", geometry: { x: 35, y: 35.43822674418605, width: 1370, height: 1010 }, zIndex: 1, surfaceScope: "unit" }, dialogues),
+    buildFrame({ number: 10, beatIndex: 6, assetId: "campus-asset-rendezvous-running-step", geometry: { x: 63.00581395348826, y: 68.8466569767441, width: 178.1184593023256, height: 260.5566860465116 }, zIndex: 3, surfaceScope: "unit", crop: { x: 0, y: 0.06861415908469679, width: 0.92, height: 0.92 } }, dialogues),
+    buildFrame({ number: 11, beatIndex: 7, assetId: "campus-asset-rendezvous-friend", geometry: { x: 1020.241279069768, y: 756.3059593023257, width: 334.7056686046512, height: 233.9658430232558 }, zIndex: 4, crop: { x: 0.2529087469464316, y: 0.1401133238255756, width: 0.6191661602623987, height: 0.6191661602623987 } }, dialogues),
   ];
   const spread: PresentationUnit = {
     id: "campus-spread-03-04", name: "Page 03–04", kind: "spread",
@@ -193,8 +198,7 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
     }, {
       id: "campus-spread-cross-page", name: "跨页对白", zIndex: 5, visible: true, anchor: { type: "unit" }, purpose: "cross_page",
       elements: [
-        { id: "campus-cross-page-balloon-left", kind: "balloon", dialogueId: crossLeftId, transform: { x: 505, y: 670, width: 108, height: 64 }, tailTarget: { x: 395, y: 565 }, shape: "normal", style: balloonStyle(15), name: "对白" },
-        { id: "campus-cross-page-balloon-right", kind: "balloon", dialogueId: crossRightId, transform: { x: 1130, y: 390, width: 148, height: 70 }, tailTarget: { x: 1215, y: 560 }, shape: "normal", style: balloonStyle(15), name: "对白" },
+        { id: "campus-cross-page-balloon-right", kind: "balloon", dialogueId: crossRightId, transform: { x: 939.6722383720924, y: 372.2943313953489, width: 143.421511627907, height: 70.18968023255815 }, tailTarget: { x: 1088.599088015313, y: 438.7111911815826 }, shape: "normal", style: balloonStyle(15), name: "对白" },
       ],
     }],
     readingSequence: spreadFrames.map((frame) => ({ frameId: frame.id })),
@@ -280,7 +284,7 @@ export async function seedCampusLetter() {
   const contextSnapshot = { comic: { id: ids.comic, title: "风停之前" }, chapter: { id: ids.chapter, title: "第 1 话 · 旧看台" }, workingRevision: 1, storyboardBeats: [], assets: [], recentConversation: [] };
   const tasks = [
     { id: ids.storyboardTask, type: TaskType.STORYBOARD, key: "sample:campus-letter:storyboard", baseRevision: 1, input: { instruction: "把课堂里的无署名信封与一次克制的操场赴约拆成四页短篇。" }, output: { kind: "storyboard", storyboardBeatCount: storyboardBeats.length }, provider: "sample-seed", model: "lantern-authored-storyboard" },
-    { id: ids.layoutTask, type: TaskType.PAGE_LAYOUT, key: "sample:campus-letter:layout", baseRevision: 2, input: { instruction: "前两页保持同一教室连续性，以连续特写衔接发冠破格；后两页用安全区内外格、右下女同学回头特写和飞鸟跨页完成赴约。" }, output: { kind: "page_layout", physicalPages: 4, presentationUnits: 3, frameCount: 10, features: ["breakout", "spread", "cross_page", "nested_frames", "frame_overlap"] }, provider: "sample-seed", model: "lantern-layout-authored" },
+    { id: ids.layoutTask, type: TaskType.PAGE_LAYOUT, key: "sample:campus-letter:layout", baseRevision: 2, input: { instruction: "前两页保持同一教室连续性，以连续特写衔接发冠破格；后两页用安全区内外格、左上跑步叠格、右下女同学回头特写和飞鸟跨页完成赴约。" }, output: { kind: "page_layout", physicalPages: 4, presentationUnits: 3, frameCount: 11, features: ["breakout", "spread", "cross_page", "nested_frames", "frame_overlap"] }, provider: "sample-seed", model: "lantern-layout-authored" },
     { id: ids.imageTask, type: TaskType.FRAME_IMAGE_GENERATE, key: "sample:campus-letter:images", baseRevision: 3, input: { instruction: "参照首页宣传图生成统一人设和清新黑白校园日漫素材。", source: "Codex built-in imagegen" }, output: { kind: "frame_images", assetCount: imageFiles.length }, provider: "codex-imagegen", model: "gpt-image-2" },
   ];
   for (const task of tasks) {
@@ -297,13 +301,6 @@ export async function seedCampusLetter() {
     await prisma.asset.create({ data: { id: definition.id, ownerUserId: owner.id, projectId: ids.project, kind: definition.kind, name: definition.name, description: definition.description, versions: { create: { id: versionId, version: 1, objectKey: image.objectKey, contentType: image.contentType, byteSize: image.byteSize, width: image.width, height: image.height, checksum: image.checksum, source: "codex-imagegen", sourceTaskId: ids.imageTask } } } });
     await prisma.assetImage.create({ data: { assetId: definition.id, assetVersionId: versionId, label: "主图", sortIndex: 0 } });
   }
-  await prisma.canvasReferencePlacement.createMany({ data: [
-    { id: "campus-reference-xiakui", ownerUserId: owner.id, projectId: ids.project, assetId: "campus-asset-xiakui", assetVersionId: "campus-asset-xiakui-v1", x: 240, y: 60, zoom: .82, zIndex: 14, pinned: true },
-    { id: "campus-reference-classroom", ownerUserId: owner.id, projectId: ids.project, assetId: "campus-asset-classroom-lesson", assetVersionId: "campus-asset-classroom-lesson-v1", x: 250, y: 320, zoom: .7, zIndex: 11, pinned: false },
-    { id: "campus-reference-playground", ownerUserId: owner.id, projectId: ids.project, assetId: "campus-asset-playground-rendezvous", assetVersionId: "campus-asset-playground-rendezvous-v1", x: 520, y: 320, zoom: .68, zIndex: 10, pinned: false },
-    { id: "campus-reference-letter", ownerUserId: owner.id, projectId: ids.project, assetId: "campus-asset-flower-envelope", assetVersionId: "campus-asset-flower-envelope-v1", x: 520, y: 590, zoom: .58, zIndex: 12, pinned: false },
-  ] });
-
   const firstUnit = document.units[0];
   const blankDocument: ComicDocument = { ...document, reading: { ...document.reading, unitOrder: [firstUnit.id] }, units: [{ ...firstUnit, frames: [], overlayLayers: [], readingSequence: [] }], resources: [], dialogues: [] };
   await prisma.workingRevision.createMany({ data: [
@@ -315,7 +312,7 @@ export async function seedCampusLetter() {
 
   await prisma.candidate.createMany({ data: [
     { id: "candidate-campus-storyboard", ownerUserId: owner.id, projectId: ids.project, conversationId: ids.conversation, taskId: ids.storyboardTask, kind: CandidateKind.STORYBOARD, status: CandidateStatus.APPLIED, title: "风停之前 · 八个分镜条目", changeSummary: "从同一间课堂里的花印信封推进到旧看台赴约，保留寄信人的神秘感。", targetLabel: "第 1 话", target: { type: "chapter", id: ids.chapter }, baseRevision: 1, sourceRefs: [], outputRefs: storyboardBeats.map((beat) => ({ objectType: "storyboard_beat", objectId: beat.id, versionId: beat.versionId })), payload: { storyboardBeats }, operations: [{ type: "replace_storyboard_beats", count: storyboardBeats.length }], appliedRevision: 2 },
-    { id: "candidate-campus-layout", ownerUserId: owner.id, projectId: ids.project, conversationId: ids.conversation, taskId: ids.layoutTask, kind: CandidateKind.PAGE_LAYOUT, status: CandidateStatus.APPLIED, title: "四页课堂赴约与真正双页", changeSummary: "Page 01–02 用连续特写和对齐后的发冠破格收束课堂；Page 03–04 用安全区内外格、右下女同学回头特写与飞鸟跨页呈现两位女同学相见。", targetLabel: "Page 01–04", target: { type: "chapter", id: ids.chapter }, baseRevision: 2, sourceRefs: storyboardBeats.map((beat) => ({ objectType: "storyboard_beat", objectId: beat.id, versionId: beat.versionId })), outputRefs: document.units.map((unit) => ({ objectType: "presentation_unit", objectId: unit.id })), payload: { physicalPages: 4, presentationUnits: 3, frameCount: 10 }, operations: [{ type: "replace_chapter_presentation", document }], appliedRevision: 3 },
+    { id: "candidate-campus-layout", ownerUserId: owner.id, projectId: ids.project, conversationId: ids.conversation, taskId: ids.layoutTask, kind: CandidateKind.PAGE_LAYOUT, status: CandidateStatus.APPLIED, title: "四页课堂赴约与真正双页", changeSummary: "Page 01–02 用连续特写和对齐后的发冠破格收束课堂；Page 03–04 用安全区内外格、左上跑步叠格、右下女同学回头特写与飞鸟跨页呈现两位女同学相见。", targetLabel: "Page 01–04", target: { type: "chapter", id: ids.chapter }, baseRevision: 2, sourceRefs: storyboardBeats.map((beat) => ({ objectType: "storyboard_beat", objectId: beat.id, versionId: beat.versionId })), outputRefs: document.units.map((unit) => ({ objectType: "presentation_unit", objectId: unit.id })), payload: { physicalPages: 4, presentationUnits: 3, frameCount: 11 }, operations: [{ type: "replace_chapter_presentation", document }], appliedRevision: 3 },
   ] });
 
   const messages = [

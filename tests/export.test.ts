@@ -5,8 +5,10 @@ import sharp from "sharp";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
 import {
   createStructuredExportPayload,
+  presentationUnitSurface,
   renderChapterLongPng,
   renderChapterPngPages,
+  renderPagePng,
   renderSurfaceSvg,
 } from "../packages/server/src/export-renderer";
 import { projectBalloonStrokeWidths, projectComicRenderScene, projectImageCrop, scaleImageCrop, type ComicDocument, type StoryboardBeat } from "../packages/shared/src";
@@ -145,6 +147,27 @@ test("cross-page images, frames and balloons are projected into both physical su
   assert.equal(right.match(/data-scene-id="image-1"/g)?.length, 1);
   assert.equal(left.match(/data-scene-id="cross-page-balloon"/g)?.length, 1);
   assert.equal(right.match(/data-scene-id="cross-page-balloon"/g)?.length, 1);
+});
+
+test("true spread page download renders the complete presentation canvas", async () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  unit.kind = "spread";
+  unit.canvas.width = 400;
+  unit.surfaces = [
+    { id: "surface-left", role: "left", geometry: { x: 0, y: 0, width: 200, height: 300 }, pageNumber: 1 },
+    { id: "surface-right", role: "right", geometry: { x: 200, y: 0, width: 200, height: 300 }, pageNumber: 2 },
+  ];
+  document.resources = [];
+
+  assert.deepEqual(presentationUnitSurface(unit).geometry, { x: 0, y: 0, width: 400, height: 300 });
+  const metadata = await sharp(await renderPagePng(document, unit)).metadata();
+  assert.equal(metadata.width, 400);
+  assert.equal(metadata.height, 300);
+
+  const physicalMetadata = await sharp(await renderPagePng(document, unit, unit.surfaces[1])).metadata();
+  assert.equal(physicalMetadata.width, 200);
+  assert.equal(physicalMetadata.height, 300);
 });
 
 test("PNG, long PNG and structured JSON match the persistent runtime export golden", async () => {

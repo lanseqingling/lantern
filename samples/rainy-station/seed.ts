@@ -13,7 +13,7 @@ import {
   TaskType,
   type Prisma,
 } from "@prisma/client";
-import type { ComicDocument, Dialogue, Frame, PresentationUnit, StoryboardBeat } from "../../packages/shared/src";
+import { validateComicDocument, type ComicDocument, type Dialogue, type Frame, type PresentationUnit, type StoryboardBeat } from "../../packages/shared/src";
 import { prisma } from "../../packages/server/src/db";
 import { putImage, type StoredObject } from "../../packages/server/src/object-storage";
 
@@ -42,15 +42,15 @@ const imageFiles = [
 ] as const;
 type MockImageFile = typeof imageFiles[number] | "prop-ticket.png";
 
-const storyboardBeats: StoryboardBeat[] = [
-  { id: "rain-beat-01", versionId: "rain-beat-01-v1", title: "雨夜候车", description: "超远景建立深夜末班车站。林澄独自站在左侧候车亭，湿亮道路占据主要负空间，疲惫中隐约不安。" },
-  { id: "rain-beat-02", versionId: "rain-beat-02-v1", title: "积水中的旧票", description: "物件近景。鞋尖、手与车票形成斜向动线，林澄疑惑地弯腰拾起积水边的旧车票。" },
-  { id: "rain-beat-03", versionId: "rain-beat-03-v1", title: "父亲的字迹", description: "人物中近景，面部与手中车票形成对角关系，雨痕压在背景玻璃上。她认出失踪父亲的字迹，错愕而警觉。" },
-  { id: "rain-beat-04", versionId: "rain-beat-04-v1", title: "雨幕后的车灯", description: "眼部特写，眼睛与远处双灯在雨幕中对照。她抬眼望向弯道上的车灯，用克制的恐惧制造翻页钩子。" },
-  { id: "rain-beat-05", versionId: "rain-beat-05-v1", title: "无牌末班车", description: "低机位大景，公交车从右上压入画面，林澄在左下形成尺度对比。没有线路牌的车刹停在她面前，气氛压迫而迟疑。" },
-  { id: "rain-beat-06", versionId: "rain-beat-06-v1", title: "晕开的警告", description: "微距特写，湿车票斜切画面，雨滴正在晕开字迹。林澄攥紧车票，墨迹在指尖化开，确认危险。" },
-  { id: "rain-beat-07", versionId: "rain-beat-07-v1", title: "熟悉的小名", description: "司机近景被挡风玻璃和后视镜切割，林澄后脑处于前景。陌生司机叫出只有父亲使用的小名，温和却诡异。" },
-  { id: "rain-beat-08", versionId: "rain-beat-08-v1", title: "车门前的拒绝", description: "横向全景，车门与林澄分居两侧，湿地反光构成明亮边界。林澄清醒地后退一步，不让自己跨过光带。" },
+export const storyboardBeats: StoryboardBeat[] = [
+  { id: "rain-beat-01", versionId: "rain-beat-01-v1", title: "建立深夜末班车站与孤立感", description: "镜头：超远景；构图：林澄置于左侧候车亭，湿亮道路占据主要负空间；画面：林澄在雨棚下等待迟到的末班车；氛围：疲惫、隐约不安" },
+  { id: "rain-beat-02", versionId: "rain-beat-02-v1", title: "让旧车票进入故事", description: "镜头：物件近景；构图：鞋尖、手与车票形成斜向动线；画面：林澄弯腰拾起积水边的旧车票；氛围：疑惑" },
+  { id: "rain-beat-03", versionId: "rain-beat-03-v1", title: "把普通发现转为私人线索", description: "镜头：人物中近景；构图：面部与手中车票形成对角关系，雨痕压在背景玻璃上；画面：她翻过车票，认出失踪父亲的字迹；氛围：错愕、警觉" },
+  { id: "rain-beat-04", versionId: "rain-beat-04-v1", title: "以警告和远处车灯制造翻页钩子", description: "镜头：眼部特写；构图：眼睛占据左侧，远处双灯在右侧雨幕中出现；画面：她抬眼望向弯道上出现的车灯；氛围：克制的恐惧" },
+  { id: "rain-beat-05", versionId: "rain-beat-05-v1", title: "让警告对象具体到站", description: "镜头：低机位大景；构图：公交车从右上压入画面，林澄在左下形成尺度对比；画面：没有线路牌的末班车刹停在她面前；氛围：压迫、迟疑" },
+  { id: "rain-beat-06", versionId: "rain-beat-06-v1", title: "再次确认票面警告", description: "镜头：微距特写；构图：湿车票斜切画面，雨滴正在晕开字迹；画面：林澄攥紧车票，墨迹在指尖化开；氛围：确认危险" },
+  { id: "rain-beat-07", versionId: "rain-beat-07-v1", title: "用熟悉称呼制造错误身份", description: "镜头：司机近景；构图：司机被挡风玻璃和后视镜切割，林澄后脑处于前景；画面：陌生司机转头，叫出只有父亲使用的小名；氛围：温和却诡异" },
+  { id: "rain-beat-08", versionId: "rain-beat-08-v1", title: "让主角主动拒绝并留下续写钩子", description: "镜头：横向全景；构图：车门与林澄分居两侧，湿地反光构成明亮边界；画面：林澄后退一步，不让自己跨过车门前的光带；氛围：清醒、坚定" },
 ];
 
 const storyboardDialogueById: Readonly<Record<string, string>> = {
@@ -63,13 +63,13 @@ const storyboardDialogueById: Readonly<Record<string, string>> = {
 };
 
 const frameLayout = [
-  { page: 0, x: 40, y: 40, width: 640, height: 260 },
+  { page: 0, x: 39.17395104895105, y: 37.88243006993007, width: 640, height: 260 },
   { page: 0, x: 40, y: 320, width: 190, height: 330 },
   { page: 0, x: 250, y: 320, width: 430, height: 330 },
   { page: 0, x: 40, y: 670, width: 640, height: 370 },
   { page: 1, x: 40, y: 40, width: 390, height: 590 },
   { page: 1, x: 450, y: 40, width: 230, height: 270 },
-  { page: 1, x: 450, y: 330, width: 230, height: 300 },
+  { page: 1, x: 450.3802447552447, y: 330.7604895104895, width: 230, height: 300 },
   { page: 1, x: 40, y: 650, width: 640, height: 390 },
 ] as const;
 
@@ -122,15 +122,26 @@ function buildFrame(storyboardBeat: StoryboardBeat, index: number, dialogues: Di
       assetId,
       assetVersionId: `${assetId}-v1`,
       transform: { x: 0, y: 0, width: 1, height: 1 },
-      crop: { x: 0, y: 0, width: 1, height: 1 },
+      crop: index === 0
+        ? { x: 0.05153518356643357, y: 0.01500907746100054, width: 0.92, height: 0.92 }
+        : index === 2
+          ? { x: 0.02393946170108961, y: 0.02275508582326764, width: 0.92, height: 0.92 }
+          : { x: 0, y: 0, width: 1, height: 1 },
       name: `${storyboardBeat.title} · 画面`,
     }],
   }];
   const dialogueText = storyboardDialogueById[storyboardBeat.id];
   if (dialogueText) {
     const isNarration = index === 0 || index === 3 || index === 4;
-    const width = Math.min(isNarration ? 280 : index === 6 ? 150 : 180, sourceRect.width - 24);
-    const height = isNarration ? 58 : index === 6 ? 78 : 66;
+    const presentations: Record<number, { transform: { x: number; y: number; width: number; height: number }; shape: "caption_box" | "normal" | "thought"; tailTarget?: { x: number; y: number } }> = {
+      0: { transform: { x: 0.04651100852272727, y: 0.07558162990855294, width: 0.4375, height: 0.2230769230769231 }, shape: "caption_box" as const },
+      2: { transform: { x: 0.4777291022930558, y: 0.6465048209366391, width: 0.4002480078061474, height: 0.2025826446280991 }, shape: "thought" as const, tailTarget: { x: 0.558801437996828, y: 0.6004418229674419 } },
+      3: { transform: { x: 0.0738001256555944, y: 0.04333065583065583, width: 0.4375, height: 0.1567567567567568 }, shape: "caption_box" as const },
+      4: { transform: { x: 0.03589743589743589, y: 0.02372881355932203, width: 0.717948717948718, height: 0.09830508474576272 }, shape: "caption_box" as const },
+      6: { transform: { x: 0.05118387047734863, y: 0.4941520979020978, width: 0.6521739130434783, height: 0.26 }, shape: "normal" as const, tailTarget: { x: 0.4212073696084478, y: 0.4502666044829606 } },
+      7: { transform: { x: 0.3009069055944055, y: 0.05418683880222341, width: 0.28125, height: 0.1692307692307692 }, shape: "normal" as const, tailTarget: { x: 0.3253081192302826, y: 0.246340666409451 } },
+    };
+    const presentation = presentations[index]!;
     const dialogueId = `rain-dialogue-${index + 1}`;
     dialogues.push({ id: dialogueId, storyboardBeatId: storyboardBeat.id, storyboardBeatVersionId: storyboardBeat.versionId, content: dialogueText });
     layers.push({
@@ -144,14 +155,9 @@ function buildFrame(storyboardBeat: StoryboardBeat, index: number, dialogues: Di
         id: `rain-balloon-${index + 1}`,
         kind: "balloon",
         dialogueId,
-        transform: {
-          x: isNarration ? 14 / sourceRect.width : (sourceRect.width - width - 12) / sourceRect.width,
-          y: 14 / sourceRect.height,
-          width: width / sourceRect.width,
-          height: height / sourceRect.height,
-        },
-        ...(isNarration ? {} : { tailTarget: { x: .55, y: .48 } }),
-        shape: isNarration ? "caption_box" : "normal",
+        transform: presentation.transform,
+        ...(presentation.tailTarget ? { tailTarget: presentation.tailTarget } : {}),
+        shape: presentation.shape,
         style: { fontFamily: "sans-serif", fontSize: isNarration ? 16 : 17, textColor: "#111", fill: "#fff", stroke: "#111", strokeWidth: 2, writingMode: "horizontal" },
         name: isNarration ? "旁白框" : "对白",
       }],
@@ -160,7 +166,7 @@ function buildFrame(storyboardBeat: StoryboardBeat, index: number, dialogues: Di
   return {
     id: frameId,
     geometry: { x: sourceRect.x, y: sourceRect.y, width: sourceRect.width, height: sourceRect.height },
-    zIndex: index + 1,
+    zIndex: 1,
     storyRefs: [{ storyboardBeatId: storyboardBeat.id, storyboardBeatVersionId: storyboardBeat.versionId, role: "primary" }],
     border: { color: "#151515", width: 3, style: "solid" },
     shape: { kind: "rect" },
@@ -170,7 +176,7 @@ function buildFrame(storyboardBeat: StoryboardBeat, index: number, dialogues: Di
   };
 }
 
-function buildDocument(stored: Map<string, StoredObject>): ComicDocument {
+export function buildRainyStationDocument(stored: ReadonlyMap<string, StoredObject>): ComicDocument {
   const dialogues: Dialogue[] = [];
   const units: PresentationUnit[] = [0, 1].map((pageIndex) => {
     const frames = storyboardBeats.flatMap((storyboardBeat, index) => frameLayout[index].page === pageIndex ? [buildFrame(storyboardBeat, index, dialogues)] : []);
@@ -183,10 +189,10 @@ function buildDocument(stored: Map<string, StoredObject>): ComicDocument {
       frames,
       overlayLayers: [],
       readingSequence: frames.map((frame) => ({ frameId: frame.id })),
-      layoutPolicy: { frameOverlap: "forbid", gutter: 20, defaultOverflow: "clip" },
+      layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },
     };
   });
-  return {
+  return validateComicDocument({
     protocolVersion: "lcd-0.4",
     comicId: ids.comic,
     chapterId: ids.chapter,
@@ -199,7 +205,7 @@ function buildDocument(stored: Map<string, StoredObject>): ComicDocument {
       return { assetId, assetVersionId: `${assetId}-v1`, kind: "image", width: image.width ?? 1024, height: image.height ?? 1024, mediaType: "image/png" } as const;
     }),
     dialogues,
-  };
+  });
 }
 
 export async function seedRainyStation() {
@@ -220,7 +226,7 @@ export async function seedRainyStation() {
   const ticketBytes = await readFile(path.join(process.cwd(), "public", "samples", "rainy-station", "frame-02.png"));
   stored.set("prop-ticket.png", await putImage(ticketBytes, "mock/rainy-station/props"));
   const now = new Date();
-  const document = buildDocument(stored);
+  const document = buildRainyStationDocument(stored);
   const storyboardBeatHeads = Object.fromEntries(storyboardBeats.map((storyboardBeat) => [storyboardBeat.id, storyboardBeat.versionId]));
   const frameImageAssetHeads = Object.fromEntries(storyboardBeats.map((_, index) => {
     const assetId = `rain-asset-frame-${String(index + 1).padStart(2, "0")}`;
@@ -264,12 +270,6 @@ export async function seedRainyStation() {
     const suffix = String(index + 1).padStart(2, "0");
     await createAsset({ id: `rain-asset-frame-${suffix}`, versionId: `rain-asset-frame-${suffix}-v1`, kind: AssetKind.GENERATED_IMAGE, name: `雨夜车站 · 格内成稿图 ${suffix}`, description: storyboardBeats[index].title, fileName: `frame-${suffix}.png` as MockImageFile, sourceTaskId: ids.imageTask });
   }
-  await prisma.canvasReferencePlacement.createMany({ data: [
-    { id: "rain-reference-lincheng", ownerUserId: owner.id, projectId: ids.project, assetId: "rain-asset-lincheng", assetVersionId: "rain-asset-lincheng-v1", x: 250, y: 80, zoom: .86, zIndex: 12, pinned: true },
-    { id: "rain-reference-bus-stop", ownerUserId: owner.id, projectId: ids.project, assetId: "rain-asset-bus-stop", assetVersionId: "rain-asset-bus-stop-v1", x: 248, y: 310, zoom: .78, zIndex: 11, pinned: false },
-    { id: "rain-reference-ticket", ownerUserId: owner.id, projectId: ids.project, assetId: "rain-asset-ticket", assetVersionId: "rain-asset-ticket-v1", x: 380, y: 570, zoom: .62, zIndex: 13, pinned: false },
-  ] });
-
   const firstUnit = document.units[0];
   const blankDocument: ComicDocument = { ...document, reading: { ...document.reading, unitOrder: firstUnit ? [firstUnit.id] : [] }, units: firstUnit ? [{ ...firstUnit, frames: [], overlayLayers: [], readingSequence: [] }] : [], resources: [], dialogues: [] };
   await prisma.workingRevision.createMany({ data: [

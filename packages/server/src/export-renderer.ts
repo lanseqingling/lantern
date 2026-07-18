@@ -112,9 +112,21 @@ async function renderSurface(document: ComicDocument, unit: PresentationUnit, su
   return sharp(Buffer.from(renderSurfaceSvg(document, unit, surface, assets))).png().toBuffer();
 }
 
-export async function renderPagePng(document: ComicDocument, unit: PresentationUnit, surface = unit.surfaces[0]) {
-  if (!surface) throw new Error(`${unit.id} has no output surface`);
-  return renderSurface(document, unit, surface, await assetDataByVersion(document));
+export function presentationUnitSurface(unit: PresentationUnit): PageSurface {
+  if (unit.kind !== "spread") {
+    const surface = unit.surfaces[0];
+    if (!surface) throw new Error(`${unit.id} has no output surface`);
+    return surface;
+  }
+  return {
+    id: `${unit.id}-presentation`,
+    role: "single",
+    geometry: { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height },
+  };
+}
+
+export async function renderPagePng(document: ComicDocument, unit: PresentationUnit, surface?: PageSurface) {
+  return renderSurface(document, unit, surface ?? presentationUnitSurface(unit), await assetDataByVersion(document));
 }
 
 export function createStructuredExportPayload(args: { document: ComicDocument; storyboardBeats: unknown; assetVersions: unknown; exportedAt?: string }) {

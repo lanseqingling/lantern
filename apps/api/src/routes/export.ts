@@ -25,9 +25,16 @@ export function registerExportRoutes(app: FastifyInstance) {
     const unit = document.units.find((item) => item.id === request.params.unitId);
     if (!unit) throw new AppError("not_found", "当前版本中不存在该漫画页。", 404);
     const bytes = await renderPagePng(document, unit);
+    const pageNumbers = unit.surfaces
+      .map((surface) => surface.pageNumber)
+      .filter((pageNumber): pageNumber is number => typeof pageNumber === "number")
+      .sort((a, b) => a - b);
+    const pageLabel = unit.kind === "spread" && pageNumbers.length > 1
+      ? `${pageNumbers[0]}-${pageNumbers.at(-1)}`
+      : `${pageNumbers[0] ?? 1}`;
     return reply
       .header("Content-Type", "image/png")
-      .header("Content-Disposition", `attachment; filename="${request.params.chapterId}-page-${unit.surfaces[0]?.pageNumber ?? 1}.png"`)
+      .header("Content-Disposition", `attachment; filename="${request.params.chapterId}-page-${pageLabel}.png"`)
       .header("Cache-Control", "no-store")
       .send(bytes);
   });

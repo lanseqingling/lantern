@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
 import { createDefaultWorkbench, loadWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@/packages/ui/src";
-import { apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
+import { apiDownloadPage, apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageDisplayMode } from "@/packages/shared/src";
 
@@ -93,6 +93,9 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     const unit = orderedUnits[index];
     return unit ? orderedUnitSurfaces(unit, document.reading.direction).map((surface) => ({ unit, surface })) : [];
   });
+  const downloadSpreadUnit = !isVertical && currentGroup?.trueSpread
+    ? orderedUnits[currentGroup.unitIndices[0] ?? -1]
+    : undefined;
   const atFirstPage = isVertical ? shownPageIndex === 0 : currentGroupIndex === 0;
   const atLastPage = isVertical ? shownPageIndex >= orderedUnits.length - 1 : currentGroupIndex >= displayGroups.length - 1;
   const editUrl = `/comics/${comicId}/chapters/${chapterId}?focus=${shownPageIndex}`;
@@ -141,8 +144,12 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     setDownloading(true);
     try {
       if (configuredRuntimeAdapter() === "demo") throw new Error("演示模式暂不支持导出，请切换到服务端模式后重试。");
-      for (const { unit, surface } of downloadSurfaces) await apiDownloadSurface(chapterId, unit.id, surface.id);
-      const numbers = downloadSurfaces.map(({ surface }) => surface.pageNumber).filter((number): number is number => typeof number === "number");
+      if (downloadSpreadUnit) await apiDownloadPage(chapterId, downloadSpreadUnit.id);
+      else for (const { unit, surface } of downloadSurfaces) await apiDownloadSurface(chapterId, unit.id, surface.id);
+      const numbers = (downloadSpreadUnit?.surfaces ?? downloadSurfaces.map(({ surface }) => surface))
+        .map((surface) => surface.pageNumber)
+        .filter((number): number is number => typeof number === "number")
+        .sort((a, b) => a - b);
       setNotice(numbers.length > 1 ? `第 ${numbers.join("、")} 页已开始下载` : `第 ${numbers[0] ?? shownPageIndex + 1} 页已开始下载`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "保存失败，请稍后重试");
@@ -185,7 +192,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}
         <div className="preview-save-tool">
           <button type="button" aria-label="下载选项" aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
-          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadSurfaces.length > 1 ? "下载当前物理页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
+          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadSpreadUnit ? "下载当前双页" : downloadSurfaces.length > 1 ? "下载当前物理页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
         </div>
       </nav>
       {notice ? <div className="preview-notice" role="status">{notice}</div> : null}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
-import { createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
+import { balloonCutCornerPoints, createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
@@ -208,6 +208,21 @@ test("reshape frame capability applies geometry and four-corner shape atomically
   assert.deepEqual(pageFrame?.type === "comic_frame" ? pageFrame.shape : undefined, shape);
 });
 
+test("frame border width accepts half-step values independently from its storyboard binding", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const result = dryRunEditorCapability("update_frame_border", { unitId: unit.id, frameId: frame.id, width: 1.5 }, {
+    fixture,
+    createId: (prefix) => `${prefix}-border`,
+    actor: "human",
+  });
+  const next = result.result.working.document.units[0].frames.find((candidate) => candidate.id === frame.id);
+  assert.deepEqual(result.commands.map((command) => command.type), ["set_frame_style"]);
+  assert.deepEqual(next?.border, { ...frame.border, width: 1.5 });
+  assert.deepEqual(next?.storyRefs, frame.storyRefs);
+});
+
 test("adding a presentation unit appends a valid blank page without changing existing frames", () => {
   const fixture = createInitialFixture();
   const previous = fixture.working.document.units.at(-1)!;
@@ -259,6 +274,7 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "reorder_frame",
     "resize_frame",
     "reshape_frame",
+    "update_frame_border",
     "set_frame_cross_page",
     "set_element_transform",
     "update_balloon",
@@ -644,7 +660,7 @@ test("multiple human capabilities plan one atomic ChangeSet without mutating the
   const plan = planEditorCapabilities([
     {
       id: "update_balloon",
-      input: { unitId: unit.id, frameId: frame.id, layerId: layer.id, elementId: balloon.id, changes: { shape: "thought" } },
+      input: { unitId: unit.id, frameId: frame.id, layerId: layer.id, elementId: balloon.id, changes: { transform: { ...balloon.transform, rotate: 28 }, shape: "thought", style: { ...balloon.style, fontSize: 22, strokeWidth: 4, writingMode: "vertical" } } },
     },
     { id: "update_dialogue", input: { dialogueId: balloon.dialogueId, content } },
   ], {
@@ -665,8 +681,50 @@ test("multiple human capabilities plan one atomic ChangeSet without mutating the
   assert.equal(result.working.revision, fixture.working.revision + 1);
   assert.ok(changed?.kind === "balloon");
   assert.equal(changed.shape, "thought");
+  assert.equal(changed.style.fontSize, 22);
+  assert.equal(changed.style.strokeWidth, 4);
+  assert.equal(changed.style.writingMode, "vertical");
+  assert.equal(changed.transform.rotate, 28);
   assert.equal(result.working.document.dialogues.find((dialogue) => dialogue.id === balloon.dialogueId)?.content, content);
   assert.deepEqual(fixture, before);
+});
+
+test("cut-corner dialogue gets a stable irregular octagon without a tail", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const layer = frame.layers.find((item) => item.kind === "text");
+  const balloon = layer?.elements.find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(layer && balloon);
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-cut-${++sequence}`, actor: "human" as const });
+  const result = dryRunEditorCapability("update_balloon", {
+    unitId: unit.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    changes: { shape: "cut_corner" },
+  }, context());
+  const changed = frameElements(result.result.working.document.units[0].frames[0]).find((element) => element.id === balloon.id);
+  assert.ok(changed?.kind === "balloon");
+  assert.equal(changed.shape, "cut_corner");
+  assert.ok(changed.cutCorners);
+  const points = balloonCutCornerPoints(changed);
+  assert.equal(points.length, 8);
+  assert.equal(points[0].x, changed.cutCorners.topLeft.x * 2);
+  assert.equal(points[2].y, changed.cutCorners.topRight.y * 2);
+  assert.equal(new Set(Object.values(changed.cutCorners).flatMap((corner) => [corner.x, corner.y])).size > 4, true);
+  assert.deepEqual(balloonCutCornerPoints(changed), points);
+  const rerolled = dryRunEditorCapability("update_balloon", {
+    unitId: unit.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    changes: { shape: "cut_corner" },
+  }, context()).result.working.document.units[0].frames[0];
+  const rerolledBalloon = frameElements(rerolled).find((element) => element.id === balloon.id);
+  assert.ok(rerolledBalloon?.kind === "balloon");
+  assert.notDeepEqual(rerolledBalloon.cutCorners, changed.cutCorners);
 });
 
 test("element appearance is an atomic human capability and remains disabled for Agent", () => {

@@ -113,9 +113,44 @@ test("export consumes the same render scene semantics", () => {
   assert.match(svg, /stroke-width="1.4"[^>]+vector-effect="non-scaling-stroke"/);
   assert.equal(svg.match(/vector-effect="non-scaling-stroke"/g)?.length, 2);
   assert.match(svg, /保持三端一致/);
-  assert.match(svg, />白。<\/tspan>/);
+  assert.match(svg, />最后一句对白<\/tspan>/);
+  assert.match(svg, />。<\/tspan>/);
   assert.match(svg, /data-scene-id="overlay-text"/);
   assert.doesNotMatch(svg, /hidden-effect/);
+  const cutCornerDocument = structuredClone(document);
+  const cutCornerLayer = cutCornerDocument.units[0].frames[0].layers.find((layer) => layer.kind === "text");
+  const cutCornerBalloon = cutCornerLayer?.elements.find((element) => element.kind === "balloon");
+  assert.ok(cutCornerBalloon?.kind === "balloon");
+  cutCornerBalloon.shape = "cut_corner";
+  const cutCornerSvg = renderSurfaceSvg(cutCornerDocument, cutCornerDocument.units[0], cutCornerDocument.units[0].surfaces[0], new Map([["asset-1-v1", "data:image/png;base64,AA=="]]));
+  assert.match(cutCornerSvg, /<polygon points="[^\"]+" fill="#fffdf8" stroke="#234567"/);
+});
+
+test("vertical dialogue export follows the workbench right-to-left column order", () => {
+  const document = renderFixture();
+  document.dialogues[0].content = "甲乙丙丁戊";
+  const unit = document.units[0];
+  const balloonNode = projectComicRenderScene(document, unit).elements
+    .find((node) => node.element.id === "balloon-1");
+  const balloon = balloonNode?.element;
+  assert.ok(balloon?.kind === "balloon");
+  balloon.style.writingMode = "vertical";
+
+  const svg = renderSurfaceSvg(document, unit, unit.surfaces[0]);
+  const balloonMarkup = svg.match(/<g data-scene-id="balloon-1"[^>]*>([\s\S]*?)<\/g>/)?.[1];
+  assert.ok(balloonMarkup);
+  const columns = [...balloonMarkup.matchAll(/<text x="([^"]+)" y="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)];
+
+  assert.equal(columns.length, 2);
+  assert.ok(Number(columns[0][1]) > Number(columns[1][1]));
+  assert.ok(balloonNode);
+  assert.ok(Math.abs((Number(columns[0][1]) + Number(columns[1][1])) / 2 - (balloonNode.geometry.x + balloonNode.geometry.width / 2)) < 1e-9);
+  assert.ok(Number(columns[1][2]) > Number(columns[0][2]));
+  assert.match(columns[0][3], />甲<\/tspan>.*>丙<\/tspan>/);
+  assert.match(columns[1][3], />丁<\/tspan>.*>戊<\/tspan>/);
+  assert.match(balloonMarkup, /dominant-baseline="central"/);
+  assert.match(balloonMarkup, /font-weight="720"/);
+  assert.doesNotMatch(balloonMarkup, /paint-order="stroke fill"/);
 });
 
 test("cross-page images, frames and balloons are projected into both physical surface exports", () => {

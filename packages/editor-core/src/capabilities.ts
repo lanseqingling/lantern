@@ -21,6 +21,7 @@ import {
   type UnitOverlayLayer,
   type WorkbenchFixture,
   type WorkspaceCommand,
+  createBalloonCutCorners,
   deriveLocalTransform,
   orderedUnitSurfaces,
   resolveLocalTransform,
@@ -1119,6 +1120,28 @@ const reshapeFrameCapability = defineCapability({
   },
 });
 
+const updateFrameBorderCapability = defineCapability({
+  id: "update_frame_border",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    width: z.number().min(0).max(24),
+  }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["frame_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["set_frame_style"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { frame } = findFrame(context, input.unitId, input.frameId);
+    return [{ type: "set_frame_style", unitId: input.unitId, frameId: input.frameId, border: { ...frame.border, width: input.width } }];
+  },
+});
+
 const setFrameCrossPageCapability = defineCapability({
   id: "set_frame_cross_page",
   version: 1,
@@ -1172,6 +1195,7 @@ const balloonChangesInputSchema = balloonElementSchema.pick({
   transform: true,
   tailTarget: true,
   shape: true,
+  cutCorners: true,
   style: true,
   overflow: true,
 }).partial().strict().refine((changes) => Object.keys(changes).length > 0, "balloon changes cannot be empty");
@@ -1197,7 +1221,10 @@ const updateBalloonCapability = defineCapability({
   execute(input, context) {
     const { element } = findLocatedElement(context, input);
     if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
-    return [{ type: "update_balloon", ...input }];
+    const changes = input.changes.shape === "cut_corner" && !input.changes.cutCorners
+      ? { ...input.changes, cutCorners: createBalloonCutCorners(`${element.id}:${context.createId("cut-corners")}`) }
+      : input.changes;
+    return [{ type: "update_balloon", ...input, changes }];
   },
 });
 
@@ -1671,6 +1698,7 @@ const capabilityRegistry = {
   reorder_frame: reorderFrameCapability,
   resize_frame: resizeFrameCapability,
   reshape_frame: reshapeFrameCapability,
+  update_frame_border: updateFrameBorderCapability,
   set_frame_cross_page: setFrameCrossPageCapability,
   set_element_transform: setElementTransformCapability,
   update_balloon: updateBalloonCapability,

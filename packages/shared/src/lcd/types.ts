@@ -199,13 +199,50 @@ export type TextElement = {
   name?: string;
 };
 
+export type BalloonCutCorners = {
+  topLeft: Point;
+  topRight: Point;
+  bottomRight: Point;
+  bottomLeft: Point;
+};
+
+export function createBalloonCutCorners(seed: string): BalloonCutCorners {
+  let state = Array.from(seed).reduce((hash, character) => Math.imul(hash ^ character.charCodeAt(0), 16_777_619), 2_166_136_261) >>> 0;
+  const next = () => {
+    state = (Math.imul(state ^ (state >>> 15), 2_246_822_519) + 3_266_489_917) >>> 0;
+    return Math.round((.055 + state % 76 / 1_000) * 1_000) / 1_000;
+  };
+  return {
+    topLeft: { x: next(), y: next() },
+    topRight: { x: next(), y: next() },
+    bottomRight: { x: next(), y: next() },
+    bottomLeft: { x: next(), y: next() },
+  };
+}
+
+export function balloonCutCornerPoints(balloon: Pick<BalloonElement, "id" | "cutCorners">): [Point, Point, Point, Point, Point, Point, Point, Point] {
+  const corners = balloon.cutCorners ?? createBalloonCutCorners(balloon.id);
+  const projected = (value: number) => Math.min(.36, value * 2);
+  return [
+    { x: projected(corners.topLeft.x), y: 0 },
+    { x: 1 - projected(corners.topRight.x), y: 0 },
+    { x: 1, y: projected(corners.topRight.y) },
+    { x: 1, y: 1 - projected(corners.bottomRight.y) },
+    { x: 1 - projected(corners.bottomRight.x), y: 1 },
+    { x: projected(corners.bottomLeft.x), y: 1 },
+    { x: 0, y: 1 - projected(corners.bottomLeft.y) },
+    { x: 0, y: projected(corners.topLeft.y) },
+  ];
+}
+
 export type BalloonElement = {
   id: string;
   kind: "balloon";
   dialogueId: string;
   transform: LocalTransform;
   tailTarget?: Point;
-  shape: "normal" | "thought" | "caption_box";
+  shape: "normal" | "thought" | "caption_box" | "cut_corner";
+  cutCorners?: BalloonCutCorners;
   style: {
     fontFamily: string;
     fontSize: number;
@@ -478,7 +515,7 @@ export type SpeechBalloonElement = CanvasViewBase & {
   linkedStoryboardBeatVersionId?: string;
   dialogueId: string;
   readingOrder: number;
-  content: { text: string; shape: BalloonElement["shape"]; tailTarget?: Point };
+  content: { text: string; shape: BalloonElement["shape"]; tailTarget?: Point; cutCorners?: BalloonCutCorners };
   style: BalloonElement["style"];
   appearance?: VisualAssetReference;
   layerId: string;
@@ -521,7 +558,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
       else if (element.kind === "balloon") elements.push({
         id: element.id, type: "speech_balloon", geometry, zIndex: frame.zIndex * 100 + layer.zIndex, layerId: layer.id, comicFrameId: frame.id,
         linkedStoryboardBeatId: primary?.storyboardBeatId ?? "unassigned", linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId ?? "unassigned-v1",
-        dialogueId: element.dialogueId, readingOrder: 1, content: { text: dialogueById.get(element.dialogueId) ?? "", shape: element.shape, tailTarget: element.tailTarget ? { x: frame.geometry.x + element.tailTarget.x * frame.geometry.width, y: frame.geometry.y + element.tailTarget.y * frame.geometry.height } : undefined },
+        dialogueId: element.dialogueId, readingOrder: 1, content: { text: dialogueById.get(element.dialogueId) ?? "", shape: element.shape, cutCorners: element.cutCorners, tailTarget: element.tailTarget ? { x: frame.geometry.x + element.tailTarget.x * frame.geometry.width, y: frame.geometry.y + element.tailTarget.y * frame.geometry.height } : undefined },
         style: element.style, appearance: element.appearance, visible: element.visible, name: element.name,
         location: { space: "frame", frameId: frame.id, layerId: layer.id },
       });
@@ -551,7 +588,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
         id: element.id, type: "speech_balloon", geometry, zIndex, layerId: layer.id, comicFrameId: anchorFrame?.id,
         linkedStoryboardBeatId: primary?.storyboardBeatId, linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId,
         dialogueId: element.dialogueId, readingOrder: 1,
-        content: { text: dialogueById.get(element.dialogueId) ?? "", shape: element.shape, tailTarget: element.tailTarget ? anchorFrame ? { x: anchorFrame.geometry.x + element.tailTarget.x * anchorFrame.geometry.width, y: anchorFrame.geometry.y + element.tailTarget.y * anchorFrame.geometry.height } : element.tailTarget : undefined },
+        content: { text: dialogueById.get(element.dialogueId) ?? "", shape: element.shape, cutCorners: element.cutCorners, tailTarget: element.tailTarget ? anchorFrame ? { x: anchorFrame.geometry.x + element.tailTarget.x * anchorFrame.geometry.width, y: anchorFrame.geometry.y + element.tailTarget.y * anchorFrame.geometry.height } : element.tailTarget : undefined },
         style: element.style, appearance: element.appearance, visible: element.visible, name: element.name, location,
       });
       else if (element.kind === "text") elements.push({

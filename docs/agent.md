@@ -201,7 +201,7 @@ Agent 上下文和 Candidate 摘要需要说明目标对象、采用的抠图或
 |---|---|---|---|---|---|---|
 | 核心 | 基础组织 | 创建、编辑和删除漫画与章节 | 通用 | `Comic / Chapter / Project` 持久化操作 | 已接入 | 未登记 |
 | 核心 | 基础组织 | 新增、命名和删除页面或滚动段，并修改滚动段比例 | 通用 | `PresentationUnit`；现有页面 Capability 组合 | 已接入 | 4 项已登记（禁用） |
-| 核心 | 画格编排 | 新增、删除、复制、移动和缩放常规矩形画格 | 通用 | `Frame.geometry / readingSequence`；保持基础间距和一次原子变更 | 已接入 | 5 项已登记（禁用） |
+| 核心 | 画格编排 | 新增、删除、复制、移动、缩放和编辑常规矩形画格 | 通用 | `Frame.geometry / border / readingSequence`；画格属性与分镜绑定独立编辑，并保持一次原子变更 | 已接入 | 6 项已登记（禁用） |
 | 核心 | 画格编排 | 使用少量布局预设快速形成页面骨架 | 通用 | 1-6 格常用模板形成一次原子结构变更 | 未接入 | 未登记 |
 | 核心 | 分镜 | 为每格创建和编辑画面描述 | 通用 | `StoryboardBeat / Frame.storyRefs` | 已接入 | 2 项已登记（禁用） |
 | 核心 | 格内图片 | 把上传图片或已有资产放入指定画格 | 通用 | `ResourceRef + ImageElement` 作为一次受控放置，并支持更换或移除实例 | 已接入 | 3 项已登记（禁用） |
@@ -209,14 +209,14 @@ Agent 上下文和 Candidate 摘要需要说明目标对象、采用的抠图或
 | 核心 | 格内图片 | 对指定格进行重画、扩图或局部精修 | 通用 | 混合：修图模型或 SDK 只处理当前格与选区，生成新 `AssetVersion` | 部分接入：旧任务仅支持整格 | 未登记 |
 | 核心 | 格内图片 | 调整格内图片取景 | 通用 | `ImageElement.crop`；平移、缩放、裁切和重置 | 已接入 | `set_art_crop`、`set_element_transform`（已登记，禁用） |
 | 核心 | 对白与气泡 | 新增、编辑和删除普通对白气泡 | 通用 | `Dialogue + BalloonElement` 作为一个复合能力 | 已接入 | 4 项已登记（禁用） |
-| 核心 | 对白与气泡 | 调整气泡位置、尺寸、尾巴和基础样式 | 通用 | `BalloonElement.transform / tailTarget / shape / style`；只提供少量预设 | 已接入 | `update_balloon`（已登记，禁用） |
+| 核心 | 对白与气泡 | 调整气泡位置、尺寸、旋转、尾巴和基础样式 | 通用 | `BalloonElement.transform / tailTarget / shape / cutCorners / style`；支持基础形状、稳定不规则的无尾切角八边形、横竖排、自动换行换列、字号和边框粗细 | 已接入 | `update_balloon`（已登记，禁用） |
 | 核心 | 资产与一致性 | 上传、摆放、整理和复用人物、场景与风格参考 | 通用 | `AssetVersion / ReferencePlacement / context snapshot` | 已接入 | 不适用：作为生成上下文 |
 | 核心 | 版本与输出 | 保存、预览、应用、撤销、重做和恢复最近保存版本 | 通用 | `ChangeSet / Candidate / Undo / Snapshot`；恢复保存版本产生新的工作稿 revision | 已接入 | `restore_workspace_version`（已登记，禁用） |
 | 核心 | 版本与输出 | 页漫单页/双页预览、条漫连续预览、最近保存快照的当前范围 PNG 和 LCD 下载 | 通用 | LCD 与固定资源版本的确定性渲染和导出 | 已接入 | 不适用 |
 | 增强 | 基础组织 | 复制和重排页面或滚动段 | 通用 | `reading.unitOrder` 与展示单元复制、ID 重映射 | 未接入 | 未登记 |
 | 增强 | 画格编排 | 根据分镜生成 2-3 个页面布局候选 | 通用 | 混合：模型规划布局意图，确定性布局器生成结构 Candidate | 部分接入：旧任务直接替换大范围文档 | 未登记 |
 | 增强 | 画格编排 | 显式允许叠格、取消叠格并调整画格前后层级 | 通用 | `layoutPolicy.frameOverlap / Frame.zIndex`；视觉层级与 `readingSequence` 独立 | 已接入 | 2 项已登记（禁用） |
-| 增强 | 画格表现 | 使用四角斜切、无框、线宽、圆角、基础形状、出血、整页主视觉和局部断框 | 通用 | `Frame.border / shape / mask / geometry`；四角斜切使用轴向锁定的四边形和包围盒重算，局部断框由出格对象或遮罩覆盖 | 部分接入：四角斜切 | `reshape_frame`（已登记，禁用） |
+| 增强 | 画格表现 | 使用四角斜切、无框、线宽、圆角、基础形状、出血、整页主视觉和局部断框 | 通用 | `Frame.border / shape / mask / geometry`；四角斜切使用轴向锁定的四边形和包围盒重算，局部断框由出格对象或遮罩覆盖 | 部分接入：四角斜切与线宽 | `reshape_frame`、`update_frame_border`（已登记，禁用） |
 | 增强 | 页面合成 | 让图片、气泡、文字或效果破格、跨格显示，并调整基础层级和可见性 | 通用 | Frame 锚定的 `UnitOverlay`；设为破格、转为纸面对象和收回画格保持视觉位置且可逆，不开放完整图层软件 | 部分接入：图片与对白可破格、转纸面和收回 | 4 项已登记（禁用） |
 | 增强 | 页面合成 | 创建和编辑无格图、纸面对白、旁白与装饰 | 通用 | Unit 锚定的 `UnitOverlay`；与无框 Frame 明确区分 | 已接入无格图、纸面对白和置顶纸面旁白 | 7 项已登记（禁用） |
 | 增强 | 文字 | 使用旁白、说明字和无气泡对白 | 通用 | 旁白使用无 surface 约束的 `narration` TextElement；说明字和格内无气泡对白仍按所在范围建模 | 部分接入：纸面旁白可创建、编辑、复制和删除 | `create_narration`、`update_narration`、`duplicate_narration`、`delete_narration`（已登记，禁用） |

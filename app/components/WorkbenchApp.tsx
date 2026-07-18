@@ -125,6 +125,17 @@ const noSelection: Selection = { type: "none", label: "未选择对象" };
 function ComicMenuGroup({ label, children }: { label: string; children: ReactNode }) {
   return <div className="comic-menu-group" aria-label={label}><MenuSection>{children}</MenuSection></div>;
 }
+
+function NumberStepper({ ariaLabel, value, step = 1, onChange, onAdjust }: { ariaLabel: string; value: string; step?: number; onChange: (value: string) => void; onAdjust: (delta: number) => void }) {
+  const decimal = !Number.isInteger(step);
+  const sanitize = (raw: string) => {
+    if (!decimal) return raw.replace(/[^0-9]/g, "");
+    const cleaned = raw.replace(/[^0-9.]/g, "");
+    const [whole = "", ...fraction] = cleaned.split(".");
+    return fraction.length ? `${whole}.${fraction.join("")}` : whole;
+  };
+  return <div className="font-size-stepper"><input type="text" inputMode={decimal ? "decimal" : "numeric"} aria-label={ariaLabel} value={value} onChange={(event) => onChange(sanitize(event.target.value))} /><span><button type="button" aria-label={`${ariaLabel}增加${step}`} onClick={() => onAdjust(step)}>＋</button><button type="button" aria-label={`${ariaLabel}减少${step}`} onClick={() => onAdjust(-step)}>−</button></span></div>;
+}
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 // Keep new references clear of the left creation drawer while still close enough
 // to be used alongside the page.
@@ -146,6 +157,7 @@ const canvasAssetSaveTypeOptions: Array<{ value: CanvasAssetSaveKind; label: str
 const balloonStyleOptions = [
   { value: "normal", label: "对话气泡" },
   { value: "thought", label: "无尾气泡" },
+  { value: "cut_corner", label: "切角对白" },
   { value: "caption_box", label: "方框对白" },
   { value: "thought_balloon", label: "思考气泡", disabled: true },
   { value: "burst_balloon", label: "喊叫气泡", disabled: true },
@@ -784,7 +796,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const stageRect = stage.getBoundingClientRect();
       const elementRect = element.getBoundingClientRect();
       const width = 226;
-      const height = selection.type === "text" ? 214 : 228;
+      const height = selection.type === "text" ? 214 : 330;
       const gap = 12;
       const candidates = [
         { x: elementRect.right - stageRect.left + gap, y: elementRect.top - stageRect.top },
@@ -1439,8 +1451,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       if (patch.tailTarget) changes.tailTarget = patch.tailTarget;
       if (patch.geometry && frame) changes.transform = deriveLocalTransform(frame.geometry, patch.geometry as SpeechBalloonElement["geometry"]);
       const content = patch.content as SpeechBalloonElement["content"] | undefined;
-      if (content?.shape) changes.shape = content.shape;
+      const style = patch.style as SpeechBalloonElement["style"] | undefined;
+      if (content?.shape && content.shape !== element.content.shape) changes.shape = content.shape;
+      if (content?.cutCorners && JSON.stringify(content.cutCorners) !== JSON.stringify(element.content.cutCorners)) changes.cutCorners = content.cutCorners;
       if (content?.tailTarget && frame) changes.tailTarget = { x: (content.tailTarget.x - frame.geometry.x) / frame.geometry.width, y: (content.tailTarget.y - frame.geometry.y) / frame.geometry.height };
+      if (style && (style.fontSize !== element.style.fontSize || style.strokeWidth !== element.style.strokeWidth || style.writingMode !== element.style.writingMode)) changes.style = style;
       const requests: EditorCapabilityRequest[] = Object.keys(changes).length ? [{ id: "update_balloon", input: { unitId, frameId: element.location.space === "frame" ? element.location.frameId : undefined, layerId: element.layerId, elementId, changes } }] : [];
       if (content && content.text !== element.content.text) requests.push({ id: "update_dialogue", input: { dialogueId: element.dialogueId, content: content.text } });
       if (typeof patch.zIndex === "number" && element.location.space === "frame") requests.push({ id: "reorder_layer", input: { unitId, frameId: element.location.frameId, layerId: element.layerId, zIndex: patch.zIndex } });
@@ -2018,7 +2033,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (selection.type === "speech_balloon") {
       const balloon = selectedElement as SpeechBalloonElement | undefined;
       const value = editDraft.dialogue ?? balloon?.content.text ?? "";
-      if (balloon?.dialogueId) commitCapability("update_dialogue", { dialogueId: balloon.dialogueId, content: value }, "编辑气泡对白");
+      if (balloon && selection.pageId) {
+        const parsedFontSize = Number(editDraft.fontSize ?? balloon.style.fontSize);
+        const parsedStrokeWidth = Number(editDraft.strokeWidth ?? balloon.style.strokeWidth);
+        const fontSize = Number.isFinite(parsedFontSize) ? clampValue(parsedFontSize, 6, 240) : balloon.style.fontSize;
+        const strokeWidth = Number.isFinite(parsedStrokeWidth) ? clampValue(parsedStrokeWidth, 0, 20) : balloon.style.strokeWidth;
+        commitCapabilities(capabilitiesForElementPatch(selection.pageId, balloon.id, {
+          content: { ...balloon.content, text: value },
+          style: { ...balloon.style, fontSize, strokeWidth },
+        }), "编辑对白与气泡样式");
+      }
     } else if (selection.type === "text" && selectedElement?.type === "text" && selection.pageId) {
       const content = editDraft.narration ?? selectedElement.content.text;
       const parsedSize = Number(editDraft.fontSize ?? selectedElement.style.fontSize);
@@ -2063,6 +2087,38 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setEditDraft((draft) => ({ ...draft, fontSize: String(next) }));
   };
 
+  const adjustBalloonStyleNumber = (field: "fontSize" | "strokeWidth", delta: number) => {
+    if (selectedElement?.type !== "speech_balloon") return;
+    const fallback = selectedElement.style[field];
+    const current = Number(editDraft[field] ?? fallback);
+    const next = clampValue(Number.isFinite(current) ? current + delta : fallback + delta, field === "fontSize" ? 6 : 0, field === "fontSize" ? 240 : 20);
+    setEditDraft((draft) => ({ ...draft, [field]: String(next) }));
+  };
+
+  const adjustFrameBorderWidth = (delta: number) => {
+    if (!editingStoryboardFrame) return;
+    const current = Number(editDraft.frameBorderWidth ?? editingStoryboardFrame.border.width);
+    const next = clampValue(Number.isFinite(current) ? current + delta : editingStoryboardFrame.border.width + delta, 0, 24);
+    setEditDraft((draft) => ({ ...draft, frameBorderWidth: String(next) }));
+  };
+
+  const applyFrameBorderEdit = () => {
+    if (!editingStoryboardTarget || !editingStoryboardFrame) return;
+    const parsedWidth = Number(editDraft.frameBorderWidth ?? editingStoryboardFrame.border.width);
+    if (!Number.isFinite(parsedWidth)) {
+      setToast("请输入有效的边框粗细");
+      return;
+    }
+    const width = clampValue(parsedWidth, 0, 24);
+    if (commitCapability("update_frame_border", {
+      unitId: editingStoryboardTarget.unitId,
+      frameId: editingStoryboardTarget.frameId,
+      width,
+    }, "调整画格边框")) {
+      setEditDraft((draft) => ({ ...draft, frameBorderWidth: String(width) }));
+    }
+  };
+
   const cropImage = (direction: "in" | "out" | "left" | "right" | "up" | "down" | "reset") => {
     if (!selectedElement || selectedElement.type !== "image" || !selection.pageId) return;
     const crop = selectedElement.crop ?? { x: 0, y: 0, width: 1, height: 1 };
@@ -2085,8 +2141,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const beginCrop = () => {
-    if (selection.type === "speech_balloon" || selection.type === "text") {
-      setToast(selection.type === "text" ? "旁白不支持裁切；请使用移动模式调整位置和换行宽度" : "对白气泡不支持裁切；请使用移动模式调整位置、大小和尖尾");
+    if (selection.type === "speech_balloon") {
+      setInspectorOpen(false);
+      setObjectInteractionMode("crop");
+      setToast("已进入气泡旋转模式：拖动右下角编辑点旋转");
+      return;
+    }
+    if (selection.type === "text") {
+      setToast("旁白不支持裁切；请使用移动模式调整位置和换行宽度");
       return;
     }
     const { frame, image: frameImage } = frameAndImageForSelection(selection);
@@ -3019,6 +3081,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     else deleteDialogueBalloon(comicDeleteTarget.selection);
   };
   const editingStoryboardBeat = editingStoryboardBeatId ? state.fixture.storyboardBeats.find((beat) => beat.id === editingStoryboardBeatId) : undefined;
+  const editingStoryboardFrame = editingStoryboardTarget
+    ? workingPages.find((page) => page.id === editingStoryboardTarget.unitId)?.elements.find((element): element is ComicFrameElement => element.type === "comic_frame" && element.id === editingStoryboardTarget.frameId)
+    : undefined;
   const editorStyle: CSSProperties | undefined = editingStoryboardTarget && toolbarPlacement
     ? { left: toolbarPlacement.x, top: toolbarPlacement.y, right: "auto", bottom: "auto" }
     : undefined;
@@ -3323,7 +3388,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         {canvasMode === "focus" && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
           <button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("创作"); setAgentOpen(true); }}><Icon name="ai" /></button>
           <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : selection.type === "text" ? "开启或关闭旁白移动和换行宽度调整" : selection.type === "image" ? "开启或关闭纸面图片移动和缩放" : "开启或关闭移动画格"} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay")) || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
-          <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? "旁白不支持裁切" : "裁切格内图片并调整画格角度"} disabled={selection.type === "text" || (selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame"))} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
+          <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? "旁白不支持裁切" : selection.type === "speech_balloon" ? "旋转对白气泡" : "裁切格内图片并调整画格角度"} disabled={selection.type === "text" || (selection.type !== "speech_balloon" && selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame"))} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
           <button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selection.type === "text" ? "编辑旁白文字和字号" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button>
           <button type="button" aria-label="管理当前对象" aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
         </ObjectToolbar> : null}
@@ -3347,7 +3412,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           </article>;
         })}
 
-        {inspectorOpen && editingStoryboardTarget && editorStyle ? <aside className="object-inspector near-selection" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{editingStoryboardBeat ? "编辑单格画面" : "创建单格画面"} · {editingStoryboardTarget.label}</span><button type="button" aria-label="关闭单格画面编辑" onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><label>标题<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder="例如：空站来信" onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>描述<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder="描述这一格的场景、人物、动作、情绪或叙事作用" onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? "保存" : "创建并绑定"}</button></aside> : null}
+        {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />编辑画格 · {editingStoryboardTarget.label}</span><button type="button" aria-label="关闭画格编辑" onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><section className="frame-editor-section"><strong>分镜条目</strong><label>标题<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder="例如：空站来信" onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>描述<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder="描述这一格的场景、人物、动作、情绪或叙事作用" onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? "保存" : "创建并绑定"}</button></section><section className="frame-editor-section"><strong>画格</strong><label>边框粗细<NumberStepper ariaLabel="画格边框粗细" step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>保存</button></section></aside> : null}
 
         {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label="关闭对象编辑器" onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>拖动图片调整取景，滚轮或下面动作缩放；拖动画格四角可沿横向或纵向调整边线角度。</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>放大</button><button type="button" onClick={() => cropImage("out")}>缩小</button><button type="button" onClick={() => cropImage("left")}>左移</button><button type="button" onClick={() => cropImage("up")}>上移</button><button type="button" onClick={() => cropImage("down")}>下移</button><button type="button" onClick={() => cropImage("right")}>右移</button><button type="button" onClick={() => cropImage("reset")}>重置取景</button></div><button className="text-edit-link" type="button" disabled={!selectedCropFrame || selectedCropFrame.shape.kind === "rect"} onClick={resetFrameShape}>重置画格角度</button><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: `画格 ${selectedElement.comicFrameId.split("-").pop()}` })}>回到画格</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"}</button></> : null}</aside> : null}
       </CanvasStage>
@@ -3373,7 +3438,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "image", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />移除图片</span></button></ComicMenuGroup>
         </> : null}
         {comicContextMenu.target.type === "speech_balloon" && contextTargetElement?.type === "speech_balloon" ? <>
-          <ComicMenuGroup label="对象"><button type="button" onClick={() => duplicateDialogueBalloon(comicContextMenu.target)}><span><Icon name="copy" />复制对白</span></button></ComicMenuGroup>
+          <ComicMenuGroup label="对象"><button type="button" onClick={() => duplicateDialogueBalloon(comicContextMenu.target)}><span><Icon name="copy" />复制对白</span></button><button type="button" onClick={() => { if (!comicContextMenu.target.pageId) return; commitCapabilities(capabilitiesForElementPatch(comicContextMenu.target.pageId, contextTargetElement.id, { style: { ...contextTargetElement.style, writingMode: contextTargetElement.style.writingMode === "vertical" ? "horizontal" : "vertical" } }), contextTargetElement.style.writingMode === "vertical" ? "转为横向对白" : "转为竖向对白"); setComicContextMenu(null); }}><span><Icon name="text" />{contextTargetElement.style.writingMode === "vertical" ? "转为横向" : "转为竖向"}</span></button></ComicMenuGroup>
           <MenuDivider />
           {contextBalloonPurpose === "cross_page" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="collapse" />取消跨页</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetUnit?.kind === "spread" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertBalloonToCrossPage(comicContextMenu.target)}><span><Icon name="pageSpread" />设为跨页对白</span></button></ComicMenuGroup><MenuDivider /></> : null}
           {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => promoteSelectionToOverlay(comicContextMenu.target)}><span><Icon name="expand" />设为破格</span></button><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面对白</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetElement.location.anchor.type === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面对白</span></button><button type="button" onClick={() => returnSelectionToFrame(comicContextMenu.target)}><span><Icon name="collapse" />收回画格</span></button></ComicMenuGroup><MenuDivider /></> : null}
@@ -3398,8 +3463,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
       {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>请输入文本</div> : null}
 
-      {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />对白 {String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭对白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>对白<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft({ dialogue: event.target.value })} /></label><label>文字样式<CustomSelect ariaLabel="文字样式" className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
-      {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />旁白 {String(selectedNarrationNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭旁白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>文字<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>字号<div className="font-size-stepper"><input type="text" inputMode="numeric" aria-label="旁白字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(event) => setEditDraft((current) => ({ ...current, fontSize: event.target.value.replace(/[^0-9]/g, "") }))} /><span><button type="button" aria-label="字号加一" onClick={() => adjustNarrationFontSize(1)}>＋</button><button type="button" aria-label="字号减一" onClick={() => adjustNarrationFontSize(-1)}>−</button></span></div></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
+      {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />对白 {String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭对白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>对白<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>文字样式<CustomSelect ariaLabel="文字样式" className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>字号<NumberStepper ariaLabel="对话字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>边框粗细<NumberStepper ariaLabel="气泡边框粗细" step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
+      {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />旁白 {String(selectedNarrationNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭旁白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>文字<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>字号<NumberStepper ariaLabel="旁白字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
 
       <div className="canvas-global-actions" aria-label="全局入口"><button type="button" className="global-icon-button" aria-label="用户页" onClick={() => setToast("个人中心即将支持")}><Icon name="user" /></button><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => setToast("全局设置即将支持")}><Icon name="settings" /></button></div>
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label="Agent 对话">

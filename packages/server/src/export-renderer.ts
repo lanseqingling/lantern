@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "../../shared/src";
-import { projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "../../shared/src";
+import { balloonCutCornerPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "../../shared/src";
 import { prisma } from "./db";
 import { getObject, putObject } from "./object-storage";
 
@@ -43,26 +43,49 @@ function renderAppearance(appearance: { assetVersionId: string } | undefined, ge
 const textAnchor = (align: "left" | "center" | "right" | undefined) => align === "center" ? "middle" : align === "right" ? "end" : "start";
 const textX = (geometry: Geometry, align: "left" | "center" | "right" | undefined) => align === "center" ? geometry.x + geometry.width / 2 : align === "right" ? geometry.x + geometry.width : geometry.x;
 
-function renderTextContent(value: string, geometry: Geometry, style: TextElement["style"] | BalloonElement["style"], color: string, align: "left" | "center" | "right" | undefined = "center", projectedStrokeWidth?: number) {
+type TextRenderOptions = {
+  align?: "left" | "center" | "right";
+  fontWeight?: number;
+  paddingX?: number;
+  paddingY?: number;
+  stroke?: { color: string; width: number };
+  verticalFlow?: "lr" | "rl";
+};
+
+function renderTextContent(value: string, geometry: Geometry, style: TextElement["style"] | BalloonElement["style"], color: string, options: TextRenderOptions = {}) {
+  const { align = "center", paddingX = 0, paddingY = 0, stroke, verticalFlow = "lr" } = options;
   const vertical = style.writingMode === "vertical";
   const fontFamily = escapeXml(style.fontFamily);
-  const fontWeight = "fontWeight" in style && style.fontWeight ? ` font-weight="${style.fontWeight}"` : "";
-  const strokeWidth = projectedStrokeWidth ?? ("strokeWidth" in style ? style.strokeWidth : undefined);
-  const textStroke = "stroke" in style && style.stroke && strokeWidth
-    ? ` stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill"`
+  const weight = options.fontWeight ?? ("fontWeight" in style ? style.fontWeight : undefined);
+  const fontWeight = weight ? ` font-weight="${weight}"` : "";
+  const textStroke = stroke
+    ? ` stroke="${escapeXml(stroke.color)}" stroke-width="${stroke.width}" stroke-linejoin="round" paint-order="stroke fill"`
     : "";
+  const contentGeometry = {
+    x: geometry.x + paddingX,
+    y: geometry.y + paddingY,
+    width: Math.max(1, geometry.width - paddingX * 2),
+    height: Math.max(1, geometry.height - paddingY * 2),
+  };
   if (vertical) {
-    const maxRows = Math.max(1, Math.floor(geometry.height / Math.max(1, style.fontSize * 1.05)));
+    const characterAdvance = style.fontSize * 1.05;
+    const columnAdvance = style.fontSize * 1.25;
+    const maxRows = Math.max(1, Math.floor(contentGeometry.height / Math.max(1, characterAdvance)));
     const columns = textLines(value, maxRows);
     return columns.map((column, columnIndex) => {
-      const x = geometry.x + style.fontSize * .55 + columnIndex * style.fontSize * 1.2;
-      return `<text x="${x}" y="${geometry.y + style.fontSize}" text-anchor="middle" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${Array.from(column).map((char, index) => `<tspan x="${x}" dy="${index ? style.fontSize * 1.05 : 0}">${escapeXml(char)}</tspan>`).join("")}</text>`;
+      const characters = Array.from(column);
+      const columnOffset = (columns.length - 1) * columnAdvance / 2;
+      const x = verticalFlow === "rl"
+        ? contentGeometry.x + contentGeometry.width / 2 + columnOffset - columnIndex * columnAdvance
+        : contentGeometry.x + contentGeometry.width / 2 - columnOffset + columnIndex * columnAdvance;
+      const y = contentGeometry.y + contentGeometry.height / 2 - Math.max(0, characters.length - 1) * characterAdvance / 2;
+      return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${characters.map((char, index) => `<tspan x="${x}" dy="${index ? characterAdvance : 0}">${escapeXml(char)}</tspan>`).join("")}</text>`;
     }).join("");
   }
-  const maxChars = Math.max(1, Math.floor(geometry.width / Math.max(1, style.fontSize * 0.72)));
+  const maxChars = Math.max(1, Math.floor(contentGeometry.width / Math.max(1, style.fontSize * 0.72)));
   const lines = textLines(value, maxChars);
-  const x = textX(geometry, align);
-  const startY = geometry.y + Math.max(style.fontSize, (geometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize);
+  const x = textX(contentGeometry, align);
+  const startY = contentGeometry.y + Math.max(style.fontSize, (contentGeometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize);
   return `<text x="${x}" y="${startY}" text-anchor="${textAnchor(align)}" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text>`;
 }
 
@@ -72,8 +95,11 @@ function renderBalloonShell(element: BalloonElement, geometry: Geometry) {
   const tail = projectBalloonTail(element);
   const tailFill = tail ? `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y} Z` : "";
   const tailOutline = tail ? `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y}` : "";
+  const cutCornerPoints = element.shape === "cut_corner" ? balloonCutCornerPoints(element).map((point) => `${point.x * 100},${point.y * 100}`).join(" ") : undefined;
   const shape = element.shape === "caption_box"
     ? `<rect x="1.5" y="1.5" width="97" height="97" rx="3" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" vector-effect="non-scaling-stroke"/>`
+    : cutCornerPoints
+      ? `<polygon points="${cutCornerPoints}" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`
     : `<ellipse cx="50" cy="50" rx="48" ry="46" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" vector-effect="non-scaling-stroke"/>`;
   const tailShape = tail ? `<path d="${tailFill}" fill="${escapeXml(style.fill)}"/><path d="${tailOutline}" fill="none" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.tail}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><ellipse cx="50" cy="50" rx="48" ry="46" fill="${escapeXml(style.fill)}"/>` : "";
   return `<svg x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 100 100" overflow="visible" preserveAspectRatio="none">${shape}${tailShape}</svg>`;
@@ -93,9 +119,13 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>) {
   }
   if (element.kind === "balloon") {
     const shell = renderAppearance(element.appearance, geometry, assets) ?? renderBalloonShell(element, geometry);
-    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${shell}${renderTextContent(node.dialogueText ?? "", geometry, element.style, element.style.textColor, "center")}</g>`;
+    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${shell}${renderTextContent(node.dialogueText ?? "", geometry, element.style, element.style.textColor, { align: "center", fontWeight: 720, paddingX: 7, paddingY: 5, verticalFlow: "rl" })}</g>`;
   }
-  if (element.kind === "text") return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, element.style.align, projectTextStrokeWidth(element))}</g>`;
+  if (element.kind === "text") {
+    const strokeWidth = projectTextStrokeWidth(element);
+    const stroke = element.style.stroke && strokeWidth ? { color: element.style.stroke, width: strokeWidth } : undefined;
+    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, { align: element.style.align, stroke, verticalFlow: "lr" })}</g>`;
+  }
   if (element.assetVersionId) {
     const data = assets.get(element.assetVersionId); if (!data) return "";
     return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" preserveAspectRatio="none" opacity="${element.opacity ?? 1}"${clip}${transform}/>`;

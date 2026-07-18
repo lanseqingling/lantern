@@ -31,10 +31,17 @@ const balloonStyleSchema = z.object({
   fontFamily: z.string(), fontSize: z.number().positive(), textColor: z.string(), fill: z.string(), stroke: z.string(),
   strokeWidth: z.number().nonnegative(), writingMode: z.enum(["horizontal", "vertical"]).optional(),
 });
+const balloonCutCornerSchema = z.object({ x: z.number().min(.03).max(.18), y: z.number().min(.03).max(.18) });
+export const balloonCutCornersSchema = z.object({
+  topLeft: balloonCutCornerSchema,
+  topRight: balloonCutCornerSchema,
+  bottomRight: balloonCutCornerSchema,
+  bottomLeft: balloonCutCornerSchema,
+});
 export const balloonElementSchema = z.object({
   id: z.string().min(1), kind: z.literal("balloon"), dialogueId: z.string().min(1), transform: localTransformSchema,
   tailTarget: z.object({ x: z.number(), y: z.number() }).optional(),
-  shape: z.enum(["normal", "thought", "caption_box"]), style: balloonStyleSchema,
+  shape: z.enum(["normal", "thought", "caption_box", "cut_corner"]), cutCorners: balloonCutCornersSchema.optional(), style: balloonStyleSchema,
   appearance: visualAssetReferenceSchema.optional(), overflow: overflowSchema.optional(), ...visibilitySchema,
 });
 const effectElementSchema = z.object({

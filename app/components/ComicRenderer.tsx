@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@/packages/shared/src";
-import { frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@/packages/shared/src";
+import { balloonCutCornerPoints, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@/packages/shared/src";
 import type { Selection } from "@/app/lib/workbench-state";
 import { snapFrameCornerToNeighborParallel, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 
@@ -11,7 +11,7 @@ type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
 export type ComicContextPoint = { clientX: number; clientY: number; canvasX: number; canvasY: number };
 type DragState = {
-  mode: "frame_move" | "frame_resize" | "frame_corner" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_tail" | "text_move" | "text_resize";
+  mode: "frame_move" | "frame_resize" | "frame_corner" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_rotate" | "balloon_tail" | "text_move" | "text_resize";
   elementId: string;
   frameId?: string;
   anchorGeometry?: Geometry;
@@ -25,6 +25,7 @@ type DragState = {
   cornerIndex?: FrameCornerIndex;
   axis?: FrameCornerAxis;
   startTransform?: LocalTransform;
+  minimumWidth?: number;
   startTailTarget?: Point;
   startCrop?: { x: number; y: number; width: number; height: number };
   moved?: boolean;
@@ -56,6 +57,8 @@ type ComicRendererProps = {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const minimumFrameWidth = 40;
+const minimumFrameHeight = 32;
 const rectsOverlap = (a: Geometry, b: Geometry) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 0.5 && Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > 0.5;
 const containsGeometry = (bounds: Geometry, geometry: Geometry) => geometry.x >= bounds.x && geometry.y >= bounds.y && geometry.x + geometry.width <= bounds.x + bounds.width && geometry.y + geometry.height <= bounds.y + bounds.height;
 const pointInPolygon = (point: Point, points: Point[]) => points.reduce((inside, current, index) => {
@@ -336,6 +339,14 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       };
       if (snapped.guides.length) setSnapGuides({ edgeGuides: snapped.guides });
       patch = { transform };
+    } else if (drag.mode === "balloon_rotate" && drag.startTransform && drag.startSceneGeometry) {
+      const centerX = bounds.left + (drag.startSceneGeometry.x + drag.startSceneGeometry.width / 2) / unit.canvas.width * bounds.width;
+      const centerY = bounds.top + (drag.startSceneGeometry.y + drag.startSceneGeometry.height / 2) / unit.canvas.height * bounds.height;
+      const startAngle = Math.atan2(drag.startY - centerY, drag.startX - centerX);
+      const currentAngle = Math.atan2(event.clientY - centerY, event.clientX - centerX);
+      const angleDelta = (currentAngle - startAngle + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+      const rotate = Math.round(((drag.startTransform.rotate ?? 0) + angleDelta * 180 / Math.PI) * 10) / 10;
+      patch = { transform: { ...drag.startTransform, rotate } };
     } else if ((drag.mode === "balloon_move" || drag.mode === "text_move") && drag.startTransform) {
       const anchor = drag.anchorGeometry; if (!anchor) return;
       const offsetX = drag.frameId ? dx / anchor.width : dx;
@@ -377,7 +388,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       patch = { transform };
     } else if ((drag.mode === "balloon_resize" || drag.mode === "text_resize") && drag.startTransform) {
       const anchor = drag.anchorGeometry; if (!anchor) return;
-      const minWidth = drag.frameId ? .12 : unit.canvas.width * .08;
+      const minWidth = drag.mode === "balloon_resize" && drag.minimumWidth !== undefined ? drag.minimumWidth : drag.frameId ? .12 : unit.canvas.width * .08;
       const minHeight = drag.frameId ? .08 : unit.canvas.height * .05;
       const coordinateWidth = drag.frameId ? 1 : anchor.width;
       const coordinateHeight = drag.frameId ? 1 : anchor.height;
@@ -416,9 +427,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       patch = { geometry };
     } else if (drag.mode === "frame_resize" && drag.startGeometry && drag.frameId) {
       const start = drag.startGeometry;
-      const rawGeometry = { ...start, width: clamp(start.width + dx, 120, unit.canvas.width - start.x), height: clamp(start.height + dy, 100, unit.canvas.height - start.y) };
+      const rawGeometry = { ...start, width: clamp(start.width + dx, minimumFrameWidth, unit.canvas.width - start.x), height: clamp(start.height + dy, minimumFrameHeight, unit.canvas.height - start.y) };
       const snapped = snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold);
-      const snappedAllowed = snapped.geometry.width >= 120 && snapped.geometry.height >= 100 && frameGeometryAllowed(drag.frameId, snapped.geometry);
+      const snappedAllowed = snapped.geometry.width >= minimumFrameWidth && snapped.geometry.height >= minimumFrameHeight && frameGeometryAllowed(drag.frameId, snapped.geometry);
       const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
       if (!frameGeometryAllowed(drag.frameId, geometry)) return;
       if (snappedAllowed && snapped.guides.length) setSnapGuides({ edgeGuides: snapped.guides });
@@ -431,7 +442,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const drag = dragRef.current; if (!drag) return;
     if (drag.moved) { suppressClick.current = true; window.setTimeout(() => { suppressClick.current = false; }, 0); }
     const patch = draftsRef.current[drag.elementId];
-    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_corner" ? "调整画格角度" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : drag.mode === "text_resize" ? "调整旁白换行宽度" : drag.mode === "text_move" ? "移动旁白" : "移动画格";
+    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_corner" ? "调整画格角度" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_rotate" ? "旋转对白气泡" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : drag.mode === "text_resize" ? "调整旁白换行宽度" : drag.mode === "text_move" ? "移动旁白" : "移动画格";
     if (patch) {
       if (drag.mode === "frame_move" || drag.mode === "frame_resize" || drag.mode === "frame_corner") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
       else onCommitElement?.(unit.id, drag.elementId, patch, label);
@@ -558,21 +569,25 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const tail = projectBalloonTail(balloon);
       const strokeWidths = projectBalloonStrokeWidths(balloon);
       const paths = tail ? tailPaths(tail) : undefined;
+      const cutCornerPoints = balloon.shape === "cut_corner" ? balloonCutCornerPoints(balloon).map((point) => `${point.x * 100},${point.y * 100}`).join(" ") : undefined;
       const localTailTip = tail ? { x: balloon.transform.x + tail.tip.x / 100 * balloon.transform.width, y: balloon.transform.y + tail.tip.y / 100 * balloon.transform.height } : undefined;
       const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
       const coordinateBounds = nodeCoordinateBounds(node, frame);
+      const oneCharacterWidth = Math.max(balloon.style.fontSize * 1.65, balloon.style.strokeWidth * 2 + 8);
+      const minimumWidth = Math.min(balloon.transform.width, frame ? oneCharacterWidth / frame.geometry.width : oneCharacterWidth);
       return <button type="button" className={`lcd-balloon shape-${balloon.shape} ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(balloon.id) ? "multi-selected" : ""}`} data-element-id={balloon.id} data-page-id={unit.id} key={balloon.id}
-        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), color: balloon.style.textColor, fontFamily: balloon.style.fontFamily, fontSize: `${balloon.style.fontSize / unit.canvas.width * 100}cqw`, writingMode: balloon.style.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb" }}
+        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), zIndex: selected && interactionMode === "crop" ? 2_147_483_646 : node.zIndex, color: balloon.style.textColor, fontFamily: balloon.style.fontFamily, fontSize: `${balloon.style.fontSize / unit.canvas.width * 100}cqw`, writingMode: balloon.style.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb", textOrientation: balloon.style.writingMode === "vertical" ? "upright" : undefined }}
         onClick={(event) => { event.stopPropagation(); if (!suppressClick.current) onSelect?.(balloonSelection); }}
         onDoubleClick={(event) => doubleClick(event, balloonSelection)}
         onContextMenu={(event) => contextFor(event, balloonSelection)}
         onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, balloonSelection); }}>
         {appearanceSrc ? <img className="balloon-appearance" src={appearanceSrc} alt="" draggable={false} /> : <svg className="balloon-shape" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {balloon.shape === "caption_box" ? <rect className="balloon-outline" x="1.5" y="1.5" width="97" height="97" rx="3" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} /> : <ellipse className="balloon-outline" cx="50" cy="50" rx="48" ry="46" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} />}
+          {balloon.shape === "caption_box" ? <rect className="balloon-outline" x="1.5" y="1.5" width="97" height="97" rx="3" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} /> : balloon.shape === "cut_corner" && cutCornerPoints ? <polygon className="balloon-outline" points={cutCornerPoints} vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline, strokeLinejoin: "round" }} /> : <ellipse className="balloon-outline" cx="50" cy="50" rx="48" ry="46" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} />}
           {tail && paths ? <><path className="balloon-tail-fill" d={paths.fill} style={{ fill: balloon.style.fill }} /><path className="balloon-tail-outline" d={paths.outline} vectorEffect="non-scaling-stroke" style={{ stroke: balloon.style.stroke, strokeWidth: strokeWidths.tail }} /><ellipse className="balloon-mask" cx="50" cy="50" rx="48" ry="46" style={{ fill: balloon.style.fill }} /></> : null}
         </svg>}
         <span className="balloon-content">{node.dialogueText ?? ""}</span>
-        {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label="调整气泡大小" onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform }, balloonSelection)}/>{tail && localTailTip ? <span className="balloon-tail-handle" aria-label="调整气泡尾巴长度与指向" style={{ left: `${tail.tip.x}%`, top: `${tail.tip.y}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: localTailTip }, balloonSelection)}/> : null}</> : null}
+        {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label="调整气泡大小" onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, minimumWidth }, balloonSelection)}/>{tail && localTailTip ? <span className="balloon-tail-handle" aria-label="调整气泡尾巴长度与指向" style={{ left: `${tail.tip.x}%`, top: `${tail.tip.y}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: localTailTip }, balloonSelection)}/> : null}</> : null}
+        {selected && interactionMode === "crop" ? <span className="balloon-rotate-handle" aria-label="旋转对白气泡" onPointerDown={(event) => startDrag(event, { mode: "balloon_rotate", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startSceneGeometry: node.geometry }, balloonSelection)} /> : null}
       </button>;
     })}
     {editable ? <div className="object-order-layer">

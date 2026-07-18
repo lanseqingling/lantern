@@ -41,6 +41,7 @@ const balloonChangesSchema = balloonElementSchema.pick({
   transform: true,
   tailTarget: true,
   shape: true,
+  cutCorners: true,
   style: true,
   overflow: true,
 }).partial().strict().refine((changes) => Object.keys(changes).length > 0, "balloon changes cannot be empty");

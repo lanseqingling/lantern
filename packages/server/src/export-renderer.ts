@@ -7,7 +7,22 @@ import { getObject, putObject } from "./object-storage";
 export type ExportKind = "png" | "long_png" | "json";
 export type ExportArtifact = { objectKey: string; contentType: "image/png" | "application/json"; fileName: string; byteSize: number; checksum: string };
 const escapeXml = (value: string) => value.replace(/[<>&"']/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;", "'": "&apos;" })[char]!);
-const textLines = (value: string, maxChars = 12) => Array.from({ length: Math.ceil(Array.from(value).length / maxChars) }, (_, index) => Array.from(value).slice(index * maxChars, (index + 1) * maxChars).join(""));
+/**
+ * Mirrors the renderer's `white-space: pre-wrap` / `overflow-wrap: anywhere`
+ * contract.  Export used to flatten explicit line breaks and use a smaller
+ * vertical advance than the browser renderer, so a downloaded page could put
+ * characters in different columns from its preview.
+ */
+const textLines = (value: string, maxChars = 12) => value
+  .split(/\r\n?|\n/)
+  .flatMap((line) => {
+    const characters = Array.from(line);
+    if (!characters.length) return [""];
+    return Array.from(
+      { length: Math.ceil(characters.length / maxChars) },
+      (_, index) => characters.slice(index * maxChars, (index + 1) * maxChars).join(""),
+    );
+  });
 
 async function assetDataByVersion(document: ComicDocument) {
   const versionIds = [...new Set(document.resources.filter((resource) => resource.kind === "image").map((resource) => resource.assetVersionId))];
@@ -60,6 +75,7 @@ const textX = (geometry: Geometry, align: "left" | "center" | "right" | undefine
 
 type TextRenderOptions = {
   align?: "left" | "center" | "right";
+  blockAlign?: "start" | "center";
   fontWeight?: number;
   paddingX?: number;
   paddingY?: number;
@@ -67,8 +83,13 @@ type TextRenderOptions = {
   verticalFlow?: "lr" | "rl";
 };
 
+// These punctuation marks use their vertical form in the browser renderer.
+// SVG text rendered by sharp has no vertical OpenType substitution, so rotate
+// them explicitly instead of exporting the horizontal glyph unchanged.
+const verticalRotatedPunctuation = new Set(Array.from("「」『』【】〔〕〈〉《》()（）［］[]{}｛｝"));
+
 function renderTextContent(value: string, geometry: Geometry, style: TextElement["style"] | BalloonElement["style"], color: string, options: TextRenderOptions = {}) {
-  const { align = "center", paddingX = 0, paddingY = 0, stroke, verticalFlow = "lr" } = options;
+  const { align = "center", blockAlign = "center", paddingX = 0, paddingY = 0, stroke, verticalFlow = "lr" } = options;
   const vertical = style.writingMode === "vertical";
   const fontFamily = escapeXml(style.fontFamily);
   const weight = options.fontWeight ?? ("fontWeight" in style ? style.fontWeight : undefined);
@@ -83,6 +104,8 @@ function renderTextContent(value: string, geometry: Geometry, style: TextElement
     height: Math.max(1, geometry.height - paddingY * 2),
   };
   if (vertical) {
+    // In CSS vertical-rl, `line-height` determines the distance between
+    // columns. Glyphs within a column follow their own near-em advance.
     const characterAdvance = style.fontSize * 1.05;
     const columnAdvance = style.fontSize * 1.25;
     const maxRows = Math.max(1, Math.floor(contentGeometry.height / Math.max(1, characterAdvance)));
@@ -93,15 +116,31 @@ function renderTextContent(value: string, geometry: Geometry, style: TextElement
       const x = verticalFlow === "rl"
         ? contentGeometry.x + contentGeometry.width / 2 + columnOffset - columnIndex * columnAdvance
         : contentGeometry.x + contentGeometry.width / 2 - columnOffset + columnIndex * columnAdvance;
-      const y = contentGeometry.y + contentGeometry.height / 2 - Math.max(0, characters.length - 1) * characterAdvance / 2;
-      return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${characters.map((char, index) => `<tspan x="${x}" dy="${index ? characterAdvance : 0}">${escapeXml(char)}</tspan>`).join("")}</text>`;
+      const y = blockAlign === "start"
+        ? contentGeometry.y + characterAdvance / 2
+        : contentGeometry.y + contentGeometry.height / 2 - Math.max(0, characters.length - 1) * characterAdvance / 2;
+      const regularCharacters = characters.map((char, index) => {
+        const characterY = y + index * characterAdvance;
+        return verticalRotatedPunctuation.has(char) ? "" : `<tspan x="${x}" y="${characterY}">${escapeXml(char)}</tspan>`;
+      }).join("");
+      const rotatedPunctuation = characters.map((char, index) => {
+        if (!verticalRotatedPunctuation.has(char)) return "";
+        const characterY = y + index * characterAdvance;
+        // sharp/librsvg ignores a transform on <tspan>; a standalone text
+        // node is required for the rotation to appear in the PNG output.
+        return `<text x="${x}" y="${characterY}" text-anchor="middle" dominant-baseline="middle" transform="rotate(90 ${x} ${characterY})" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${escapeXml(char)}</text>`;
+      }).join("");
+      return `<text data-vertical-column="${columnIndex}" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${regularCharacters}</text>${rotatedPunctuation}`;
     }).join("");
   }
   const maxChars = Math.max(1, Math.floor(contentGeometry.width / Math.max(1, style.fontSize * 0.72)));
   const lines = textLines(value, maxChars);
   const x = textX(contentGeometry, align);
-  const startY = contentGeometry.y + Math.max(style.fontSize, (contentGeometry.height - lines.length * style.fontSize * 1.2) / 2 + style.fontSize);
-  return `<text x="${x}" y="${startY}" text-anchor="${textAnchor(align)}" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? style.fontSize * 1.2 : 0}">${escapeXml(line)}</tspan>`).join("")}</text>`;
+  const lineAdvance = style.fontSize * 1.25;
+  const startY = blockAlign === "start"
+    ? contentGeometry.y + style.fontSize
+    : contentGeometry.y + Math.max(style.fontSize, (contentGeometry.height - lines.length * lineAdvance) / 2 + style.fontSize);
+  return `<text x="${x}" y="${startY}" text-anchor="${textAnchor(align)}" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? lineAdvance : 0}">${escapeXml(line)}</tspan>`).join("")}</text>`;
 }
 
 function renderBalloonShell(element: BalloonElement, geometry: Geometry) {
@@ -139,7 +178,7 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>) {
   if (element.kind === "text") {
     const strokeWidth = projectTextStrokeWidth(element);
     const stroke = element.style.stroke && strokeWidth ? { color: element.style.stroke, width: strokeWidth } : undefined;
-    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, { align: element.style.align, stroke, verticalFlow: "rl" })}</g>`;
+    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, { align: element.style.align, blockAlign: "start", stroke, verticalFlow: "rl" })}</g>`;
   }
   if (element.assetVersionId) {
     const data = assets.get(element.assetVersionId); if (!data) return "";

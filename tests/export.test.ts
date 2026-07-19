@@ -156,8 +156,10 @@ test("vertical dialogue export follows the workbench right-to-left column order"
   const svg = renderSurfaceSvg(document, unit, unit.surfaces[0]);
   const balloonMarkup = svg.match(/<g data-scene-id="balloon-1"[^>]*>([\s\S]*?)<\/g>/)?.[1];
   assert.ok(balloonMarkup);
-  const columns = [...balloonMarkup.matchAll(/<text x="([^"]+)" y="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)];
+  const columns = [...balloonMarkup.matchAll(/<text data-vertical-column="\d+" x="([^"]+)" y="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)];
 
+  // CSS vertical-rl uses line-height between columns, while glyphs in a
+  // column keep their near-em advance.
   assert.equal(columns.length, 2);
   assert.ok(Number(columns[0][1]) > Number(columns[1][1]));
   assert.ok(balloonNode);
@@ -165,9 +167,31 @@ test("vertical dialogue export follows the workbench right-to-left column order"
   assert.ok(Number(columns[1][2]) > Number(columns[0][2]));
   assert.match(columns[0][3], />甲<\/tspan>.*>丙<\/tspan>/);
   assert.match(columns[1][3], />丁<\/tspan>.*>戊<\/tspan>/);
-  assert.match(balloonMarkup, /dominant-baseline="central"/);
+  assert.match(balloonMarkup, /dominant-baseline="middle"/);
   assert.match(balloonMarkup, /font-weight="720"/);
   assert.doesNotMatch(balloonMarkup, /paint-order="stroke fill"/);
+});
+
+test("vertical export preserves explicit line breaks and punctuation orientation", () => {
+  const document = renderFixture();
+  document.dialogues[0].content = "「空间\n斩」";
+  const unit = document.units[0];
+  const balloonNode = projectComicRenderScene(document, unit).elements
+    .find((node) => node.element.id === "balloon-1");
+  const balloon = balloonNode?.element;
+  assert.ok(balloon?.kind === "balloon");
+  balloon.style.writingMode = "vertical";
+
+  const svg = renderSurfaceSvg(document, unit, unit.surfaces[0]);
+  const balloonMarkup = svg.match(/<g data-scene-id="balloon-1"[^>]*>([\s\S]*?)<\/g>/)?.[1];
+  assert.ok(balloonMarkup);
+  const columns = [...balloonMarkup.matchAll(/<text data-vertical-column="\d+" x="([^"]+)" y="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)];
+  assert.equal(columns.length, 2);
+  assert.ok(Number(columns[0][1]) > Number(columns[1][1]));
+  assert.match(columns[0][3], />空<\/tspan>.*>间<\/tspan>/);
+  assert.match(columns[1][3], />斩<\/tspan>/);
+  assert.match(balloonMarkup, /<text [^>]*transform="rotate\(90 [^)]+\)"[^>]*>「<\/text>/);
+  assert.match(balloonMarkup, /<text [^>]*transform="rotate\(90 [^)]+\)"[^>]*>」<\/text>/);
 });
 
 test("vertical narration export follows the workbench right-to-left column order", () => {
@@ -179,13 +203,16 @@ test("vertical narration export follows the workbench right-to-left column order
   narration.content = "甲乙丙丁戊";
   narration.style.writingMode = "vertical";
 
+  const narrationNode = projectComicRenderScene(document, unit).elements.find((node) => node.element.id === "text-1");
+  assert.ok(narrationNode);
   const svg = renderSurfaceSvg(document, unit, unit.surfaces[0]);
   const narrationMarkup = svg.match(/<g data-scene-id="text-1"[^>]*>([\s\S]*?)<\/g>/)?.[1];
   assert.ok(narrationMarkup);
-  const columns = [...narrationMarkup.matchAll(/<text x="([^"]+)" y="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)];
+  const columns = [...narrationMarkup.matchAll(/<text data-vertical-column="\d+" x="([^"]+)" y="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)];
   assert.equal(columns.length, 3);
   assert.ok(Number(columns[0][1]) > Number(columns[1][1]));
   assert.ok(Number(columns[1][1]) > Number(columns[2][1]));
+  assert.equal(Number(columns[0][2]), narrationNode.geometry.y + narration.style.fontSize * 1.05 / 2);
   assert.match(columns[0][3], />甲<\/tspan>.*>乙<\/tspan>/);
   assert.match(columns[1][3], />丙<\/tspan>.*>丁<\/tspan>/);
   assert.match(columns[2][3], />戊<\/tspan>/);

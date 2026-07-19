@@ -60,7 +60,7 @@ React / Vinext Web
 - 预览和导出只读取 LCD 与固定资源版本，不读取画布摆放、对话或临时 UI 状态。前端通过领域 Capability 提交作品变化，不能把组件状态或整个画布 store 当成作品。
 - `WorkingRevision` 是可变工作稿，`SavedSnapshot` 是用户显式保存后的不可变阅读和导出基线。确定性编辑通过 `WorkspaceChangeSet` 形成可撤销 revision；生成、结构、多对象和其他高风险结果先形成 Candidate。
 - `WorkspaceCommand` 是编辑器内部的原子写入语言，不直接作为 Agent 工具。UI 与 Agent 通过同一 Capability 输入 schema 和执行器进入 ChangeSet；新 Capability 默认不向 Agent 开放。
-- 任务、候选、消息与作品内容生命周期分离，任何任务都不能静默覆盖工作稿。旧 AI 对话与非确定性任务创建已硬冻结，不提供配置开关；会话历史、候选管理和确定性导出继续可用。
+- 任务、候选、消息与作品内容生命周期分离，任何任务都不能静默覆盖工作稿。Agent 通过受控循环创建生成任务；同一会话只运行一个前台任务，所有生成与结构结果先形成 Candidate。
 - 生产工作台只使用 `server` adapter；`demo` 必须显式开启，服务失败不能静默回退到演示作品。
 - `.lantern-runtime/` 只保存本地对象和临时运行数据，不能作为示例素材或提交内容。
 

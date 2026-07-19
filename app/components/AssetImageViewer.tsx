@@ -17,6 +17,7 @@ type AssetImageViewerProps = {
   hideControlsWhenEmpty?: boolean;
   onStagePointerDown?: () => void;
   onImageContextMenu?: (event: MouseEvent<HTMLImageElement>, image: ComicAssetImage) => void;
+  onImageClick?: (event: MouseEvent<HTMLImageElement>, image: ComicAssetImage) => void;
   stageOverlay?: ReactNode;
 };
 
@@ -27,12 +28,13 @@ export function AssetImageViewer({
   onActiveIndexChange,
   showPrimary = true,
   emptyTitle = "还没有资产图片",
-  emptyDescription = "文字资料仍然可以作为创作参考。",
+  emptyDescription = "文字资料仍然可以用于创作。",
   onEmptyAction,
   emptyActionDisabled = false,
   hideControlsWhenEmpty = false,
   onStagePointerDown,
   onImageContextMenu,
+  onImageClick,
   stageOverlay,
 }: AssetImageViewerProps) {
   const safeIndex = images.length ? Math.min(activeIndex, images.length - 1) : 0;
@@ -41,7 +43,7 @@ export function AssetImageViewer({
 
   return <section className="asset-image-viewer" aria-label={`${name}图片查看器`}>
     <div className="asset-image-stage" onPointerDown={onStagePointerDown}>
-      {activeImage ? <><img src={activeImage.contentUrl} alt={`${name}·${activeImage.label}`} onContextMenu={onImageContextMenu ? (event) => onImageContextMenu(event, activeImage) : undefined} />{showPrimary && activeImage.isPrimary ? <span className="asset-image-primary-badge">主图</span> : null}</> : onEmptyAction ? <button type="button" className="asset-image-empty asset-image-empty-action" disabled={emptyActionDisabled} onClick={onEmptyAction}>{emptyContent}</button> : <div className="asset-image-empty">{emptyContent}</div>}
+      {activeImage ? <><img src={activeImage.contentUrl} alt={`${name}·${activeImage.label}`} onClick={onImageClick ? (event) => onImageClick(event, activeImage) : undefined} onContextMenu={onImageContextMenu ? (event) => onImageContextMenu(event, activeImage) : undefined} />{showPrimary && activeImage.isPrimary ? <span className="asset-image-primary-badge">主图</span> : null}</> : onEmptyAction ? <button type="button" className="asset-image-empty asset-image-empty-action" disabled={emptyActionDisabled} onClick={onEmptyAction}>{emptyContent}</button> : <div className="asset-image-empty">{emptyContent}</div>}
       {stageOverlay}
     </div>
     {!images.length && hideControlsWhenEmpty ? null : <footer className="asset-image-controls">

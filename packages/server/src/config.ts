@@ -18,6 +18,9 @@ const envSchema = z.object({
   IMAGE_MODEL_BASE_URL: z.string().url().default("https://dashscope.aliyuncs.com/api/v1"),
   IMAGE_MODEL_NAME: z.string().default("qwen-image-2.0"),
   IMAGE_MODEL_API_KEY: z.string().optional(),
+  VISION_MODEL_BASE_URL: z.string().url().default("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+  VISION_MODEL_NAME: z.string().default("qwen3.6-flash"),
+  VISION_MODEL_API_KEY: z.string().optional(),
   LANTERN_DEV_USER_EMAIL: z.string().email().default("creator@lantern.local"),
 });
 

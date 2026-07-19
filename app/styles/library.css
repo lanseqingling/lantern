@@ -90,13 +90,16 @@
 
 .asset-reference-list { position: relative; display: flex; min-height: 100%; max-height: 100%; flex-direction: column; overflow: visible; }
 .asset-reference-items { min-height: 0; flex: 1; margin-right: 0; padding-right: 0; }
-.asset-reference-list .asset-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) 28px; gap: 5px; width: 100%; min-height: 40px; margin-bottom: 6px; padding: 5px; border-color: transparent; border-radius: 14px; box-shadow: none; }
+.asset-reference-list .asset-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) 28px; gap: 5px; width: 100%; min-height: 42px; margin-bottom: 6px; padding: 5px; border-color: transparent; border-radius: 14px; box-shadow: none; }
 .asset-reference-list .asset-row:hover { border-color: transparent; }
 .asset-reference-list .asset-row.active { border-color: rgba(100,200,200,.42); }
-.asset-reference-list .asset-row > button:first-child { display: flex; align-items: center; gap: 8px; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.asset-reference-list .asset-row > button:first-child > span { flex: 0 0 21px; }
-.asset-reference-list .asset-row > button:first-child b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.asset-row-rename { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0,1fr) auto auto; gap: 5px; align-items: center; width: 100%; }
+.asset-reference-list .asset-row-main { display: flex; align-items: center; gap: 7px; min-width: 0; border: 0; background: transparent; color: inherit; padding: 0; font: inherit; text-align: left; cursor: pointer; }
+.asset-reference-list .asset-row-main b { min-width: 0; overflow: hidden; color: #35464e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.asset-reference-list .asset-row-thumbnail { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; overflow: hidden; border: 1px solid rgba(36,127,130,.1); border-radius: 9px; background: #e8efed; color: #688087; }
+.asset-reference-list .asset-row-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.asset-reference-list .asset-row-thumbnail svg { width: 13px; height: 13px; }
+.asset-reference-list .asset-kind-tag { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 17px; border-radius: 6px; background: rgba(100,200,200,.13); color: var(--cyan-deep); font-size: 8px; font-weight: 900; line-height: 1; }
+.asset-row-rename { display: grid; grid-column: 1 / -1; grid-template-columns: 30px 20px minmax(0,1fr) auto auto; gap: 5px; align-items: center; width: 100%; }
 .asset-row-rename input { min-width: 0; height: 28px; border: 1px solid rgba(100,200,200,.4); border-radius: 8px; background: #fff; padding: 0 7px; color: var(--ink); font: inherit; font-size: 9px; outline: 0; }
 .asset-row-rename button { display: grid; place-items: center; min-width: 28px; height: 28px; border: 0; border-radius: 8px; background: rgba(100,200,200,.16); color: var(--cyan-deep); font: inherit; font-size: 8px; font-weight: 850; cursor: pointer; }
 .asset-row-rename button:last-child { min-width: 29px; width: 29px; height: 29px; padding: 0; border-radius: 10px; background: rgba(23,32,38,.05); color: var(--muted); }

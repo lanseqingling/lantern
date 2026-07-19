@@ -13,7 +13,7 @@ import {
 } from "@prisma/client";
 import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
 import { prisma } from "../../packages/server/src/db";
-import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
+import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
 import { duplicateComic } from "../../packages/server/src/comic-service";
 import { applyPageVariant, commitChangeSet, deletePageVariant, revertCandidateApplication, saveCandidateAsPageVariant } from "../../packages/server/src/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
@@ -59,9 +59,9 @@ test("database candidate apply and revert preserve version heads atomically", as
 
   try {
     await prisma.user.create({ data: { id: ids.user, email: `${suffix}@integration.lantern.local`, displayName: "persistent runtime Integration" } });
-    await prisma.comic.create({ data: { id: ids.comic, ownerUserId: ids.user, title: "集成测试漫画", worldSummary: "雨夜城市会通过末班车留下失踪者线索。", styleSummary: "克制的蓝绿色水彩与电影感夜景。", format: ComicFormat.PAGE } });
+    await prisma.comic.create({ data: { id: ids.comic, ownerUserId: ids.user, title: "集成测试漫画", summary: "少女在雨夜末班车寻找失踪同学留下的线索。", worldSummary: "雨夜城市会通过末班车留下失踪者线索。", styleSummary: "克制的蓝绿色水彩与电影感夜景。", format: ComicFormat.PAGE } });
     await prisma.comicSetting.create({ data: { id: ids.comicSetting, ownerUserId: ids.user, comicId: ids.comic, title: "禁忌规则", content: "午夜后不得直呼失踪者姓名。", sortIndex: 20 } });
-    await prisma.chapter.create({ data: { id: ids.chapter, ownerUserId: ids.user, comicId: ids.comic, number: 1, title: "第一话" } });
+    await prisma.chapter.create({ data: { id: ids.chapter, ownerUserId: ids.user, comicId: ids.comic, number: 1, title: "第一话", summary: "少女循着失踪同学留下的线索登上末班车。" } });
     await prisma.project.create({ data: { id: ids.project, ownerUserId: ids.user, chapterId: ids.chapter } });
     await prisma.storyboardBeat.create({ data: { id: ids.storyboardBeat, ownerUserId: ids.user, projectId: ids.project, currentVersionNumber: 1 } });
     await prisma.storyboardBeatVersion.create({ data: {
@@ -152,7 +152,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     const context = await buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,
-      taskType: "frame_image_generate",
+      taskType: "storyboard",
       instruction: "生成当前格",
       scope: "selected_comic_frame",
       selection: { type: "storyboard_beat", id: ids.storyboardBeat, pageId: document.units[0].id },
@@ -171,24 +171,76 @@ test("database candidate apply and revert preserve version heads atomically", as
     const frameContext = await buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,
-      taskType: "frame_image_generate",
+      taskType: "storyboard",
       instruction: "生成这个画格的格内成稿图",
       scope: "selected_comic_frame",
       selection: { type: "comic_frame", id: comicFrame.id, pageId: document.units[0].id },
     });
     assert.equal(frameContext.currentPage?.id, document.units[0].id);
+    assert.equal(frameContext.currentPageLcd?.unit.id, document.units[0].id);
+    const interactionContext = await buildAgentContext({
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      taskType: "interaction",
+      instruction: "重新编排当前页",
+      scope: "current_page",
+      currentPageId: document.units[0].id,
+      visiblePageIds: [document.units[0].id],
+      selection: { type: "comic_frame", id: comicFrame.id, pageId: "stale-page", label: "旧页面画格" },
+    });
+    assert.equal(interactionContext.currentPage?.id, document.units[0].id);
+    assert.deepEqual(interactionContext.currentView?.unitIds, [document.units[0].id]);
+    assert.deepEqual(interactionContext.selection, { type: "none", pageId: document.units[0].id, label: "当前页面" });
+    assert.deepEqual(interactionContext.visiblePageLcd.map((item) => item.unit.id), [document.units[0].id]);
+    const referencedFrameContext = await buildAgentContext({
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      taskType: "storyboard",
+      instruction: "分析引用画格",
+      scope: "reference_only",
+      selection: { type: "none" },
+      explicitReferences: [{ objectType: "canvas_element", objectId: comicFrame.id, label: "画格 01" }],
+    });
+    assert.equal(referencedFrameContext.currentPage?.id, document.units[0].id);
+    assert.equal(referencedFrameContext.explicitComicFrameReferences[0]?.frameId, comicFrame.id);
+    assert.equal(referencedFrameContext.explicitComicFrameReferences[0]?.storyboardBeat?.id, ids.storyboardBeat);
     assert.equal(frameContext.currentComicFrame?.id, comicFrame.id);
     assert.equal(frameContext.currentStoryboardBeat?.id, ids.storyboardBeat);
+    const assetContext = await buildAgentContext({
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      taskType: "asset_parse",
+      instruction: "创建一个符合漫画基线的新角色",
+      scope: "reference_only",
+      selection: { type: "none", pageId: document.units[0].id },
+    });
+    assert.equal(assetContext.comic.summary, "少女在雨夜末班车寻找失踪同学留下的线索。");
+    assert.equal(assetContext.comic.worldSummary, "雨夜城市会通过末班车留下失踪者线索。");
+    assert.equal(assetContext.comic.styleSummary, "克制的蓝绿色水彩与电影感夜景。");
+    assert.deepEqual(assetContext.storyboardBeats, []);
+    assert.equal(assetContext.currentPageLcd, undefined);
+    assert.deepEqual(assetContext.assets.map((asset) => asset.kind), ["style"]);
+    const storyboardContext = await buildAgentContext({
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      taskType: "storyboard",
+      instruction: "为当前页生成新的分镜方案",
+      scope: "current_page",
+      selection: { type: "none", pageId: document.units[0].id },
+    });
+    assert.equal(storyboardContext.chapter.summary, "少女循着失踪同学留下的线索登上末班车。");
+    assert.equal(storyboardContext.currentPageLcd?.unit.id, document.units[0].id);
+    assert.equal(storyboardContext.storyboardBeats[0]?.id, ids.storyboardBeat);
     const debug = await buildAgentContextDebugSnapshot({
       ownerUserId: ids.user,
       projectId: ids.project,
-      taskType: "frame_image_generate",
+      taskType: "storyboard",
       instruction: "定位角色、分镜和页面",
       scope: "selected_comic_frame",
       selection: { type: "storyboard_beat", id: ids.storyboardBeat, pageId: document.units[0].id },
       explicitReferences: [{ objectType: "character", objectId: ids.asset, versionId: ids.assetV1 }],
     });
-    assert.equal(debug.debugContractVersion, "context-debug-0.4");
+    assert.equal(debug.debugContractVersion, "context-debug-0.5");
     assert.ok(debug.contextIndex.assets.characters.some((asset) => asset.id === ids.asset));
     assert.equal(debug.contextIndex.world.summary, "雨夜城市会通过末班车留下失踪者线索。");
     assert.deepEqual(debug.contextIndex.world.settings, context.comic.settings);
@@ -199,7 +251,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     await assert.rejects(() => buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,
-      taskType: "frame_image_generate",
+      taskType: "storyboard",
       instruction: "尝试引用不属于当前空间的版本",
       scope: "selected_comic_frame",
       explicitReferences: [{ objectType: "character", objectId: ids.asset, versionId: `foreign-${suffix}` }],
@@ -293,6 +345,12 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal((await prisma.canvasReferencePlacement.findUnique({ where: { id: placement.id } }))?.assetVersionId, ids.assetV1);
     assert.deepEqual(await listComicAssetCards(ids.user, ids.comic), []);
     await assert.rejects(() => getAssetFamilyDetail(ids.user, ids.asset), /资产不存在/);
+
+    const restoredItem = await restoreAssetToCanvasList(ids.user, ids.project, ids.asset);
+    assert.equal(restoredItem.assetId, ids.asset);
+    assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: ids.asset } })).archivedAt, null);
+    assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: ids.assetVariant } })).archivedAt, null);
+    assert.equal((await prisma.canvasAssetListItem.findUniqueOrThrow({ where: { projectId_assetId: { projectId: ids.project, assetId: ids.asset } } })).hiddenAt, null);
   } finally {
     if (copiedComicId) {
       const copiedProjects = await prisma.project.findMany({ where: { chapter: { comicId: copiedComicId } }, select: { id: true } });

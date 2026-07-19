@@ -15,6 +15,7 @@ import {
   restoreLatestSnapshot,
 } from "../../../../packages/server/src/workbench-service";
 import { buildAgentContextDebugSnapshot } from "../../../../packages/agent-runtime/src/context-builder";
+import { explicitWorkspaceReferencesSchema } from "../../../../packages/agent-runtime/src/schemas";
 import { getActiveConversationTask } from "../../../../packages/agent-runtime/src/task-service";
 import { currentUser, ok } from "../http";
 
@@ -32,8 +33,10 @@ const contextDebugRequestSchema = z.object({
   message: z.string().max(20_000).default(""),
   intent: z.string().max(80).optional(),
   scope: z.string().max(80).optional(),
+  currentPageId: z.string().min(1).optional(),
+  visiblePageIds: z.array(z.string().min(1)).min(1).max(2).optional(),
   selection: selectionSchema.optional(),
-  explicitReferences: z.array(z.object({ objectType: z.string().min(1), objectId: z.string().min(1), versionId: z.string().min(1).optional() })).max(24).optional(),
+  explicitReferences: explicitWorkspaceReferencesSchema.optional(),
   currentPageIndex: z.number().int().nonnegative().optional(),
   workspaceMode: z.string().max(40).optional(),
   pendingAttachments: z.array(z.object({ name: z.string().max(240) })).max(12).optional(),
@@ -93,9 +96,11 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
       ownerUserId: user.id,
       projectId: request.params.projectId,
       conversationId: conversation.id,
-      taskType: body.intent ?? "storyboard",
+      taskType: "interaction",
       instruction: body.message,
       scope: body.scope ?? "current_page",
+      currentPageId: body.currentPageId,
+      visiblePageIds: body.visiblePageIds,
       selection: body.selection,
       explicitReferences: body.explicitReferences,
     }, {

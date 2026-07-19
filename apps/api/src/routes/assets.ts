@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { AssetKind, AssetLibraryStatus } from "@prisma/client";
 import { z } from "zod";
 import { createUploadedAsset, readUploadedImage } from "../../../../packages/server/src/asset-service";
-import { appendAssetImage, archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, renameAssetImage, setPrimaryAssetImage } from "../../../../packages/server/src/asset-library-service";
+import { appendAssetImage, archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "../../../../packages/server/src/asset-library-service";
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
 import { getOwnedProject } from "../../../../packages/server/src/workbench-service";
@@ -26,7 +26,7 @@ export function registerAssetRoutes(app: FastifyInstance) {
     return ok(request, await archiveAssetFamily(user.id, request.params.assetId));
   });
 
-  app.post<{ Params: { projectId: string }; Querystring: { place?: string } }>("/v1/projects/:projectId/assets", async (request) => {
+  app.post<{ Params: { projectId: string }; Querystring: { place?: string; usage?: string } }>("/v1/projects/:projectId/assets", async (request) => {
     const user = await currentUser(request);
     await getOwnedProject(user.id, request.params.projectId);
     const uploaded = await readUploadedImage(request, `uploads/${request.params.projectId}`);
@@ -34,6 +34,7 @@ export function registerAssetRoutes(app: FastifyInstance) {
       ownerUserId: user.id,
       projectId: request.params.projectId,
       placeOnCanvas: request.query.place === "canvas",
+      conversationAttachment: request.query.usage === "conversation",
       uploaded,
     }));
   });
@@ -88,18 +89,7 @@ export function registerAssetRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { projectId: string; assetId: string } }>("/v1/projects/:projectId/canvas-assets/:assetId/import", async (request) => {
     const user = await currentUser(request);
-    const targetProject = await prisma.project.findFirst({ where: { id: request.params.projectId, ownerUserId: user.id }, include: { chapter: { select: { comicId: true } } } });
-    if (!targetProject) throw new AppError("not_found", "创作空间不存在。", 404);
-    const asset = await prisma.asset.findFirst({
-      where: { id: request.params.assetId, ownerUserId: user.id, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY, project: { chapter: { comicId: targetProject.chapter.comicId, archivedAt: null } } },
-    });
-    if (!asset) throw new AppError("not_found", "资产不存在或尚未保存到资产空间。", 404);
-    const item = await prisma.canvasAssetListItem.upsert({
-      where: { projectId_assetId: { projectId: targetProject.id, assetId: asset.id } },
-      create: { ownerUserId: user.id, projectId: targetProject.id, assetId: asset.id, displayName: asset.name, displayKind: asset.kind },
-      update: { hiddenAt: null },
-    });
-    return ok(request, item);
+    return ok(request, await restoreAssetToCanvasList(user.id, request.params.projectId, request.params.assetId));
   });
 
   app.patch<{ Params: { assetId: string }; Body: { name?: string; description?: string } }>("/v1/assets/:assetId", async (request) => {
@@ -152,12 +142,12 @@ export function registerAssetRoutes(app: FastifyInstance) {
   app.patch<{ Params: { placementId: string }; Body: { x?: number; y?: number; zoom?: number; zIndex?: number; collapsed?: boolean; pinned?: boolean; assetVersionId?: string } }>("/v1/placements/:placementId", async (request) => {
     const user = await currentUser(request);
     const placement = await prisma.canvasReferencePlacement.findFirst({ where: { id: request.params.placementId, ownerUserId: user.id } });
-    if (!placement) throw new AppError("not_found", "参考卡不存在。", 404);
+    if (!placement) throw new AppError("not_found", "图片卡不存在。", 404);
     const patch = request.body ?? {};
-    if (patch.zoom !== undefined && (!Number.isFinite(patch.zoom) || patch.zoom < 0.12 || patch.zoom > 20)) throw new AppError("validation", "参考图缩放值无效。", 400);
-    if (patch.x !== undefined && !Number.isFinite(patch.x)) throw new AppError("validation", "参考图位置无效。", 400);
-    if (patch.y !== undefined && !Number.isFinite(patch.y)) throw new AppError("validation", "参考图位置无效。", 400);
-    if (patch.zIndex !== undefined && (!Number.isInteger(patch.zIndex) || patch.zIndex < 0 || patch.zIndex > 10000)) throw new AppError("validation", "参考图层级无效。", 400);
+    if (patch.zoom !== undefined && (!Number.isFinite(patch.zoom) || patch.zoom < 0.12 || patch.zoom > 20)) throw new AppError("validation", "图片缩放值无效。", 400);
+    if (patch.x !== undefined && !Number.isFinite(patch.x)) throw new AppError("validation", "图片位置无效。", 400);
+    if (patch.y !== undefined && !Number.isFinite(patch.y)) throw new AppError("validation", "图片位置无效。", 400);
+    if (patch.zIndex !== undefined && (!Number.isInteger(patch.zIndex) || patch.zIndex < 0 || patch.zIndex > 10000)) throw new AppError("validation", "图片层级无效。", 400);
     if (patch.assetVersionId !== undefined) {
       const image = await prisma.assetImage.findFirst({ where: { assetId: placement.assetId, assetVersionId: patch.assetVersionId }, select: { id: true } });
       if (!image) throw new AppError("validation", "这张图片不属于当前资产。", 400);

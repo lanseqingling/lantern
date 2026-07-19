@@ -43,7 +43,8 @@
     "db:sample:campus-letter": "tsx samples/campus-letter/seed.ts",
     "db:reset:campus-letter": "tsx scripts/reset-to-campus-letter.ts",
     "db:studio": "prisma studio",
-    "provider:probe": "tsx scripts/probe-providers.ts"
+    "provider:probe": "tsx scripts/probe-providers.ts",
+    "agent:probe": "tsx scripts/probe-agent-planner.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.1.0",

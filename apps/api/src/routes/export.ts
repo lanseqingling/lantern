@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
-import { renderPagePng } from "../../../../packages/server/src/export-renderer";
+import { renderPagePng, renderPreviewPageGroupPng } from "../../../../packages/server/src/export-renderer";
 import { getObject } from "../../../../packages/server/src/object-storage";
 import { verifySignedAssetPath, verifySignedExportPath } from "../../../../packages/server/src/signed-assets";
 import { getWorkbench } from "../../../../packages/server/src/workbench-service";
@@ -52,6 +52,27 @@ export function registerExportRoutes(app: FastifyInstance) {
     return reply
       .header("Content-Type", "image/png")
       .header("Content-Disposition", `attachment; filename="${request.params.chapterId}-page-${surface.pageNumber ?? 1}.png"`)
+      .header("Cache-Control", "no-store")
+      .send(bytes);
+  });
+
+  app.get<{ Params: { chapterId: string; firstUnitId: string; secondUnitId: string } }>("/v1/chapters/:chapterId/preview-spreads/:firstUnitId/:secondUnitId/download", async (request, reply) => {
+    const user = await currentUser(request);
+    const workbench = await getWorkbench(user.id, request.params.chapterId);
+    const document = workbench.snapshot?.document;
+    if (!document) throw new AppError("not_found", "当前一话还没有已保存版本。", 404);
+    const firstIndex = document.reading.unitOrder.indexOf(request.params.firstUnitId);
+    const secondIndex = document.reading.unitOrder.indexOf(request.params.secondUnitId);
+    const units = [request.params.firstUnitId, request.params.secondUnitId].map((unitId) => document.units.find((unit) => unit.id === unitId));
+    if (firstIndex < 0 || secondIndex !== firstIndex + 1 || units.some((unit) => !unit || unit.kind !== "single_page")) {
+      throw new AppError("validation", "当前两页不能作为同一个双页预览下载。", 400);
+    }
+    const pages = units.flatMap((unit) => unit?.surfaces ?? []);
+    const pageNumbers = pages.map((surface) => surface.pageNumber).filter((pageNumber): pageNumber is number => typeof pageNumber === "number").sort((a, b) => a - b);
+    const bytes = await renderPreviewPageGroupPng(document, units.filter((unit): unit is NonNullable<typeof unit> => Boolean(unit)));
+    return reply
+      .header("Content-Type", "image/png")
+      .header("Content-Disposition", `attachment; filename="${request.params.chapterId}-pages-${pageNumbers[0] ?? firstIndex + 1}-${pageNumbers.at(-1) ?? secondIndex + 1}.png"`)
       .header("Cache-Control", "no-store")
       .send(bytes);
   });

@@ -39,7 +39,7 @@ type ComicRendererProps = {
   pageIndex: number;
   selection?: Selection;
   editable?: boolean;
-  interactionMode?: "select" | "move" | "crop";
+  interactionMode?: "select" | "move" | "crop" | "preview";
   creationMode?: "dialogue" | "narration";
   multiSelectedIds?: ReadonlySet<string>;
   multiMoving?: boolean;
@@ -496,7 +496,18 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       </> : null}
     </svg> : null}
     {editable && unit.surfaces.length > 1 ? unit.surfaces.slice(1).map((surface) => <span key={`${surface.id}-seam`} className={`lcd-surface-seam ${unit.kind === "spread" ? "vertical" : "horizontal"}`} aria-hidden="true" style={unit.kind === "spread" ? { left: `${surface.geometry.x / unit.canvas.width * 100}%` } : { top: `${surface.geometry.y / unit.canvas.height * 100}%` }} />) : null}
-    {scene.frames.map(({ frame, fillZIndex }) => <div className="lcd-frame-fill" key={`${frame.id}-fill`} style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: fillZIndex }}><FrameShapeVisual frame={frame} fill="#fff" /></div>)}
+    {scene.frames.map(({ frame, fillZIndex }) => {
+      const selected = selection?.type === "comic_frame" && selection.id === frame.id;
+      const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
+      return <div className="lcd-frame-fill" key={`${frame.id}-fill`} style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: fillZIndex }}>
+        <FrameShapeVisual frame={frame} fill="#fff" />
+        {editable ? <button type="button" className="lcd-frame-hit-target" data-element-id={frame.id} data-page-id={unit.id} tabIndex={-1} aria-label={`选择${frameLabel(frame)}`} style={{ clipPath: frameClipPath(frame, frame.geometry) }}
+          onClick={(event) => { event.stopPropagation(); const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
+          onDoubleClick={(event) => doubleClick(event, frameSelection)}
+          onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection); }}
+          onContextMenu={(event) => contextFor(event, frameSelection)} /> : null}
+      </div>;
+    })}
     {images.map((node) => {
       const image = node.element;
       const frame = node.frame;

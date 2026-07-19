@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type { ReferencePlacement } from "@/packages/shared/src";
 import { Icon } from "@/packages/ui/src";
+import { assetKindLabel, assetKindTag } from "@/app/lib/asset-kind";
 import { FloatingMenu, MenuDivider, MenuSection } from "./FloatingPrimitives";
 
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -31,6 +32,7 @@ export function ReferenceCard({
   onDelete,
   onLayer,
   onCycleImage,
+  onView,
 }: {
   reference: ReferencePlacement;
   selected: boolean;
@@ -48,16 +50,17 @@ export function ReferenceCard({
   onDelete: () => void;
   onLayer: (action: "up" | "down" | "top" | "bottom") => void;
   onCycleImage: () => void;
+  onView: () => void;
 }) {
   const zoom = reference.zoom ?? 1;
   const isUploadedReference = reference.kind === "reference_image" || reference.localAssetSource === "upload";
-  const kindGlyph = reference.kind === "character" ? "人" : reference.kind === "scene" ? "景" : reference.kind === "prop" ? "物" : "图";
-  const kindName = reference.kind === "character" ? "角色" : reference.kind === "scene" ? "场景" : reference.kind === "prop" ? "道具" : reference.kind === "style" ? "风格" : isUploadedReference ? "参考" : reference.kind === "generated_image" ? "生成图片" : "参考";
+  const kindGlyph = assetKindTag(reference.kind);
+  const kindName = assetKindLabel(reference.kind);
   const [referenceBaseWidth, setReferenceBaseWidth] = useState(204);
   const [position, setPosition] = useState({ x: reference.x, y: reference.y });
   const [contextMenu, setContextMenu] = useState<{ left: number; top: number; layerMenu?: { left: number; top: number } } | null>(null);
   const cardRef = useRef<HTMLElement>(null);
-  const dragRef = useRef<{ originX: number; originY: number; startX: number; startY: number; latestX: number; latestY: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ originX: number; originY: number; startX: number; startY: number; latestX: number; latestY: number; moved: boolean; viewOnClick: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const lastWheelAtRef = useRef(0);
   const zoomRef = useRef(zoom);
@@ -142,7 +145,7 @@ export function ReferenceCard({
         "--multi-move-y": `${multiMoveDelta?.y ?? 0}px`,
       } as CSSProperties}
       data-reference-id={reference.id}
-      aria-label={`${reference.name}，${kindName}，仅作为参考层`}
+      aria-label={`${reference.name}，${kindName}，仅作为画布图片`}
       onClick={(event) => {
         event.stopPropagation();
         if (suppressClickRef.current) {
@@ -199,6 +202,7 @@ export function ReferenceCard({
           latestX: position.x,
           latestY: position.y,
           moved: false,
+          viewOnClick: target instanceof Element && Boolean(target.closest(".reference-image")) && !target.closest("button"),
         };
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
@@ -218,7 +222,15 @@ export function ReferenceCard({
         if (!drag) return;
         dragRef.current = null;
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-        if (!drag.moved) return;
+        if (!drag.moved) {
+          setPosition({ x: drag.originX, y: drag.originY });
+          if (drag.viewOnClick) {
+            suppressClickRef.current = true;
+            window.setTimeout(() => { suppressClickRef.current = false; }, 0);
+            onView();
+          }
+          return;
+        }
         suppressClickRef.current = true;
         window.setTimeout(() => { suppressClickRef.current = false; }, 0);
         onMove(drag.latestX, drag.latestY);
@@ -232,7 +244,7 @@ export function ReferenceCard({
       }}
     >
       <div className={`reference-image ${reference.kind}`}>
-        <img src={reference.imageSrc} alt={`${reference.name}参考图`} draggable={false} loading="lazy" decoding="async" />
+        <img src={reference.imageSrc} alt={`${reference.name}图片`} draggable={false} loading="lazy" decoding="async" />
         {(reference.images?.length ?? 0) > 1 ? <button type="button" className="reference-image-cycle" aria-label={`切换${reference.name}的资产图片`} title="切换资产图片" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onCycleImage(); }}><Icon name="replace" /></button> : null}
         <div className="reference-body">
           <em aria-label={kindName} title={kindName}>{kindGlyph}</em>

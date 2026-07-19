@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@/packages/ui/src";
 import { AssetDetailDialog } from "@/app/components/AssetDetailDialog";
 import { ComicBriefDialog } from "@/app/components/ComicBriefDialog";
+import { assetKindLabel, assetKindTag } from "@/app/lib/asset-kind";
 import { apiDeleteAsset, apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
 
 type AssetFilter = "all" | "character" | "scene" | "prop" | "reference";
@@ -15,20 +16,12 @@ const filters: Array<{ id: AssetFilter; label: string; kinds?: ComicAssetListIte
   { id: "character", label: "角色", kinds: ["character"] },
   { id: "scene", label: "场景", kinds: ["scene"] },
   { id: "prop", label: "道具", kinds: ["prop"] },
-  // Reference images only arrive here through an explicit user upload/add.
+  // Image assets only arrive here through an explicit user upload/add.
   // Page-owned generated frame images are intentionally absent.
-  { id: "reference", label: "参考", kinds: ["reference_image"] },
+  { id: "reference", label: "图片", kinds: ["reference_image"] },
 ];
 
 const filterIcons = { all: "assetAll", character: "user", scene: "scene", prop: "prop", reference: "referenceImage" } as const;
-
-function assetKindLabel(kind: ComicAssetListItem["kind"]) {
-  return ({ character: "角色", scene: "场景", prop: "道具", style: "风格", sketch: "草图", reference_image: "参考", generated_image: "图片" } as const)[kind];
-}
-
-function assetKindGlyph(kind: ComicAssetListItem["kind"]) {
-  return kind === "character" ? "人" : kind === "scene" ? "景" : kind === "prop" ? "物" : "图";
-}
 
 /** Comic-level reusable assets. A chapter only stores its own canvas placements. */
 export default function ComicAssetsPage() {
@@ -82,7 +75,7 @@ export default function ComicAssetsPage() {
 
   const goBack = () => router.push(returnToWorkbench ? `/comics/${comicId}/chapters/${chapterId}` : `/comics/${comicId}`);
   const addKind = filter === "all" ? "asset" : filter;
-  const addLabel = ({ all: "添加资产", character: "添加角色", scene: "添加场景", prop: "添加道具", reference: "添加参考图" } as const)[filter];
+  const addLabel = ({ all: "添加资产", character: "添加角色", scene: "添加场景", prop: "添加道具", reference: "添加图片" } as const)[filter];
   const openAssetCreate = () => {
     if (!chapterId) {
       setNotice("请先进入一话工作区，再创建或上传资产。");
@@ -121,7 +114,7 @@ export default function ComicAssetsPage() {
   };
 
   const briefs = comic ? [
-    { id: "style" as const, icon: "ai" as const, eyebrow: "VISUAL STYLE", title: "视觉风格", description: "统一管理线条、色彩、光影、构图规则和参考图片。", value: comic.styleSummary, placeholder: "描述线条、色彩、媒介质感、镜头语言和希望避免的风格。", maxLength: 4000 },
+    { id: "style" as const, icon: "ai" as const, eyebrow: "VISUAL STYLE", title: "视觉风格", description: "统一管理线条、色彩、光影、构图规则和风格图片。", value: comic.styleSummary, placeholder: "描述线条、色彩、媒介质感、镜头语言和希望避免的风格。", maxLength: 4000 },
     { id: "story" as const, icon: "storyboard" as const, eyebrow: "STORY CORE", title: "故事核心", description: "这部漫画最重要的故事承诺与核心冲突。", value: comic.summary, placeholder: "用一两段话说明主角、目标、冲突与故事吸引力。", maxLength: 2000, required: true },
     { id: "world" as const, icon: "context" as const, eyebrow: "WORLD", title: "世界设定", description: "跨章节保持一致的时代背景、规则与长期冲突。", value: comic.worldSummary, placeholder: "补充世界规则、时代背景、地域、组织或超自然机制。", maxLength: 4000 },
   ] : [];
@@ -143,7 +136,7 @@ export default function ComicAssetsPage() {
 
   const uploadVisualStyleReference = async (file: File) => {
     setVisualStyle(await apiUploadComicVisualStyleImage(comicId, file));
-    setNotice("视觉风格参考图已上传");
+    setNotice("视觉风格图片已上传");
   };
 
   const renameVisualStyleReference = async (imageId: string, label: string) => {
@@ -226,7 +219,7 @@ export default function ComicAssetsPage() {
         </nav>
         <div className="comic-asset-content" aria-live="polite">
           {loading ? <div className="comic-asset-loading">正在整理资产…</div> : null}
-          {!loading && !error ? <div className="comic-asset-grid"><button type="button" className="comic-asset-add-card" onClick={openAssetCreate}><span><Icon name="add" /></span><b>{addLabel}</b><small>{filter === "reference" ? "上传或加入参考图" : "在当前工作区与 Agent 创建"}</small></button>{visibleAssets.map((asset) => <article className="comic-asset-card" key={asset.id}><button type="button" className="asset-card-open" aria-haspopup="dialog" aria-expanded={selectedId === asset.id} onClick={(event) => openAssetDetail(asset.id, event.currentTarget)}><span className="comic-asset-image">{asset.contentUrl ? <img src={asset.contentUrl} alt={`${asset.name}资产封面`} loading="lazy" decoding="async" /> : <i>{assetKindGlyph(asset.kind)}</i>}{asset.variantCount ? <em>{asset.variantCount + 1} 形态</em> : null}</span><span className="comic-asset-meta"><b>{asset.name}</b><small><i>{assetKindGlyph(asset.kind)}</i>{assetKindLabel(asset.kind)}</small></span></button>{returnToWorkbench ? <button type="button" className="asset-card-add" data-tooltip="导入当前画布列表" aria-label={`将${asset.name}导入当前画布列表`} disabled={adding} onClick={() => void importToCanvasList(asset)}><Icon name="add" /></button> : null}</article>)}</div> : null}
+          {!loading && !error ? <div className="comic-asset-grid"><button type="button" className="comic-asset-add-card" onClick={openAssetCreate}><span><Icon name="add" /></span><b>{addLabel}</b><small>{filter === "reference" ? "上传或加入图片" : "在当前工作区与 Agent 创建"}</small></button>{visibleAssets.map((asset) => <article className="comic-asset-card" key={asset.id}><button type="button" className="asset-card-open" aria-haspopup="dialog" aria-expanded={selectedId === asset.id} onClick={(event) => openAssetDetail(asset.id, event.currentTarget)}><span className="comic-asset-image">{asset.contentUrl ? <img src={asset.contentUrl} alt={`${asset.name}资产封面`} loading="lazy" decoding="async" /> : <i>{assetKindTag(asset.kind)}</i>}{asset.variantCount ? <em>{asset.variantCount + 1} 形态</em> : null}</span><span className="comic-asset-meta"><b>{asset.name}</b><small><i>{assetKindTag(asset.kind)}</i>{assetKindLabel(asset.kind)}</small></span></button>{returnToWorkbench ? <button type="button" className="asset-card-add" data-tooltip="导入当前画布列表" aria-label={`将${asset.name}导入当前画布列表`} disabled={adding} onClick={() => void importToCanvasList(asset)}><Icon name="add" /></button> : null}</article>)}</div> : null}
         </div>
       </div>
     </section>

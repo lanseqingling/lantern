@@ -5,7 +5,14 @@ import { balloonCutCornerPoints, createComicPageView, frameCornerDragAxis, frame
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
+import { isAssetVisibleInAssetSpace } from "../app/lib/asset-kind";
 import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../app/lib/editor-snapping";
+
+test("generated frame images stay saveable until converted into an asset-space type", () => {
+  assert.equal(isAssetVisibleInAssetSpace({ kind: "generated_image", libraryStatus: "library" }), false);
+  assert.equal(isAssetVisibleInAssetSpace({ kind: "reference_image", libraryStatus: "library" }), true);
+  assert.equal(isAssetVisibleInAssetSpace({ kind: "reference_image", libraryStatus: "canvas_only" }), false);
+});
 
 test("all demo runtime fixtures satisfy executable LCD v0.4", () => {
   Object.values(previewFixtures).forEach((fixture) => assert.equal(validateComicDocument(fixture).protocolVersion, "lcd-0.4"));
@@ -280,7 +287,7 @@ test("adding a presentation unit appends a valid blank page without changing exi
   assert.deepEqual(result.working.document.units[0].frames, fixture.working.document.units[0].frames);
 });
 
-test("editor capabilities are registered but remain unavailable to Agent execution", () => {
+test("only single-frame candidate capabilities are open to Agent preview", () => {
   const capabilities = listEditorCapabilities();
   assert.deepEqual(capabilities.map((capability) => capability.id), [
     "create_frame",
@@ -335,7 +342,10 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "delete_presentation_unit",
     "restore_workspace_version",
   ]);
-  assert.ok(capabilities.every((capability) => capability.agentAccess === "disabled"));
+  assert.deepEqual(
+    capabilities.filter((capability) => capability.agentAccess !== "disabled").map((capability) => [capability.id, capability.agentAccess]),
+    [["place_frame_image", "preview"], ["replace_frame_image", "preview"], ["update_storyboard_beat", "preview"], ["create_frame_storyboard_beat", "preview"]],
+  );
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
 });
 

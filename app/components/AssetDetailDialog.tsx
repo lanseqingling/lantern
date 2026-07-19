@@ -4,11 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/packages/ui/src";
 import { AssetImageViewer } from "@/app/components/AssetImageViewer";
 import { DeleteConfirmDialog } from "@/app/components/DeleteConfirmDialog";
-import type { ComicAssetDetail, ComicAssetListItem } from "@/app/lib/api-client";
-
-function kindLabel(kind: ComicAssetListItem["kind"]) {
-  return ({ character: "角色", scene: "场景", prop: "道具", style: "风格", sketch: "草图", reference_image: "参考", generated_image: "图片" } as const)[kind];
-}
+import { ImageViewer, type ImageViewerRequest } from "@/app/components/ImageViewer";
+import { assetKindLabel } from "@/app/lib/asset-kind";
+import { apiDownloadAssetImage, type ComicAssetDetail, type ComicAssetImage } from "@/app/lib/api-client";
 
 type AssetDetailPatch = { name?: string; description?: string };
 
@@ -68,14 +66,27 @@ export function AssetDetailDialog({
   const [imageNameDraft, setImageNameDraft] = useState("");
   const [imageNameError, setImageNameError] = useState("");
   const [imageMutating, setImageMutating] = useState(false);
+  const [downloadingImageId, setDownloadingImageId] = useState<string | null>(null);
   const [imageError, setImageError] = useState("");
   const [assetMenuOpen, setAssetMenuOpen] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(false);
   const [assetDeleting, setAssetDeleting] = useState(false);
+  const [imageViewer, setImageViewer] = useState<ImageViewerRequest | null>(null);
 
   const entries = useMemo(() => detail ? [detail.root, ...detail.variants] : [], [detail]);
   const activeEntry = entries.find((entry) => entry.id === activeEntryId) ?? entries[0];
   const activeImage = activeEntry?.images[activeImageIndex] ?? activeEntry?.images[0];
+
+  const openImageViewer = (imageId?: string) => {
+    if (!activeEntry?.images.length) return;
+    const requestedIndex = imageId ? activeEntry.images.findIndex((image) => image.id === imageId) : activeImageIndex;
+    setImageMenu(null);
+    setImageViewer({
+      images: activeEntry.images.map((image) => ({ id: image.id, src: image.contentUrl, alt: `${activeEntry.name}·${image.label}` })),
+      initialIndex: requestedIndex >= 0 ? requestedIndex : 0,
+      allowNavigation: true,
+    });
+  };
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -298,6 +309,20 @@ export function AssetDetailDialog({
     }
   };
 
+  const downloadImage = async (image: ComicAssetImage) => {
+    if (!activeEntry || downloadingImageId) return;
+    setDownloadingImageId(image.id);
+    setImageMenu(null);
+    setImageError("");
+    try {
+      await apiDownloadAssetImage(image, activeEntry.name);
+    } catch (reason) {
+      setImageError(reason instanceof Error ? reason.message : "图片下载失败，请稍后重试。");
+    } finally {
+      setDownloadingImageId(null);
+    }
+  };
+
   const deleteAsset = async () => {
     if (!detail || assetDeleting) return;
     setAssetDeleting(true);
@@ -320,7 +345,7 @@ export function AssetDetailDialog({
       {!loading && error ? <div className="asset-detail-error" role="alert"><span><Icon name="asset" /></span><strong>资产详情暂时无法读取</strong><p>{error}</p><button type="button" onClick={onRetry}><Icon name="replace" />重新加载</button></div> : null}
       {!loading && !error && detail && activeEntry ? <>
         <header className="asset-detail-head">
-          <div><small>{kindLabel(detail.kind)} ASSET</small>{editingTitle ? <input ref={titleInputRef} className="asset-detail-title-input" autoFocus aria-label="资产名称" value={titleDraft} maxLength={120} disabled={titleSaving} onChange={(event) => setTitleDraft(event.target.value)} onBlur={() => void saveTitle()} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /> : <h2 title="双击编辑资产名称" tabIndex={0} onDoubleClick={startTitleEditing} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); startTitleEditing(); } }}>{activeEntry.name}</h2>}{titleError ? <em className="asset-detail-title-error" role="alert">{titleError}</em> : null}{entries.length > 1 ? <p>{`共 ${entries.length} 个形态`}</p> : null}</div>
+          <div><small>{assetKindLabel(detail.kind)} ASSET</small>{editingTitle ? <input ref={titleInputRef} className="asset-detail-title-input" autoFocus aria-label="资产名称" value={titleDraft} maxLength={120} disabled={titleSaving} onChange={(event) => setTitleDraft(event.target.value)} onBlur={() => void saveTitle()} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /> : <h2 title="双击编辑资产名称" tabIndex={0} onDoubleClick={startTitleEditing} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); startTitleEditing(); } }}>{activeEntry.name}</h2>}{titleError ? <em className="asset-detail-title-error" role="alert">{titleError}</em> : null}{entries.length > 1 ? <p>{`共 ${entries.length} 个形态`}</p> : null}</div>
         </header>
         {entries.length > 1 ? <nav className="asset-variant-tabs" aria-label="资产派生形态">
           {entries.map((entry) => <button type="button" key={entry.id} className={entry.id === activeEntry.id ? "active" : ""} aria-pressed={entry.id === activeEntry.id} onClick={() => selectEntry(entry.id)}>{entry.label}</button>)}
@@ -335,9 +360,11 @@ export function AssetDetailDialog({
             <div className="asset-detail-section"><small>详细描述</small><p>{activeEntry.description || "暂无描述"}</p></div>
             {imageError ? <em className="asset-image-error" role="alert">{imageError}</em> : null}
           </section>}
-          <AssetImageViewer name={activeEntry.name} images={activeEntry.images} activeIndex={activeImageIndex} onActiveIndexChange={setActiveImageIndex} onStagePointerDown={() => setImageMenu(null)} onImageContextMenu={(event, image) => { event.preventDefault(); event.stopPropagation(); const stage = event.currentTarget.parentElement?.getBoundingClientRect(); const rawX = event.clientX - (stage?.left ?? 0); const rawY = event.clientY - (stage?.top ?? 0); setImageMenu({ x: Math.max(12, Math.min(rawX, (stage?.width ?? rawX + 166) - 166)), y: Math.max(12, Math.min(rawY, (stage?.height ?? rawY + 122) - 122)), imageId: image.id }); }} stageOverlay={imageMenu && activeImage?.id === imageMenu.imageId ? <div className="asset-image-menu" role="menu" style={{ left: imageMenu.x, top: imageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+          <AssetImageViewer name={activeEntry.name} images={activeEntry.images} activeIndex={activeImageIndex} onActiveIndexChange={setActiveImageIndex} onStagePointerDown={() => setImageMenu(null)} onImageClick={(event, image) => { event.preventDefault(); event.stopPropagation(); openImageViewer(image.id); }} onImageContextMenu={(event, image) => { event.preventDefault(); event.stopPropagation(); const stage = event.currentTarget.parentElement?.getBoundingClientRect(); const rawX = event.clientX - (stage?.left ?? 0); const rawY = event.clientY - (stage?.top ?? 0); setImageMenu({ x: Math.max(12, Math.min(rawX, (stage?.width ?? rawX + 166) - 166)), y: Math.max(12, Math.min(rawY, (stage?.height ?? rawY + 226) - 226)), imageId: image.id }); }} stageOverlay={imageMenu && activeImage?.id === imageMenu.imageId ? <div className="asset-image-menu" role="menu" style={{ left: imageMenu.x, top: imageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
                 <button type="button" role="menuitem" disabled={activeImage.isPrimary || imageMutating} onClick={() => void setPrimaryImage(activeImage.id)}><Icon name="pin" />{activeImage.isPrimary ? "当前主图" : "设置为主图"}</button>
                 <button type="button" role="menuitem" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingRenameImageId(activeImage.id); setImageNameDraft(activeImage.label); setImageNameError(""); }}><Icon name="edit" />修改名称</button>
+                <button type="button" role="menuitem" onClick={() => openImageViewer(activeImage.id)}><Icon name="referenceImage" />查看图片</button>
+                <button type="button" role="menuitem" disabled={Boolean(downloadingImageId)} onClick={() => void downloadImage(activeImage)}><Icon name="download" />{downloadingImageId === activeImage.id ? "下载中…" : "下载图片"}</button>
                 <button type="button" role="menuitem" disabled title="AI 图片精修能力将在后续开放"><Icon name="ai" />创作</button>
                 <button type="button" role="menuitem" className="danger" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingDeleteImageId(activeImage.id); }}><Icon name="trash" />删除</button>
               </div> : null} />
@@ -347,5 +374,6 @@ export function AssetDetailDialog({
       {pendingDeleteImageId ? <DeleteConfirmDialog dialogId="asset-image-delete" title="删除这张图片？" description="图片会从当前资产中移除，已经放到画布上的内容不会被打断。" confirmLabel={imageMutating ? "删除中…" : "确认删除"} disabled={imageMutating} onCancel={() => setPendingDeleteImageId(null)} onConfirm={deleteImage} /> : null}
       {pendingDeleteAsset && detail ? <DeleteConfirmDialog dialogId="asset-delete" title={`删除资产“${detail.root.name}”？`} description={detail.variants.length ? `资产及其 ${detail.variants.length} 个派生形态会从资产空间和画布资产列表移除，已经放到页面或画布上的内容不会被打断。` : "资产会从资产空间和画布资产列表移除，已经放到页面或画布上的内容不会被打断。"} confirmLabel={assetDeleting ? "删除中…" : "确认删除"} disabled={assetDeleting} onCancel={() => setPendingDeleteAsset(false)} onConfirm={deleteAsset} /> : null}
     </section>
+    {imageViewer ? <ImageViewer {...imageViewer} onIndexChange={setActiveImageIndex} onClose={() => setImageViewer(null)} /> : null}
   </div>;
 }

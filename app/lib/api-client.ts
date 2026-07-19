@@ -1,4 +1,4 @@
-import type { Candidate, PageVariant, ReferencePlacement, WorkbenchFixture, WorkspaceChangeSet } from "@/packages/shared/src";
+import type { Candidate, ReferencePlacement, WorkbenchFixture, WorkspaceChangeSet } from "@/packages/shared/src";
 import type { ActiveTaskLike, AgentMessage, PersistedWorkbench } from "@/app/lib/workbench-state";
 import { normalizeResolvedResourceUrls } from "@/app/lib/document-asset-urls";
 
@@ -138,8 +138,8 @@ export async function apiUploadComicVisualStyleImage(comicId: string, file: File
   const form = new FormData();
   form.set("file", file);
   const response = await fetch(`${uploadApiBase()}/v1/comics/${encodeURIComponent(comicId)}/visual-style/images`, { method: "POST", body: form, credentials: "include" });
-  const body = await readApiResponse<ComicVisualStyle>(response, "视觉风格参考图上传失败");
-  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "视觉风格参考图上传失败");
+  const body = await readApiResponse<ComicVisualStyle>(response, "视觉风格图片上传失败");
+  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "视觉风格图片上传失败");
   return { ...body.data, images: body.data.images.map((image) => ({ ...image, contentUrl: absoluteAssetUrl(image.contentUrl) })) };
 }
 
@@ -300,9 +300,9 @@ type WorkbenchResponse = {
     kind: AgentMessage["kind"];
     text: string;
     metadata?: Record<string, unknown>;
+    attachments?: Array<{ id: string; name: string; imageUrl: string }>;
   }>;
   candidates: Array<Candidate & { payload?: unknown; operations?: unknown[] }>;
-  pageVariants: Array<PageVariant & { lastAppliedRevision?: number }>;
   tasks: Array<{
     id: string;
     type: string;
@@ -310,6 +310,7 @@ type WorkbenchResponse = {
     progress: number;
     errorMessage?: string;
     target?: { canvasX?: number; canvasY?: number; label?: string };
+    createdAt: string;
   }>;
 };
 
@@ -325,13 +326,10 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
       target?: { canvasX?: number; canvasY?: number };
       previewUrl?: string;
       outputRefs?: Array<{ objectType?: string; objectId?: string; versionId?: string }>;
-      commands?: Array<{ type?: string; document?: WorkbenchFixture["working"]["document"] }>;
-      operations?: Array<{ type?: string; document?: WorkbenchFixture["working"]["document"] }>;
-      payload?: { kind?: string; name?: string; description?: string };
+      commands?: Candidate["commands"];
+      payload?: { kind?: string; name?: string; description?: string; mode?: "create" | "replace"; title?: string; storyboardBeatId?: string };
     };
     const outputAsset = runtimeCandidate.outputRefs?.find((ref) => ref.objectType === "asset");
-    const previewCommands = runtimeCandidate.commands ?? runtimeCandidate.operations;
-    const previewDocument = previewCommands?.find((operation) => operation.type === "replace_chapter_presentation" || operation.type === "replace_chapter_layout")?.document;
     return {
       id: candidate.id,
       kind: candidate.kind,
@@ -340,7 +338,6 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
       targetLabel: candidate.targetLabel,
       baseRevision: candidate.baseRevision,
       status: candidate.status,
-      ...(previewDocument ? { document: previewDocument } : {}),
       ...(runtimeCandidate.commands ? { commands: runtimeCandidate.commands as Candidate["commands"] } : {}),
       metadata: {
         runtime: "persistent",
@@ -351,6 +348,10 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
         ...(runtimeCandidate.payload?.kind ? { assetKind: runtimeCandidate.payload.kind } : {}),
         ...(runtimeCandidate.payload?.name ? { assetName: runtimeCandidate.payload.name } : {}),
         ...(runtimeCandidate.payload?.description ? { assetDescription: runtimeCandidate.payload.description } : {}),
+        ...(runtimeCandidate.payload?.mode ? { storyboardMode: runtimeCandidate.payload.mode } : {}),
+        ...(runtimeCandidate.payload?.title ? { storyboardTitle: runtimeCandidate.payload.title } : {}),
+        ...(runtimeCandidate.payload?.mode && runtimeCandidate.payload?.description ? { storyboardDescription: runtimeCandidate.payload.description } : {}),
+        ...(runtimeCandidate.payload?.storyboardBeatId ? { storyboardBeatId: runtimeCandidate.payload.storyboardBeatId } : {}),
         ...(typeof runtimeCandidate.target?.canvasX === "number" ? { canvasX: String(runtimeCandidate.target.canvasX) } : {}),
         ...(typeof runtimeCandidate.target?.canvasY === "number" ? { canvasY: String(runtimeCandidate.target.canvasY) } : {}),
       },
@@ -371,6 +372,10 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
       resolved: metadata.resolved === true,
       scope: typeof metadata.scope === "string" ? metadata.scope : undefined,
       options: questions.flatMap((question) => question.options?.map((option) => option.label).filter((item): item is string => Boolean(item)) ?? []),
+      instruction: typeof metadata.instruction === "string" ? metadata.instruction : undefined,
+      selection: metadata.selection && typeof metadata.selection === "object" ? metadata.selection as AgentMessage["selection"] : undefined,
+      explicitReferences: Array.isArray(metadata.explicitReferences) ? metadata.explicitReferences as NonNullable<AgentMessage["explicitReferences"]> : undefined,
+      attachments: message.attachments?.map((attachment) => ({ ...attachment, imageUrl: absoluteAssetUrl(attachment.imageUrl) })),
     } satisfies AgentMessage;
   });
   const running = data.tasks.find((task) => task.status === "running" || task.status === "queued" || task.status === "created");
@@ -378,15 +383,19 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
   const activeTask = running ? {
     id: running.id,
     name: running.type,
-    label: running.type === "frame_image_generate" ? "生成当前格图片" : running.type === "frame_image_refine" ? "精修当前格" : "生成创作候选",
-    scope: "候选任务",
+    label: running.type === "asset_parse" ? "创建角色或场景" : running.type === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
+    scope: running.target?.label ?? "当前创作范围",
     progress: running.progress,
     status: "running" as const,
+    stage: (running.status === "created" ? "preparing" : running.status === "queued" ? "queued" : running.progress >= 88 ? "saving" : running.progress >= 72 ? "validating" : "generating") as NonNullable<ActiveTaskLike["stage"]>,
+    targetLabel: running.target?.label,
+    createdAt: running.createdAt,
+    elapsedSeconds: Math.max(0, Math.floor((Date.now() - new Date(running.createdAt).getTime()) / 1000)),
   } : failed ? {
     id: failed.id,
     name: failed.type,
     label: "任务失败",
-    scope: failed.errorMessage ?? "旧内容未改变",
+    scope: failed.errorMessage ?? "工作稿未改变",
     progress: failed.progress,
     status: "failed" as const,
   } : null;
@@ -399,7 +408,6 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
         references: data.references.map((reference) => ({ ...reference, imageSrc: absoluteAssetUrl(reference.imageSrc), images: reference.images?.map((image) => ({ ...image, imageSrc: absoluteAssetUrl(image.imageSrc) })) })),
       },
       candidates,
-      pageVariants: (data.pageVariants ?? []).map((variant) => ({ ...variant, status: variant.lastAppliedRevision ? "applied" : "saved" } as PageVariant)),
       messages,
       currentPageIndex: 0,
       assets: data.assets.map((asset) => ({
@@ -444,8 +452,10 @@ export function apiGetContextDebugSnapshot(projectId: string, body: {
   message: string;
   intent?: string;
   scope?: string;
+  currentPageId?: string;
+  visiblePageIds?: string[];
   selection?: { type: string; id?: string; pageId?: string; label?: string };
-  explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string }>;
+  explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string; label?: string }>;
   currentPageIndex?: number;
   workspaceMode?: string;
   pendingAttachments?: Array<{ name: string }>;
@@ -489,29 +499,95 @@ export async function apiCommitChangeSet(projectId: string, changeSet: Workspace
   };
 }
 
-export async function apiSendInteraction(ids: RuntimeIds, body: {
+type AgentInteractionRequest = {
   message: string;
   intent?: string;
   scope?: string;
+  currentPageId?: string;
+  visiblePageIds?: string[];
   selection: { type: string; id?: string; pageId?: string; label?: string };
-  explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string }>;
-}) {
-  return api<{ decision:
+  explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string; label?: string }>;
+  imageAttachments?: Array<{ assetId: string; versionId: string; name: string }>;
+};
+
+type AgentInteractionResult = { decision:
     | { kind: "direct_answer"; message: string }
     | { kind: "needs_input"; message: string; questions: Array<{ options?: Array<{ label: string }> }> }
     | { kind: "needs_confirmation"; message: string; summary: string; scope: string; taskType: string }
-    | { kind: "ready_to_run"; message: string; scope: string; taskType: string }
-  }>(`/v1/conversations/${encodeURIComponent(ids.conversationId)}/interactions`, {
+    | { kind: "ready_to_run"; message: string; scope: string; taskType: string };
+    task?: { id: string; type: string; status: string; scope: string; progress: number; createdAt: string };
+  };
+
+export async function apiSendInteraction(ids: RuntimeIds, body: AgentInteractionRequest) {
+  return api<AgentInteractionResult>(`/v1/conversations/${encodeURIComponent(ids.conversationId)}/interactions`, {
     method: "POST",
     body: JSON.stringify({ ...body, idempotencyKey: `web:${crypto.randomUUID()}` }),
   });
 }
 
+export async function apiStreamInteraction(ids: RuntimeIds, body: AgentInteractionRequest, handlers: {
+  onDecision?: (decision: Omit<AgentInteractionResult["decision"], "message">) => void;
+  onTextDelta?: (delta: string) => void;
+}) {
+  const response = await fetch(`${apiBase()}/v1/conversations/${encodeURIComponent(ids.conversationId)}/interactions/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, idempotencyKey: `web:${crypto.randomUUID()}` }),
+    credentials: "include",
+  });
+  if (!response.ok || !response.body) {
+    const failure = await readApiResponse<never>(response, `Lantern API ${response.status}`);
+    throw new Error(failure.error?.message ?? `Lantern API ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed: AgentInteractionResult | undefined;
+  const consumeLine = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as
+      | { type: "decision"; decision: Omit<AgentInteractionResult["decision"], "message"> }
+      | { type: "text_delta"; delta: string }
+      | ({ type: "complete" } & AgentInteractionResult);
+    if (event.type === "decision") handlers.onDecision?.(event.decision);
+    else if (event.type === "text_delta") handlers.onTextDelta?.(event.delta);
+    else completed = { decision: event.decision, task: event.task };
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    lines.forEach(consumeLine);
+    if (done) break;
+  }
+  if (buffer) consumeLine(buffer);
+  if (!completed) throw new Error("Agent 流式响应未正常结束。");
+  return completed;
+}
+
+export function apiResolveAgentMessage(messageId: string) {
+  return api<{ id: string; resolved: true }>(`/v1/agent-messages/${encodeURIComponent(messageId)}/resolve`, { method: "POST", body: "{}" });
+}
+
+export function apiRetryAgentInteraction(messageId: string) {
+  return api<AgentInteractionResult>(`/v1/agent-messages/${encodeURIComponent(messageId)}/retry`, {
+    method: "POST",
+    body: JSON.stringify({ idempotencyKey: `web-interaction-retry:${crypto.randomUUID()}` }),
+  });
+}
+
+export function apiRetryTask(taskId: string) {
+  return api(`/v1/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST", body: JSON.stringify({ idempotencyKey: `web-retry:${crypto.randomUUID()}` }) });
+}
+
 export async function apiCreateTask(ids: RuntimeIds, body: {
-  taskType: string;
+  taskType: "storyboard" | "frame_image_generate" | "asset_parse";
   instruction: string;
   scope: string;
   selection: { type: string; id?: string; pageId?: string; label?: string; canvasX?: number; canvasY?: number };
+  explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string; label?: string }>;
+  confirmationMessageId?: string;
 }) {
   return api("/v1/tasks", {
     method: "POST",
@@ -524,31 +600,15 @@ export async function apiCreateTask(ids: RuntimeIds, body: {
   });
 }
 
-export function apiApplyCandidate(candidateId: string, expectedWorkingRevision: number) {
+export function apiApplyCandidate(candidateId: string, expectedWorkingRevision: number, expectedFrameTarget?: { unitId: string; frameId: string }) {
   return api<{ asset?: { id: string; name: string; description: string; kind: string }; revision?: number }>(`/v1/candidates/${encodeURIComponent(candidateId)}/apply`, {
     method: "POST",
-    body: JSON.stringify({ expectedWorkingRevision }),
+    body: JSON.stringify({ expectedWorkingRevision, expectedFrameTarget }),
   });
 }
 
 export function apiDiscardCandidate(candidateId: string) {
   return api(`/v1/candidates/${encodeURIComponent(candidateId)}/discard`, { method: "POST", body: "{}" });
-}
-
-export function apiSaveCandidateVariant(candidateId: string, name?: string) {
-  return api<PageVariant>(`/v1/candidates/${encodeURIComponent(candidateId)}/save-variant`, { method: "POST", body: JSON.stringify({ name }) });
-}
-
-export function apiApplyPageVariant(variantId: string, expectedWorkingRevision: number) {
-  return api(`/v1/page-variants/${encodeURIComponent(variantId)}/apply`, { method: "POST", body: JSON.stringify({ expectedWorkingRevision }) });
-}
-
-export function apiDeletePageVariant(variantId: string) {
-  return api(`/v1/page-variants/${encodeURIComponent(variantId)}`, { method: "DELETE" });
-}
-
-export function apiRevertCandidate(candidateId: string) {
-  return api(`/v1/candidates/${encodeURIComponent(candidateId)}/revert`, { method: "POST", body: "{}" });
 }
 
 export function apiSaveSnapshot(chapterId: string, expectedWorkingRevision: number) {
@@ -573,6 +633,10 @@ async function downloadPageResponse(path: string, fallbackName: string) {
   if (!response.ok) throw new Error("下载失败，请稍后重试。");
   const blob = await response.blob();
   const fileName = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] ?? fallbackName;
+  saveBrowserBlob(blob, fileName);
+}
+
+function saveBrowserBlob(blob: Blob, fileName: string) {
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
@@ -583,6 +647,30 @@ async function downloadPageResponse(path: string, fallbackName: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
+function imageFileName(name: string, contentType: string) {
+  const baseName = name
+    .trim()
+    .replace(/\.(?:png|jpe?g|webp|gif)$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 160) || "asset-image";
+  const normalizedContentType = contentType.split(";", 1)[0]?.toLowerCase() ?? "";
+  const extension = ({ "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif" } as Record<string, string>)[normalizedContentType] ?? ".png";
+  return baseName.toLowerCase().endsWith(extension) ? baseName : `${baseName}${extension}`;
+}
+
+export async function apiDownloadImage(contentUrl: string, name: string) {
+  const response = await fetch(contentUrl, { credentials: "include" });
+  if (!response.ok) throw new Error("图片下载失败，请稍后重试。");
+  const blob = await response.blob();
+  saveBrowserBlob(blob, imageFileName(name, blob.type));
+}
+
+export async function apiDownloadAssetImage(image: ComicAssetImage, assetName: string) {
+  return apiDownloadImage(image.contentUrl, `${assetName}-${image.label}`);
+}
+
 export async function apiDownloadPage(chapterId: string, unitId: string) {
   if (!unitId) throw new Error("当前没有可下载的漫画页。");
   return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/download`, `${unitId}.png`);
@@ -591,6 +679,11 @@ export async function apiDownloadPage(chapterId: string, unitId: string) {
 export async function apiDownloadSurface(chapterId: string, unitId: string, surfaceId: string) {
   if (!unitId || !surfaceId) throw new Error("当前没有可下载的物理纸面。");
   return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/surfaces/${encodeURIComponent(surfaceId)}/download`, `${surfaceId}.png`);
+}
+
+export async function apiDownloadPreviewSpread(chapterId: string, firstUnitId: string, secondUnitId: string) {
+  if (!firstUnitId || !secondUnitId) throw new Error("当前没有可下载的双页预览。");
+  return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/preview-spreads/${encodeURIComponent(firstUnitId)}/${encodeURIComponent(secondUnitId)}/download`, `${firstUnitId}-${secondUnitId}.png`);
 }
 
 export function apiCancelTask(taskId: string) {
@@ -626,6 +719,22 @@ export async function apiUploadAsset(projectId: string, file: File, kind = "refe
   if (!response.ok) throw new Error(body.error?.message ?? "上传失败");
   if (!body.data) throw new Error("上传失败");
   return body.data;
+}
+
+export async function apiUploadAgentAttachment(projectId: string, file: File) {
+  validateUploadFile(file);
+  const form = new FormData();
+  form.set("file", file);
+  form.set("kind", "reference_image");
+  form.set("name", file.name.replace(/\.[^.]+$/, ""));
+  const response = await fetch(`${uploadApiBase()}/v1/projects/${encodeURIComponent(projectId)}/assets?usage=conversation`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  const body = await readApiResponse<{ id: string; versions: Array<{ id: string }> }>(response, "图片附件上传失败");
+  if (!response.ok || !body.data?.versions[0]) throw new Error(body.error?.message ?? "图片附件上传失败");
+  return { assetId: body.data.id, versionId: body.data.versions[0].id, name: file.name };
 }
 
 export function apiUpdatePlacement(placementId: string, patch: { x?: number; y?: number; zoom?: number; zIndex?: number; collapsed?: boolean; pinned?: boolean; assetVersionId?: string }) {

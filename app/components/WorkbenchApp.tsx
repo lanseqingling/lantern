@@ -5,6 +5,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, Wheel
 import { useRouter, useSearchParams } from "next/navigation";
 import { CustomSelect } from "./CustomSelect";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { ImageViewer, type ImageViewerRequest } from "./ImageViewer";
 import { ComicRenderer, type ComicContextPoint } from "./ComicRenderer";
 import { AgentWorkspace, CanvasStage, CreationDock, CreationDrawer, ObjectToolbar, SessionDrawer, WorkbenchShell } from "./workbench/WorkbenchLayout";
 import { FloatingMenu, MenuDivider, MenuSection } from "./workbench/FloatingPrimitives";
@@ -18,7 +19,6 @@ import type {
   ComicFrameElement,
   ComicPage,
   ImageElement,
-  PageVariant,
   PresentationUnit,
   ReferencePlacement,
   SpeechBalloonElement,
@@ -29,10 +29,8 @@ import type {
 import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, scaleImageCrop, type PageDisplayMode } from "@/packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
 import {
-  createContinuationCandidate,
-  createStoryboardLayoutCandidate,
+  createFrameStoryboardCandidate,
   decideDemoInteraction,
-  previewFixtures,
 } from "@/packages/demo-runtime/src";
 import {
   createDefaultWorkbench,
@@ -44,32 +42,36 @@ import {
   type Selection,
 } from "@/app/lib/workbench-state";
 import { saveGeneratedImageFromUrl, saveUploadedImage } from "@/app/lib/local-assets-client";
+import { assetKindTag, isAssetVisibleInAssetSpace } from "@/app/lib/asset-kind";
 import { buildFrameImageChoices, type FrameImageChoice } from "@/app/lib/frame-image-choices";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 import { fitVerticalNavigatorPaper, fitVerticalViewportWidth, nextVerticalViewportMode, verticalNavigatorWindow, verticalViewportModeMeta, type VerticalViewportMode } from "@/app/lib/vertical-workspace";
+import { findAvailableFrameImageCandidateForTask, isCandidatePreviewTargetVisible, resolveReadingUnitIndex, resolveWorkbenchPageIndex } from "@/app/lib/workbench-location";
 import {
   apiApplyCandidate,
-  apiApplyPageVariant,
   apiCancelTask,
   apiCommitChangeSet,
   apiCreateConversation,
   apiCreateTask,
   configuredRuntimeAdapter,
   apiDeletePlacement,
-  apiDeletePageVariant,
+  apiDownloadImage,
   apiDiscardCandidate,
   apiGetContextDebugSnapshot,
   apiLoadWorkbench,
+  apiImportAssetToCanvasList,
   apiPlaceAsset,
-  apiRevertCandidate,
+  apiResolveAgentMessage,
   apiRestoreSnapshot,
+  apiRetryAgentInteraction,
+  apiRetryTask,
   apiSaveSnapshot,
-  apiSaveCandidateVariant,
-  apiSendInteraction,
+  apiStreamInteraction,
   apiUpdateCanvasAssetListItem,
   apiUpdateComic,
   apiUpdateConversation,
   apiUpdatePlacement,
+  apiUploadAgentAttachment,
   apiUploadAsset,
   apiSaveCanvasAssetToLibrary,
   type RuntimeIds,
@@ -77,12 +79,31 @@ import {
 
 type HistoryEntry = { fixture: PersistedWorkbench["fixture"]; label: string; kind: "working" | "placement" };
 type ActiveTask = ActiveTaskLike;
+type StreamingAgentTurn = { id: string; text: string; status: "thinking" | "writing" };
+type ComposerAttachment = {
+  id: string;
+  name: string;
+  imageUrl: string;
+  status: "uploading" | "ready" | "failed";
+  assetId?: string;
+  versionId?: string;
+};
 type ToolbarSide = "top" | "bottom" | "left" | "right";
 type ToolbarPlacement = { x: number; y: number; side: ToolbarSide };
 type CanvasMode = "focus" | "free";
 type CanvasObjectInteractionMode = "select" | "move" | "crop";
+type FrameImageCandidatePreview = {
+  candidateId: string;
+  mode: "candidate" | "original";
+  target: Selection;
+  previousSelection: Selection;
+  previousPageIndex: number;
+  previousCanvasMode: CanvasMode;
+  previousInteractionMode: CanvasObjectInteractionMode;
+  previousInspectorOpen: boolean;
+};
 type CanvasCreationMode = "dialogue" | "narration" | null;
-type ComicContextMenuState = { target: Selection; point: ComicContextPoint; bleedMenu?: { left: number; top: number } };
+type ComicContextMenuState = { target: Selection; point: ComicContextPoint; bleedMenu?: { left: number; top: number }; imageMoreMenu?: { left: number; top: number } };
 type ComicDeleteTarget = { kind: "frame" | "image" | "dialogue" | "narration"; selection: Selection };
 type FrameImageTarget = { selection: Selection; left: number; top: number; position?: { x: number; y: number }; placement?: "cross_page" | "cross_segment" };
 type CanvasAssetSaveKind = "character" | "scene" | "prop" | "reference_image";
@@ -106,8 +127,7 @@ type StoryboardFrameRow = {
 type LeftView = "assets" | "storyboard" | "pages";
 type PageEditorMode = "edit" | "delete";
 type PageStructureAction = "merge_pages" | "split_spread" | "merge_segments" | "split_segments";
-type ContextDebugSection = "input" | "world" | "assets" | "storyboard" | "page_layout" | "activity" | "raw";
-type AgentWorkspaceMode = "创作" | "资产";
+type ContextDebugSection = "input" | "world" | "assets" | "storyboard" | "page" | "activity" | "raw";
 type ComposerReference = {
   id: string;
   objectType: string;
@@ -121,6 +141,12 @@ type ComposerReference = {
 };
 
 const noSelection: Selection = { type: "none", label: "未选择对象" };
+
+function referenceMention(reference: NonNullable<AgentMessage["explicitReferences"]>[number]) {
+  const fallback = reference.objectType === "canvas_element" ? "当前对象" : reference.objectType === "storyboard_beat" ? "单格画面" : "资产";
+  const label = (reference.label?.trim() || fallback).split("·")[0].replace(/\s+/g, "");
+  return `@${label}`;
+}
 
 function ComicMenuGroup({ label, children }: { label: string; children: ReactNode }) {
   return <div className="comic-menu-group" aria-label={label}><MenuSection>{children}</MenuSection></div>;
@@ -144,16 +170,16 @@ const verticalWheelThreshold = 180;
 const verticalWheelResetMs = 220;
 const verticalWheelLockMs = 320;
 const verticalNavigatorHideMs = 700;
-const intentOptions = [
-  { value: "创作", label: "创作", detail: "故事、分镜、编排与精修", icon: "ai" as const },
-  { value: "资产", label: "资产", detail: "角色、场景、道具与参考图", icon: "asset" as const },
-] satisfies Array<{ value: AgentWorkspaceMode; label: string; detail: string; icon: "ai" | "asset" }>;
 const canvasAssetSaveTypeOptions: Array<{ value: CanvasAssetSaveKind; label: string }> = [
   { value: "character", label: "角色" },
   { value: "scene", label: "场景" },
   { value: "prop", label: "道具" },
-  { value: "reference_image", label: "参考图" },
+  { value: "reference_image", label: "图片" },
 ];
+const canvasAssetThumbnail = (asset: AssetSummary) => asset.images?.find((image) => image.isPrimary && image.contentUrl)?.contentUrl
+  ?? asset.images?.find((image) => image.contentUrl)?.contentUrl
+  ?? asset.contentUrl
+  ?? asset.versions?.find((version) => version.contentUrl)?.contentUrl;
 const balloonStyleOptions = [
   { value: "normal", label: "对话气泡" },
   { value: "thought", label: "无尾气泡" },
@@ -228,6 +254,44 @@ function overlapArea(a: DOMRect | { left: number; top: number; right: number; bo
   return width * height;
 }
 
+function frameImageCandidateTarget(candidate: Candidate): Selection | undefined {
+  for (const command of candidate.commands ?? []) {
+    const value = command as unknown as Record<string, unknown>;
+    if (typeof value.unitId === "string" && typeof value.frameId === "string") {
+      return { type: "comic_frame", id: value.frameId, pageId: value.unitId, label: candidate.targetLabel };
+    }
+  }
+  return undefined;
+}
+
+function frameImageCandidateAssetVersionId(candidate: Candidate) {
+  if (candidate.metadata?.outputAssetVersionId) return candidate.metadata.outputAssetVersionId;
+  for (const command of candidate.commands ?? []) {
+    const value = command as unknown as Record<string, unknown>;
+    const resource = value.resource as Record<string, unknown> | undefined;
+    if (typeof resource?.assetVersionId === "string") return resource.assetVersionId;
+    const element = value.element as Record<string, unknown> | undefined;
+    if (typeof element?.assetVersionId === "string") return element.assetVersionId;
+  }
+  return undefined;
+}
+
+function projectFrameImageCandidate(fixture: PersistedWorkbench["fixture"], candidate: Candidate) {
+  if (candidate.kind !== "frame_image" || !candidate.commands?.length) throw new Error("这个候选没有可预览的单格画面");
+  if (candidate.baseRevision !== fixture.working.revision) throw new Error("候选基于旧工作稿，无法继续预览");
+  return applyWorkspaceChangeSet(
+    { working: fixture.working, storyboardBeats: fixture.storyboardBeats },
+    {
+      id: `preview:${candidate.id}`,
+      projectId: fixture.working.projectId,
+      baseRevision: fixture.working.revision,
+      source: "candidate",
+      sourceCandidateId: candidate.id,
+      commands: candidate.commands,
+    },
+  );
+}
+
 function containsRect(container: { left: number; top: number; right: number; bottom: number }, item: DOMRect, tolerance = 0.5) {
   return item.left >= container.left - tolerance
     && item.top >= container.top - tolerance
@@ -236,7 +300,7 @@ function containsRect(container: { left: number; top: number; right: number; bot
 }
 
 function isFloatingCanvasControl(target: EventTarget | null) {
-  return target instanceof Element && target.closest(".reference-card, .object-toolbar, .object-inspector, .balloon-editor-popover, .asset-reference-menu-floating, [role='menu'], input, textarea, select");
+  return target instanceof Element && target.closest(".image-viewer-overlay, .reference-card, .canvas-page-turn-zone, .object-toolbar, .object-inspector, .balloon-editor-popover, .asset-reference-menu-floating, [role='menu'], input, textarea, select");
 }
 
 
@@ -254,17 +318,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [runtimeIds, setRuntimeIds] = useState<RuntimeIds | null>(null);
   const [workbenchMeta, setWorkbenchMeta] = useState({ comicTitle: "放学以后", chapterTitle: "第 1 话" });
   const [selection, setSelection] = useState<Selection>(noSelection);
-  const [intent, setIntent] = useState<AgentWorkspaceMode>("创作");
   const [scope, setScope] = useState("当前一话");
   const [composer, setComposer] = useState("");
   const [explicitReferences, setExplicitReferences] = useState<ComposerReference[]>([]);
-  const [composerAttachments, setComposerAttachments] = useState<Array<{ id: string; name: string; imageUrl: string }>>([]);
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [composerReferenceOrder, setComposerReferenceOrder] = useState<string[]>([]);
   const [activeTask, setActiveTask] = useState<ActiveTask | null>(null);
-  const [previewCandidateId, setPreviewCandidateId] = useState<string | null>(null);
-  const [previewVariantId, setPreviewVariantId] = useState<string | null>(null);
-  const [candidatePreviewMode, setCandidatePreviewMode] = useState<"original" | "candidate">("candidate");
+  const [taskCancelConfirmOpen, setTaskCancelConfirmOpen] = useState(false);
+  const [streamingTurn, setStreamingTurn] = useState<StreamingAgentTurn | null>(null);
   const [resolvedCardIds, setResolvedCardIds] = useState<Set<string>>(() => new Set());
+  const [expandedTerminalCandidateIds, setExpandedTerminalCandidateIds] = useState<Set<string>>(() => new Set());
+  const [collapsedTerminalCandidateIds, setCollapsedTerminalCandidateIds] = useState<Set<string>>(() => new Set());
+  const [agentScrollRequest, setAgentScrollRequest] = useState(0);
   const [leftView, setLeftView] = useState<LeftView>("assets");
   const [assetMenuId, setAssetMenuId] = useState<string | null>(null);
   const [assetMenuPosition, setAssetMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -303,7 +368,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [creationMode, setCreationMode] = useState<CanvasCreationMode>(null);
   const [creationPointer, setCreationPointer] = useState<{ x: number; y: number } | null>(null);
   const [comicContextMenu, setComicContextMenu] = useState<ComicContextMenuState | null>(null);
+  const [downloadingCanvasImageId, setDownloadingCanvasImageId] = useState<string | null>(null);
+  const [addingCanvasImageAssetId, setAddingCanvasImageAssetId] = useState<string | null>(null);
+  const [imageViewer, setImageViewer] = useState<ImageViewerRequest | null>(null);
   const [frameImageTarget, setFrameImageTarget] = useState<FrameImageTarget | null>(null);
+  const [frameImageCandidatePreview, setFrameImageCandidatePreview] = useState<FrameImageCandidatePreview | null>(null);
+  const [autoPreviewCandidateId, setAutoPreviewCandidateId] = useState<string | null>(null);
   const [comicDeleteTarget, setComicDeleteTarget] = useState<ComicDeleteTarget | null>(null);
   const [toolbarPlacement, setToolbarPlacement] = useState<ToolbarPlacement | null>(null);
   const [balloonEditorPlacement, setBalloonEditorPlacement] = useState<{ x: number; y: number } | null>(null);
@@ -326,6 +396,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [editDraft, setEditDraft] = useState<Record<string, string>>({});
   const chatUploadRef = useRef<HTMLInputElement>(null);
   const dockUploadRef = useRef<HTMLInputElement>(null);
+  const agentMessagesRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLElement>(null);
   const verticalStripRef = useRef<HTMLDivElement>(null);
   const verticalNavigatorRef = useRef<HTMLElement>(null);
@@ -339,11 +410,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const contextGestureRef = useRef<{ key: string; at: number } | null>(null);
   const scenarioHandled = useRef(false);
   const stateRef = useRef(state);
+  const activeTaskRef = useRef<ActiveTask | null>(activeTask);
   const serverCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
   const serverCommitGenerationRef = useRef(0);
   const serverPendingCommitCountRef = useRef(0);
+  const initialConversationIdRef = useRef(searchParams.get("conversationId"));
+  const initialPageIdRef = useRef(searchParams.get("pageId"));
 
   useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { activeTaskRef.current = activeTask; }, [activeTask]);
 
   const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "page" | "session" | "vertical_segment") => {
     setComicContextMenu(null);
@@ -366,7 +441,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   useOutsidePointerDismiss(Boolean(storyboardMenuFrameId), ".storyboard-frame-row, .storyboard-row-menu-floating", () => setStoryboardMenuFrameId(null));
   useOutsidePointerDismiss(Boolean(pageMenuId), ".draft-page-more, .page-item-menu-floating", () => setPageMenuId(null));
   useOutsidePointerDismiss(Boolean(pageEditor), ".page-edit-card-floating, .delete-confirm-overlay", () => setPageEditor(null));
-  useOutsidePointerDismiss(Boolean(comicContextMenu), ".comic-context-menu, .comic-frame-bleed-menu, .object-toolbar", () => setComicContextMenu(null));
   useOutsidePointerDismiss(Boolean(frameImageTarget), ".frame-image-picker", () => setFrameImageTarget(null));
 
   useLayoutEffect(() => {
@@ -421,7 +495,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }, [hydrated]);
 
   useEffect(() => {
-    const ids = (state.assets ?? []).filter((asset) => asset.kind !== "generated_image").map((asset) => asset.id);
+    const ids = (state.assets ?? []).map((asset) => asset.id);
     const timer = window.setTimeout(() => setAssetListOrder((current) => {
         const retained = current.filter((id) => ids.includes(id));
         const missing = ids.filter((id) => !retained.includes(id));
@@ -432,20 +506,37 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   useEffect(() => {
     if (!hydrated || !assetCreateIntent) return;
-    const copy = assetCreateIntent === "character" ? "创建一个角色" : assetCreateIntent === "scene" ? "创建一个场景" : assetCreateIntent === "prop" ? "创建一个道具" : assetCreateIntent === "reference" ? "我想添加一张参考图" : "创建一个新资产";
+    const copy = assetCreateIntent === "character" ? "创建一个角色" : assetCreateIntent === "scene" ? "创建一个场景" : assetCreateIntent === "prop" ? "创建一个道具" : assetCreateIntent === "reference" ? "我想添加一张图片" : "创建一个新资产";
     const timer = window.setTimeout(() => {
       setComposer(copy);
-      setIntent("资产");
       setScope("当前漫画资产");
       setAgentOpen(true);
       setLeftView("assets");
       setToast("已准备好创建资产，补充描述后发送给 Agent。");
-      router.replace(`/comics/${comicId}/chapters/${chapterId}`);
+      const params = new URLSearchParams(window.location.search);
+      params.delete("assetCreate");
+      if (runtimeIds?.conversationId) params.set("conversationId", runtimeIds.conversationId);
+      const query = params.toString();
+      router.replace(`/comics/${comicId}/chapters/${chapterId}${query ? `?${query}` : ""}`, { scroll: false });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [assetCreateIntent, chapterId, comicId, hydrated, router]);
+  }, [assetCreateIntent, chapterId, comicId, hydrated, router, runtimeIds?.conversationId]);
 
-  const resolvedExplicitReferences = () => explicitReferences.map(({ objectType, objectId, versionId }) => ({ objectType, objectId, versionId }));
+  const resolvedExplicitReferences = () => [...new Map(explicitReferences.map(({ objectType, objectId, versionId, label }) => {
+    const normalizedLabel = label.trim().slice(0, 120);
+    return [
+      `${objectType}:${objectId}:${versionId ?? ""}`,
+      { objectType, objectId, versionId, ...(normalizedLabel ? { label: normalizedLabel } : {}) },
+    ];
+  })).values()];
+
+  const visiblePageIdsForAgent = () => {
+    const units = state.fixture.working.document.units;
+    if (isVerticalCanvas) return units[state.currentPageIndex] ? [units[state.currentPageIndex].id] : [];
+    const groups = pageDisplayGroups(state.fixture.working.document, pageDisplayMode);
+    const group = displayGroupForUnit(groups, state.currentPageIndex);
+    return group?.unitIds.slice(0, 2) ?? (units[state.currentPageIndex] ? [units[state.currentPageIndex].id] : []);
+  };
 
   const refreshContextDebug = async () => {
     if (runtimeAdapter !== "server" || !runtimeIds) {
@@ -455,12 +546,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setContextDebugLoading(true);
     setContextDebugError("");
     try {
+      const visiblePageIds = visiblePageIdsForAgent();
       const snapshot = await apiGetContextDebugSnapshot(runtimeIds.projectId, {
         conversationId: runtimeIds.conversationId,
         message: composer,
-        intent,
         scope,
-        selection: { type: selection.type, id: selection.id, pageId: selection.pageId, label: selection.label },
+        currentPageId: visiblePageIds[0],
+        visiblePageIds,
+        selection: { type: selection.type, id: selection.id, pageId: selection.pageId ?? state.fixture.working.document.units[state.currentPageIndex]?.id, label: selection.label },
         explicitReferences: resolvedExplicitReferences(),
         currentPageIndex: state.currentPageIndex,
         workspaceMode: "comic",
@@ -481,10 +574,27 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setContextDebugOpen(true);
     void refreshContextDebug();
   };
+  const syncConversationUrl = (conversationId: string) => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("conversationId") === conversationId) return;
+    params.set("conversationId", conversationId);
+    const query = params.toString();
+    router.replace(`/comics/${comicId}/chapters/${chapterId}${query ? `?${query}` : ""}`, { scroll: false });
+  };
   const refreshServerWorkbench = async (conversationId = runtimeIds?.conversationId, force = false) => {
     if (!force && serverPendingCommitCountRef.current) await serverCommitQueueRef.current;
+    const previousActiveTask = activeTaskRef.current;
     const loaded = await apiLoadWorkbench(runtimeIds?.chapterId ?? chapterId, conversationId || undefined);
-    const nextState = { ...loaded.state, currentPageIndex: Math.min(stateRef.current.currentPageIndex, Math.max(0, loaded.state.fixture.working.document.units.length - 1)) };
+    const currentState = stateRef.current;
+    const currentPageId = currentState.fixture.working.document.reading.unitOrder[currentState.currentPageIndex];
+    const nextState = {
+      ...loaded.state,
+      currentPageIndex: resolveWorkbenchPageIndex(
+        loaded.state.fixture.working.document.reading.unitOrder.map((id) => ({ id })),
+        currentPageId,
+        currentState.currentPageIndex,
+      ),
+    };
     stateRef.current = nextState;
     setState(nextState);
     setSelection((current) => repairSelectionForState(current, nextState));
@@ -492,6 +602,20 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setWorkbenchMeta({ comicTitle: loaded.comic.title, chapterTitle: loaded.chapter.title });
     setPageDisplayMode(loaded.comic.canvasPageMode);
     setActiveTask(loaded.activeTask);
+    activeTaskRef.current = loaded.activeTask;
+    if (previousActiveTask?.status === "running" && previousActiveTask.name === "frame_image_generate") {
+      const completedCandidate = findAvailableFrameImageCandidateForTask(loaded.state.candidates, previousActiveTask.id);
+      const target = completedCandidate ? frameImageCandidateTarget(completedCandidate) : undefined;
+      const targetPageIndex = resolveReadingUnitIndex(nextState.fixture.working.document, target?.pageId);
+      if (completedCandidate && targetPageIndex >= 0 && isCandidatePreviewTargetVisible(
+        pageDisplayGroups(nextState.fixture.working.document, loaded.comic.canvasPageMode),
+        nextState.currentPageIndex,
+        targetPageIndex,
+      )) {
+        setAutoPreviewCandidateId(completedCandidate.id);
+      }
+    }
+    syncConversationUrl(loaded.ids.conversationId);
     return loaded;
   };
 
@@ -501,25 +625,45 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       if (configuredRuntimeAdapter() === "demo") {
         const loaded = loadWorkbench();
         if (canceled) return;
-        stateRef.current = loaded;
-        setState(loaded);
-        setSelection((current) => repairSelectionForState(current, loaded));
+        const nextState = {
+          ...loaded,
+          currentPageIndex: resolveWorkbenchPageIndex(
+            loaded.fixture.working.document.reading.unitOrder.map((id) => ({ id })),
+            initialPageIdRef.current,
+            loaded.currentPageIndex,
+          ),
+        };
+        stateRef.current = nextState;
+        setState(nextState);
+        setSelection((current) => repairSelectionForState(current, nextState));
         setRuntimeAdapter("demo");
+        setAgentScrollRequest((request) => request + 1);
         setHydrated(true);
         return;
       }
       try {
-        const loaded = await apiLoadWorkbench(chapterId);
+        const loaded = await apiLoadWorkbench(chapterId, initialConversationIdRef.current || undefined);
         if (canceled) return;
-        stateRef.current = loaded.state;
-        setState(loaded.state);
-        setSelection((current) => repairSelectionForState(current, loaded.state));
+        const nextState = {
+          ...loaded.state,
+          currentPageIndex: resolveWorkbenchPageIndex(
+            loaded.state.fixture.working.document.reading.unitOrder.map((id) => ({ id })),
+            initialPageIdRef.current,
+            loaded.state.currentPageIndex,
+          ),
+        };
+        stateRef.current = nextState;
+        setState(nextState);
+        setSelection((current) => repairSelectionForState(current, nextState));
         setRuntimeIds(loaded.ids);
         setWorkbenchMeta({ comicTitle: loaded.comic.title, chapterTitle: loaded.chapter.title });
         setPageDisplayMode(loaded.comic.canvasPageMode);
         setActiveTask(loaded.activeTask);
+        activeTaskRef.current = loaded.activeTask;
+        syncConversationUrl(loaded.ids.conversationId);
         setRuntimeAdapter("server");
         setRuntimeError("");
+        setAgentScrollRequest((request) => request + 1);
       } catch (error) {
         if (canceled) return;
         setRuntimeAdapter("server");
@@ -536,6 +680,25 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (hydrated && runtimeAdapter === "demo") persistWorkbench(state);
   }, [hydrated, runtimeAdapter, state]);
 
+  const currentPageId = state.fixture.working.document.units[state.currentPageIndex]?.id;
+  useEffect(() => {
+    if (!hydrated || !currentPageId) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("pageId") === currentPageId) return;
+    params.set("pageId", currentPageId);
+    const query = params.toString();
+    router.replace(`/comics/${comicId}/chapters/${chapterId}${query ? `?${query}` : ""}`, { scroll: false });
+  }, [chapterId, comicId, currentPageId, hydrated, router]);
+
+  useLayoutEffect(() => {
+    if (!hydrated || !agentScrollRequest) return;
+    const frame = window.requestAnimationFrame(() => {
+      const messages = agentMessagesRef.current;
+      if (messages) messages.scrollTop = messages.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [agentScrollRequest, hydrated]);
+
   useEffect(() => {
     if (runtimeAdapter !== "server") return;
     const hasPendingTask = activeTask?.status === "running";
@@ -546,16 +709,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }, [runtimeAdapter, activeTask?.id, activeTask?.status]);
 
   useEffect(() => {
+    if (activeTask?.status === "running") return;
+    setTaskCancelConfirmOpen(false);
+  }, [activeTask?.status]);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 2200);
     return () => window.clearTimeout(timer);
   }, [toast]);
-
-  useEffect(() => {
-    if (!previewCandidateId && !previewVariantId) return;
-    const timer = window.setTimeout(() => setCandidatePreviewMode("candidate"), 0);
-    return () => window.clearTimeout(timer);
-  }, [previewCandidateId, previewVariantId]);
 
   const workingPages = useMemo(() => createComicPageViews(state.fixture.working.document), [state.fixture.working.document]);
   const storyboardFrameRows = useMemo<StoryboardFrameRow[]>(() => {
@@ -572,25 +734,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       .map((row, index) => ({ ...row, label: `画格 ${String(index + 1).padStart(2, "0")}` }));
   }, [state.fixture.storyboardBeats, workingPages]);
   const page = workingPages[state.currentPageIndex] ?? workingPages[0];
-  const previewingCandidate = previewCandidateId
-    ? state.candidates.find((candidate) => candidate.id === previewCandidateId && candidate.kind !== "asset" && candidate.status === "available")
+  const previewCandidate = frameImageCandidatePreview
+    ? state.candidates.find((candidate) => candidate.id === frameImageCandidatePreview.candidateId)
     : undefined;
-  const previewingVariant = previewVariantId ? state.pageVariants.find((variant) => variant.id === previewVariantId) : undefined;
-  const variantPreviewDocument = useMemo(() => {
-    if (!previewingVariant) return undefined;
+  const previewProjection = useMemo(() => {
+    if (frameImageCandidatePreview?.mode !== "candidate" || !previewCandidate) return undefined;
     try {
-      return applyWorkspaceChangeSet({ working: state.fixture.working, storyboardBeats: state.fixture.storyboardBeats }, {
-        id: `preview:${previewingVariant.id}`,
-        projectId: state.fixture.working.projectId,
-        baseRevision: state.fixture.working.revision,
-        source: "candidate",
-        sourceCandidateId: previewingVariant.id,
-        commands: previewingVariant.commands,
-      }).working.document;
-    } catch { return undefined; }
-  }, [previewingVariant, state.fixture.storyboardBeats, state.fixture.working]);
-  const candidateDocument = previewingCandidate?.document ?? variantPreviewDocument;
-  const canvasDocument = candidatePreviewMode === "candidate" && candidateDocument ? candidateDocument : state.fixture.working.document;
+      return projectFrameImageCandidate(state.fixture, previewCandidate);
+    } catch {
+      return undefined;
+    }
+  }, [frameImageCandidatePreview?.mode, previewCandidate, state.fixture]);
+  const canvasDocument = previewProjection?.working.document ?? state.fixture.working.document;
   const canvasUnits = canvasDocument.reading.unitOrder.flatMap((unitId) => {
     const unit = canvasDocument.units.find((item) => item.id === unitId);
     return unit ? [unit] : [];
@@ -598,13 +753,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const isVerticalWorkbench = state.fixture.working.document.format === "vertical";
   const isVerticalCanvas = canvasDocument.format === "vertical";
   const verticalCanvasLayoutKey = canvasUnits.map((unit) => `${unit.id}:${unit.canvas.width}x${unit.canvas.height}`).join("|");
-  const canvasResolvedResources = useMemo(() => {
-    const next = { ...(state.fixture.working.resolvedResources ?? {}) };
-    const versionId = previewingCandidate?.metadata?.outputAssetVersionId;
-    const previewUrl = previewingCandidate?.metadata?.previewUrl;
-    if (versionId && previewUrl) next[versionId] = { url: previewUrl };
-    return next;
-  }, [previewingCandidate, state.fixture.working.resolvedResources]);
+  const previewAssetVersionId = previewCandidate ? frameImageCandidateAssetVersionId(previewCandidate) : undefined;
+  const previewUrl = previewCandidate?.metadata?.previewUrl ?? previewCandidate?.metadata?.imageSrc;
+  const canvasResolvedResources = previewProjection && previewAssetVersionId && previewUrl
+    ? { ...state.fixture.working.resolvedResources, [previewAssetVersionId]: { url: previewUrl } }
+    : state.fixture.working.resolvedResources;
+
+  useEffect(() => {
+    if (!frameImageCandidatePreview) return;
+    if (previewCandidate?.status === "available" && previewCandidate.baseRevision === state.fixture.working.revision) return;
+    setSelection(frameImageCandidatePreview.previousSelection);
+    setCanvasMode(frameImageCandidatePreview.previousCanvasMode);
+    setObjectInteractionMode(frameImageCandidatePreview.previousInteractionMode);
+    setInspectorOpen(frameImageCandidatePreview.previousInspectorOpen);
+    setState((current) => ({ ...current, currentPageIndex: frameImageCandidatePreview.previousPageIndex }));
+    setFrameImageCandidatePreview(null);
+  }, [frameImageCandidatePreview, previewCandidate, state.fixture.working.revision]);
 
   useEffect(() => {
     if (isVerticalWorkbench) return;
@@ -691,7 +855,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       { id: "world" as const, label: "世界观背景", detail: indexWorld.summary ? "漫画级长期设定" : "尚未填写", value: Object.keys(indexWorld).length ? indexWorld : { summary: debugRecord(modelInput.comic).worldSummary ?? "" } },
       { id: "assets" as const, label: "角色与场景", detail: `${assets.length} 个上下文资产`, value: Object.keys(indexAssets).length ? indexAssets : { assets } },
       { id: "storyboard" as const, label: "分镜条目", detail: `${storyboardBeats.length} 个实际送入模型`, value: Object.keys(indexStoryboard).length ? indexStoryboard : { storyboardBeats, omittedContext: modelInput.omittedContext } },
-      { id: "page_layout" as const, label: "编排与页面", detail: `${pages.length} 页工作稿`, value: Object.keys(indexLayout).length ? indexLayout : { pages } },
+      { id: "page" as const, label: "当前页面", detail: `${pages.length} 页工作稿`, value: Object.keys(indexLayout).length ? indexLayout : { pages } },
       { id: "activity" as const, label: "任务与会话", detail: "候选、任务、最近消息", value: Object.keys(indexActivity).length ? indexActivity : { tasks: debugRecord(snapshot.resolvedWorkspace).taskHistory, conversation: snapshot.conversation } },
     ];
   }, [contextDebugSnapshot]);
@@ -700,16 +864,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     return firstImage ? assetSrcByKey.get(`${firstImage.assetId}:${firstImage.assetVersionId}`) : undefined;
   };
 
+  const toolbarTarget = frameImageCandidatePreview?.target ?? selection;
+
   useLayoutEffect(() => {
-    const isCanvasSelection = selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card";
-    if (canvasMode !== "focus" || !isCanvasSelection || !selection.id || !stageRef.current) {
+    const isCanvasSelection = toolbarTarget.type !== "none" && toolbarTarget.type !== "presentation_unit" && toolbarTarget.type !== "reference_card";
+    if (canvasMode !== "focus" || !isCanvasSelection || !toolbarTarget.id || !stageRef.current) {
       setToolbarPlacement(null);
       return;
     }
 
     const updateToolbar = () => {
       const stage = stageRef.current;
-      const element = stage?.querySelector<HTMLElement>(`[data-element-id="${selection.id}"]`);
+      const element = stage?.querySelector<HTMLElement>(`[data-element-id="${toolbarTarget.id}"]`);
       if (!stage || !element) {
         setToolbarPlacement(null);
         return;
@@ -723,12 +889,42 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         right: elementRect.right - stageRect.left,
         bottom: elementRect.bottom - stageRect.top,
       };
-      const editorHandleRects = selection.type === "speech_balloon"
+      if (frameImageCandidatePreview) {
+        const previewToolbar = { width: 218, height: 44 };
+        setToolbarPlacement({
+          x: clampValue(
+            selectedRect.left + (elementRect.width - previewToolbar.width) / 2,
+            8,
+            Math.max(8, stageRect.width - previewToolbar.width - 8),
+          ),
+          y: clampValue(
+            selectedRect.bottom + 10,
+            8,
+            Math.max(8, stageRect.height - previewToolbar.height - 12),
+          ),
+          side: "bottom",
+        });
+        return;
+      }
+      const editorHandleRects = toolbarTarget.type === "speech_balloon"
         ? [...element.querySelectorAll<HTMLElement>(".balloon-resize-handle, .balloon-tail-handle")].map((handle) => {
           const rect = handle.getBoundingClientRect();
           return { left: rect.left - stageRect.left, top: rect.top - stageRect.top, right: rect.right - stageRect.left, bottom: rect.bottom - stageRect.top };
         })
         : [];
+      const obstacleNodes = [...document.querySelectorAll<HTMLElement>(
+        ".agent-workspace.open, .reference-card, .canvas-session-drawer, .object-inspector, .balloon-editor-popover, .frame-image-picker",
+      )].filter((node) => node !== element && !node.contains(element));
+      const obstacleRects = obstacleNodes.flatMap((node) => {
+        const rect = node.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || rect.right <= stageRect.left || rect.left >= stageRect.right || rect.bottom <= stageRect.top || rect.top >= stageRect.bottom) return [];
+        return [{
+          left: rect.left - stageRect.left,
+          top: rect.top - stageRect.top,
+          right: rect.right - stageRect.left,
+          bottom: rect.bottom - stageRect.top,
+        }];
+      });
       const gap = 10;
       const horizontal = { width: 190, height: 44 };
       const vertical = { width: 44, height: 190 };
@@ -780,7 +976,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           ...candidate,
           x,
           y,
-          score: rawOutside * 28 + overlapArea(rect, selectedRect) * 2.5 + editorHandleRects.reduce((total, handleRect) => total + overlapArea(rect, handleRect) * 18, 0) - candidate.free * 0.18,
+          score: rawOutside * 28
+            + overlapArea(rect, selectedRect) * 2.5
+            + editorHandleRects.reduce((total, handleRect) => total + overlapArea(rect, handleRect) * 18, 0)
+            + obstacleRects.reduce((total, obstacleRect) => total + overlapArea(rect, obstacleRect) * 36, 0)
+            - candidate.free * 0.18,
         };
       });
 
@@ -792,13 +992,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     window.addEventListener("resize", updateToolbar);
     const observer = new ResizeObserver(updateToolbar);
     observer.observe(stageRef.current);
-    const element = stageRef.current.querySelector<HTMLElement>(`[data-element-id="${selection.id}"]`);
+    const element = stageRef.current.querySelector<HTMLElement>(`[data-element-id="${toolbarTarget.id}"]`);
     if (element) observer.observe(element);
+    document.querySelectorAll<HTMLElement>(".agent-workspace.open, .reference-card, .canvas-session-drawer, .object-inspector, .balloon-editor-popover, .frame-image-picker").forEach((node) => observer.observe(node));
     return () => {
       window.removeEventListener("resize", updateToolbar);
       observer.disconnect();
     };
-  }, [agentOpen, canvasMode, canvasOffset.x, canvasOffset.y, inspectorOpen, leftOpen, objectInteractionMode, selectedElement?.type === "speech_balloon" ? selectedElement.content.tailTarget : undefined, selectedElement?.geometry, selection.id, selection.pageId, selection.type]);
+  }, [agentOpen, canvasMode, canvasOffset.x, canvasOffset.y, frameImageCandidatePreview, inspectorOpen, leftOpen, objectInteractionMode, selectedElement?.type === "speech_balloon" ? selectedElement.content.tailTarget : undefined, selectedElement?.geometry, toolbarTarget.id, toolbarTarget.pageId, toolbarTarget.type]);
 
   useLayoutEffect(() => {
     if (canvasMode !== "focus" || !inspectorOpen || (selection.type !== "speech_balloon" && selection.type !== "text") || !selection.id || !stageRef.current) {
@@ -831,8 +1032,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const replaceMessages = (updater: (messages: AgentMessage[]) => AgentMessage[]) =>
     setState((current) => ({ ...current, messages: updater(current.messages) }));
 
-  const addMessage = (message: Omit<AgentMessage, "id">) =>
+  const addMessage = (message: Omit<AgentMessage, "id">) => {
     replaceMessages((messages) => [...messages, { ...message, id: uid("message") }]);
+    setAgentScrollRequest((request) => request + 1);
+  };
 
   const switchConversation = async (conversationId: string) => {
     if (activeTask?.status === "running") {
@@ -841,6 +1044,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     try {
       await refreshServerWorkbench(conversationId);
+      setAgentScrollRequest((request) => request + 1);
       setSessionDrawerOpen(false);
       setResolvedCardIds(new Set());
       setToast("已切换对话");
@@ -859,6 +1063,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const initial = createDefaultWorkbench();
       const now = new Date().toISOString();
       setState((current) => ({ ...current, messages: initial.messages.slice(0, 0), candidates: [], conversations: [{ id: uid("conversation"), title, createdAt: now, updatedAt: now }, ...(current.conversations ?? [])] }));
+      setAgentScrollRequest((request) => request + 1);
       setSessionDrawerOpen(false);
       setSessionCreateOpen(false);
       setSessionTitleDraft("");
@@ -868,6 +1073,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     try {
       const created = await apiCreateConversation(runtimeIds.projectId, title);
       await refreshServerWorkbench(created.id);
+      setAgentScrollRequest((request) => request + 1);
       setSessionDrawerOpen(false);
       setSessionCreateOpen(false);
       setSessionTitleDraft("");
@@ -912,6 +1118,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         const replacement = isCurrent && !next ? await apiCreateConversation(runtimeIds.projectId, "新的创作对话") : undefined;
         await apiUpdateConversation(conversationId, { archived: true });
         await refreshServerWorkbench(isCurrent ? (next?.id ?? replacement?.id) : undefined);
+        if (isCurrent) setAgentScrollRequest((request) => request + 1);
       } else {
         setState((current) => ({ ...current, conversations: current.conversations?.filter((conversation) => conversation.id !== conversationId) }));
       }
@@ -929,7 +1136,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       try {
         await apiCancelTask(activeTask.id);
         await refreshServerWorkbench();
-        setToast("任务取消请求已发送");
       } catch (error) {
         setToast(error instanceof Error ? error.message : "取消失败");
       }
@@ -1371,16 +1577,95 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
-  const openFrameBleedMenu = (button: HTMLButtonElement) => {
+  const contextSubmenuPosition = (button: HTMLButtonElement, width: number, height: number) => {
     const item = button.getBoundingClientRect();
-    const width = 160;
-    const height = 134;
     const gap = 6;
     const left = item.right + gap + width <= window.innerWidth - 12
       ? item.right + gap
       : Math.max(12, item.left - width - gap);
     const top = clampValue(item.top, 12, Math.max(12, window.innerHeight - height - 12));
-    setComicContextMenu((current) => current ? { ...current, bleedMenu: { left, top } } : current);
+    return { left, top };
+  };
+
+  const openFrameBleedMenu = (button: HTMLButtonElement) => {
+    setComicContextMenu((current) => current ? { ...current, bleedMenu: contextSubmenuPosition(button, 160, 134) } : current);
+  };
+
+  const openImageMoreMenu = (button: HTMLButtonElement) => {
+    setComicContextMenu((current) => current ? { ...current, imageMoreMenu: contextSubmenuPosition(button, 184, 116) } : current);
+  };
+
+  const downloadCanvasImage = async (target: Selection) => {
+    const element = elementForSelection(target);
+    if (element?.type !== "image" || downloadingCanvasImageId) return;
+    const contentUrl = state.fixture.working.resolvedResources?.[element.assetVersionId]?.url;
+    if (!contentUrl) {
+      setToast("当前图片资源不可下载");
+      return;
+    }
+    setDownloadingCanvasImageId(element.id);
+    try {
+      await apiDownloadImage(contentUrl, element.name?.trim() || target.label || "漫画图片");
+      setComicContextMenu(null);
+      setToast("图片已开始下载");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "图片下载失败，请稍后重试");
+    } finally {
+      setDownloadingCanvasImageId(null);
+    }
+  };
+
+  const openCanvasImageViewer = (target: Selection) => {
+    const element = elementForSelection(target);
+    if (element?.type !== "image") return;
+    const contentUrl = state.fixture.working.resolvedResources?.[element.assetVersionId]?.url;
+    if (!contentUrl) {
+      setToast("当前图片资源不可查看");
+      return;
+    }
+    setComicContextMenu(null);
+    setImageViewer({
+      images: [{ id: element.id, src: contentUrl, alt: element.name?.trim() || target.label || "漫画图片" }],
+    });
+  };
+
+  const addCanvasImageToAssetList = async (target: Selection) => {
+    const element = elementForSelection(target);
+    if (element?.type !== "image" || addingCanvasImageAssetId) return;
+    if (state.assets?.some((asset) => asset.id === element.assetId)) {
+      setToast("该图片已添加到资产列表");
+      return;
+    }
+    setAddingCanvasImageAssetId(element.assetId);
+    try {
+      if (runtimeAdapter === "server" && runtimeIds) {
+        await apiImportAssetToCanvasList(runtimeIds.projectId, element.assetId);
+        await refreshServerWorkbench();
+      } else {
+        const resource = state.fixture.working.document.resources.find((item) => item.assetId === element.assetId && item.assetVersionId === element.assetVersionId);
+        const contentUrl = state.fixture.working.resolvedResources?.[element.assetVersionId]?.url;
+        const name = element.name?.trim() || target.label || "漫画图片";
+        setState((current) => current.assets?.some((asset) => asset.id === element.assetId) ? current : {
+          ...current,
+          assets: [...(current.assets ?? []), {
+            id: element.assetId,
+            kind: "reference_image",
+            name,
+            description: "从漫画画布恢复的图片资产",
+            versionId: element.assetVersionId,
+            contentUrl,
+            versions: [{ id: element.assetVersionId, version: 1, contentUrl, width: resource?.width, height: resource?.height }],
+            libraryStatus: "canvas_only",
+          }],
+        });
+      }
+      setComicContextMenu(null);
+      setToast("已添加到资产列表");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "添加到资产列表失败");
+    } finally {
+      setAddingCanvasImageAssetId(null);
+    }
   };
 
   const changeFrameLayer = (target: Selection, direction: "forward" | "backward") => {
@@ -1563,39 +1848,26 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const finishTask = (task: ActiveTask, instruction?: string) => {
-    if (task.name === "failure") {
-      setActiveTask({ ...task, status: "failed", progress: 58 });
-      addMessage({ role: "agent", kind: "failed", text: "图片 Provider 暂时不可用。旧工作稿没有改变，可以直接重试。", taskName: "failure" });
-      return;
-    }
-
     const baseRevision = state.fixture.working.revision;
     let candidates: Candidate[] = [];
-    if (task.name === "continuation") {
-      candidates = [createContinuationCandidate(baseRevision)];
-    } else if (task.name === "frame_image_refine" || task.name === "frame_image_generate") {
-      const targetImageId = selectedElement?.type === "image" ? selectedElement.id : selectedFrameImage?.id ?? "image-fixture-rain-beat-4";
-      candidates = [{
-        id: uid("candidate-storyboard"),
-        kind: task.name === "frame_image_generate" ? "frame_image" : "frame_image_patch",
-        title: task.name === "frame_image_generate" ? "当前格图片候选" : "撩发动作更自然",
-        changeSummary: task.name === "frame_image_generate" ? "已生成一张新的格内成稿图候选；应用前不会替换当前画格。" : "只更新第 4 画格主图的裁切重心和关联分镜条目的动作描述；前三个画格保持不变。",
-        targetLabel: selection.label || "当前格 04",
-        baseRevision,
-        status: "available",
-        metadata: { pageId: selection.pageId ?? "page-1", elementId: targetImageId, storyboardBeatId: selectedStoryboardBeatId ?? "fixture-rain-beat-4", previewUrl: "/samples/rainy-station/frame-04.png" },
-      }];
-    } else if (task.name === "asset_parse") {
+    if (task.name === "asset_parse") {
       const isScene = (instruction ?? "").includes("场景");
-      candidates = [{ id: uid("candidate-asset"), kind: "asset", title: isScene ? "新场景候选" : "新角色候选", changeSummary: "已生成可编辑的资产描述和参考图；确认后才进入资产库与画布参考层。", targetLabel: "资产与画布参考层", baseRevision, status: "available", metadata: { imageSrc: isScene ? "/samples/rainy-station/scene-rain-bus-stop.png" : "/samples/rainy-station/character-lincheng.png", name: isScene ? "新场景" : "新角色" } }];
-    } else if (instruction?.includes("条漫")) {
-      candidates = [{ id: uid("candidate-vertical"), kind: "page_layout", title: "条漫慢节奏", changeSummary: "切换为条漫滚动段，并在回头前加入纵向停顿。", targetLabel: "整话格式", baseRevision, status: "available", document: previewFixtures.vertical }];
-    } else if (instruction?.includes("固定四格")) {
-      candidates = [{ id: uid("candidate-four"), kind: "page_layout", title: "固定四格 2×2", changeSummary: "切换为固定四格单元，不覆盖当前页漫布局。", targetLabel: "整话格式", baseRevision, status: "available", document: previewFixtures.four_panel }];
-    } else if (task.name === "page_layout") {
-      candidates = [createStoryboardLayoutCandidate(baseRevision, "cinematic")];
+      candidates = [{ id: uid("candidate-asset"), kind: "asset", title: isScene ? "新场景候选" : "新角色候选", changeSummary: "已生成可编辑的资产描述和图片；确认后才进入资产库与画布图片层。", targetLabel: "资产与画布图片层", baseRevision, status: "available", metadata: { imageSrc: isScene ? "/samples/rainy-station/scene-rain-bus-stop.png" : "/samples/rainy-station/character-lincheng.png", name: isScene ? "新场景" : "新角色" } }];
     } else {
-      candidates = [createStoryboardLayoutCandidate(baseRevision, "quiet"), createStoryboardLayoutCandidate(baseRevision, "cinematic")];
+      const taskSelection = task.selection ?? selection;
+      const frame = workingPages.find((item) => item.id === taskSelection.pageId)?.elements.find((item): item is ComicFrameElement => item.id === taskSelection.id && item.type === "comic_frame");
+      if (!frame || !taskSelection.pageId) {
+        setActiveTask(null);
+        addMessage({ role: "agent", kind: "plain", text: "没有找到选中的漫画格，未创建候选。" });
+        return;
+      }
+      const storyboardBeatId = frame.linkedStoryboardBeatId && frame.linkedStoryboardBeatId !== "unassigned" ? frame.linkedStoryboardBeatId : undefined;
+      candidates = [createFrameStoryboardCandidate(baseRevision, {
+        unitId: taskSelection.pageId,
+        frameId: frame.id,
+        label: taskSelection.label ?? `画格 ${frame.readingOrder}`,
+        storyboardBeatId,
+      })];
     }
 
     candidates = candidates.map((candidate) => ({
@@ -1608,7 +1880,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const runTask = (name = "storyboard", option?: string, explicitInstruction?: string, explicitScope?: string, explicitSelection?: Selection) => {
-    const label = name === "continuation" ? "继续生成后续分镜" : name === "frame_image_generate" ? "生成当前格图片" : name === "frame_image_refine" ? "精修当前格" : name === "asset_parse" ? "创建角色或场景资产" : name === "failure" ? "模拟失败任务" : "生成分镜与编排候选";
+    if (name !== "storyboard" && name !== "asset_parse") {
+      setToast("这个 Agent 任务当前未开放");
+      return;
+    }
+    const label = name === "asset_parse" ? "创建角色或场景资产" : "编辑分镜条目";
     const taskScope = explicitScope ?? scope;
     const instruction = explicitInstruction ?? option ?? [...state.messages].reverse().find((message) => message.role === "user")?.text ?? label;
     const currentSelection = explicitSelection ?? selection;
@@ -1620,19 +1896,17 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setToast("当前会话已有任务运行中，请先等待或取消");
       return;
     }
-    if ((name === "frame_image_generate" || name === "frame_image_refine") && currentTargetElement?.type !== "comic_frame" && currentTargetElement?.type !== "image") {
-      setToast("请先选择当前工作稿中的漫画格或格内图片");
+    if (name === "storyboard" && currentTargetElement?.type !== "comic_frame") {
+      setToast("请先选择当前工作稿中的漫画格");
       return;
     }
     if (runtimeAdapter === "server" && runtimeIds) {
-      const taskType = name === "continuation" ? "storyboard" : name === "failure" ? "storyboard" : name;
-      const task: ActiveTask = { id: uid("task-pending"), name: taskType, label, scope: taskScope, progress: 3, status: "running" };
+      const task: ActiveTask = { id: uid("task-pending"), name, label, scope: taskScope, progress: 3, status: "running", selection: currentSelection };
       setActiveTask(task);
-      setToast(`${label} · 正在创建任务`);
       void apiCreateTask(runtimeIds, {
-        taskType,
+        taskType: name,
         instruction,
-        scope: name === "continuation" ? "after_current" : taskScope,
+        scope: taskScope,
         selection: { type: currentSelection.type, id: currentSelection.id, pageId: currentSelection.pageId, label: currentSelection.label },
       }).then(() => refreshServerWorkbench()).catch((error) => {
         setActiveTask(null);
@@ -1640,7 +1914,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       });
       return;
     }
-    const task: ActiveTask = { id: uid("task"), name, label, scope: taskScope, progress: 18, status: "running" };
+    const task: ActiveTask = { id: uid("task"), name, label, scope: taskScope, progress: 18, status: "running", selection: currentSelection };
     setActiveTask(task);
     addMessage({ role: "agent", kind: "task", text: `${label}正在进行。旧内容会一直保留到你应用候选。`, scope: taskScope, taskName: name, taskId: task.id });
     window.setTimeout(() => setActiveTask((current) => current?.id === task.id ? { ...current, progress: 62 } : current), 360);
@@ -1649,39 +1923,76 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const sendMessage = () => {
     if (activeTask?.status === "running") {
-      setToast("任务运行期间已锁定对话；可以使用停止按钮取消任务");
       return;
     }
     const message = composer.trim();
     const attachments = composerAttachments;
+    if (attachments.some((attachment) => attachment.status === "uploading")) {
+      setToast("图片仍在上传，请稍候");
+      return;
+    }
+    if (runtimeAdapter === "server" && attachments.some((attachment) => attachment.status !== "ready" || !attachment.assetId || !attachment.versionId)) {
+      setToast("有图片上传失败，请移除后重新添加");
+      return;
+    }
     const interactionSelection = selection;
     if (!message && !attachments.length) return;
     const userText = message || `上传了 ${attachments.length} 张图片作为本轮参考。`;
-    addMessage({ role: "user", kind: "plain", text: userText, attachments });
+    const sentReferences = resolvedExplicitReferences();
+    const visiblePageIds = visiblePageIdsForAgent();
+    addMessage({ role: "user", kind: "plain", text: userText, attachments, explicitReferences: sentReferences });
+    setComposer("");
+    setComposerAttachments([]);
+    setExplicitReferences([]);
+    setComposerReferenceOrder([]);
     if (runtimeAdapter === "server" && runtimeIds) {
-      setComposer("");
-      setComposerAttachments([]);
-      setToast("Agent 正在理解当前工作台上下文");
-      void apiSendInteraction(runtimeIds, {
+      const streamingId = uid("agent-stream");
+      setStreamingTurn({ id: streamingId, text: "", status: "thinking" });
+      void apiStreamInteraction(runtimeIds, {
         message: userText,
-        intent,
         scope,
-        selection: { type: interactionSelection.type, id: interactionSelection.id, pageId: interactionSelection.pageId, label: interactionSelection.label },
-        explicitReferences: resolvedExplicitReferences(),
+        currentPageId: visiblePageIds[0],
+        visiblePageIds,
+        selection: { type: interactionSelection.type, id: interactionSelection.id, pageId: interactionSelection.pageId ?? state.fixture.working.document.units[state.currentPageIndex]?.id, label: interactionSelection.label },
+        explicitReferences: sentReferences,
+        imageAttachments: attachments.flatMap((attachment) => attachment.assetId && attachment.versionId
+          ? [{ assetId: attachment.assetId, versionId: attachment.versionId, name: attachment.name }]
+          : []),
+      }, {
+        onDecision: () => setStreamingTurn((current) => current?.id === streamingId ? { ...current, status: "writing" } : current),
+        onTextDelta: (delta) => setStreamingTurn((current) => current?.id === streamingId ? { ...current, status: "writing", text: current.text + delta } : current),
       }).then(async (result) => {
+        if (result.task && ["created", "queued", "running"].includes(result.task.status)) {
+          const taskType = result.task.type;
+          const nextActiveTask: ActiveTask = {
+            id: result.task.id,
+            name: taskType,
+            label: taskType === "asset_parse" ? "创建角色或场景" : taskType === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
+            scope: interactionSelection.label ?? result.task.scope,
+            progress: result.task.progress,
+            status: "running",
+            stage: result.task.status === "created" ? "preparing" : result.task.status === "queued" ? "queued" : "generating",
+            selection: interactionSelection,
+            targetLabel: interactionSelection.label,
+            createdAt: result.task.createdAt,
+            elapsedSeconds: 0,
+          };
+          setActiveTask(nextActiveTask);
+          activeTaskRef.current = nextActiveTask;
+        }
         await refreshServerWorkbench();
         if (result.decision.kind === "ready_to_run") {
           setScope(result.decision.scope);
-          runTask(result.decision.taskType, undefined, userText, result.decision.scope, interactionSelection);
         }
       }).catch((error) => {
+        void refreshServerWorkbench().catch(() => undefined);
         setToast(error instanceof Error ? error.message : "Agent 暂时不可用");
+      }).finally(() => {
+        setStreamingTurn((current) => current?.id === streamingId ? null : current);
       });
       return;
     }
     const decision = decideDemoInteraction(userText, selection.type);
-    setComposer("");
-    setComposerAttachments([]);
     if (decision.kind === "direct_answer") {
       addMessage({ role: "agent", kind: "plain", text: decision.message });
     } else if (decision.kind === "needs_input") {
@@ -1696,22 +2007,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
-  const applyCandidate = (candidate: Candidate, applyWithoutPreview = false) => {
+  const applyCandidate = (candidate: Candidate, expectedFrameTarget?: { unitId: string; frameId: string }) => {
     if (candidate.status !== "available") {
       setToast("这个候选已经终结，不能重复应用");
       return;
     }
-    if (!applyWithoutPreview && previewCandidateId !== candidate.id) {
-      setPreviewCandidateId(candidate.id);
-      setToast("候选已在画布展开，请确认预览后再应用");
-      return;
-    }
     if (runtimeAdapter === "server") {
-      setToast(`正在应用「${candidate.title}」`);
-      void apiApplyCandidate(candidate.id, state.fixture.working.revision)
+      void apiApplyCandidate(candidate.id, state.fixture.working.revision, expectedFrameTarget)
         .then(() => refreshServerWorkbench())
-        .then(() => { setPreviewCandidateId(null); setCandidatePreviewMode("original"); setToast(`「${candidate.title}」已进入工作稿`); })
-        .catch((error) => setToast(error instanceof Error ? error.message : "候选应用失败"));
+        .catch((error) => { void refreshServerWorkbench().catch(() => undefined); setToast(error instanceof Error ? error.message : "候选应用失败"); });
       return;
     }
     if (candidate.baseRevision !== state.fixture.working.revision) {
@@ -1720,103 +2024,118 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       return;
     }
     let operations: WorkspaceOperation[];
-    if (candidate.kind === "frame_image_patch" || candidate.kind === "frame_image") {
-      const targetPage = candidate.metadata?.pageId ?? selection.pageId ?? "page-1";
-      const targetElementCandidate = candidate.metadata?.elementId ?? selection.id ?? "image-fixture-rain-beat-4";
-      const targetStoryboardBeat = candidate.metadata?.storyboardBeatId ?? selectedStoryboardBeatId ?? "fixture-rain-beat-4";
-      const targetPageElements = workingPages.find((item) => item.id === targetPage)?.elements ?? [];
-      const candidateElement = targetPageElements.find((item) => item.id === targetElementCandidate);
-      const image =
-        candidateElement?.type === "image"
-          ? candidateElement
-          : targetPageElements.find((item): item is ImageElement => item.type === "image" && item.comicFrameId === targetElementCandidate);
-      const targetElement = image?.id ?? "image-fixture-rain-beat-4";
-      const crop = image?.crop ?? { x: 0, y: 0.68, width: 1, height: 0.32 };
-      operations = planCapabilities([
-        ...capabilitiesForElementPatch(targetPage, targetElement, { crop: { ...crop, x: Math.min(1 - crop.width, crop.x + 0.02), y: Math.max(0, crop.y - 0.025) } }),
-        { id: "update_storyboard_beat", input: { storyboardBeatId: targetStoryboardBeat, patch: { description: "少女更松弛地抬手，指尖轻轻拨开发梢。" } } },
-      ]).commands;
+    if (candidate.commands?.length) {
+      operations = candidate.commands;
     } else if (candidate.document) {
-      operations = candidate.commands ?? [{ type: "replace_chapter_presentation", document: candidate.document }];
+      operations = [{ type: "replace_chapter_presentation", document: candidate.document }];
     } else {
       setToast("这个候选没有可应用内容");
       return;
     }
     if (commitOperations(operations, `应用候选「${candidate.title}」`, "candidate", candidate.id)) {
-      setPreviewCandidateId(null);
-      setCandidatePreviewMode("original");
       setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? { ...item, status: "applied" } : item) }));
-      addMessage({ role: "agent", kind: "plain", text: `「${candidate.title}」已作为一次原子变更进入工作稿。你可以一次撤销回到应用前。` });
+      addMessage({ role: "agent", kind: "plain", text: `「${candidate.title}」已作为一次原子变更进入工作稿。如需回退，请使用底部撤销。` });
     }
   };
 
+  const startFrameImageCandidatePreview = (candidate: Candidate) => {
+    if (candidate.status !== "available") {
+      setToast("这个候选已经终结，不能继续预览");
+      return;
+    }
+    const target = frameImageCandidateTarget(candidate);
+    const targetPageIndex = resolveReadingUnitIndex(state.fixture.working.document, target?.pageId);
+    if (!target || targetPageIndex < 0) {
+      setToast("候选目标已不在当前工作稿中");
+      return;
+    }
+    const targetUnit = state.fixture.working.document.units.find((unit) => unit.id === target.pageId)!;
+    const targetPageLabel = presentationUnitNumberLabel(targetUnit, targetPageIndex);
+    if (!isCandidatePreviewTargetVisible(
+      pageDisplayGroups(state.fixture.working.document, pageDisplayMode),
+      state.currentPageIndex,
+      targetPageIndex,
+    )) {
+      setToast(`这个候选属于 ${targetPageLabel}，请切换到目标页后再预览`);
+      return;
+    }
+    try {
+      projectFrameImageCandidate(state.fixture, candidate);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "候选图片暂时无法预览");
+      return;
+    }
+    const previous = frameImageCandidatePreview;
+    closeFloatingMenus();
+    setCanvasMode("focus");
+    setInspectorOpen(false);
+    setObjectInteractionMode("select");
+    setSelection(target);
+    setFrameImageCandidatePreview({
+      candidateId: candidate.id,
+      mode: "candidate",
+      target,
+      previousSelection: previous?.previousSelection ?? selection,
+      previousPageIndex: previous?.previousPageIndex ?? state.currentPageIndex,
+      previousCanvasMode: previous?.previousCanvasMode ?? canvasMode,
+      previousInteractionMode: previous?.previousInteractionMode ?? objectInteractionMode,
+      previousInspectorOpen: previous?.previousInspectorOpen ?? inspectorOpen,
+    });
+  };
+
+  const cancelFrameImageCandidatePreview = () => {
+    if (!frameImageCandidatePreview) return;
+    setSelection(frameImageCandidatePreview.previousSelection);
+    setCanvasMode(frameImageCandidatePreview.previousCanvasMode);
+    setObjectInteractionMode(frameImageCandidatePreview.previousInteractionMode);
+    setInspectorOpen(frameImageCandidatePreview.previousInspectorOpen);
+    setState((current) => ({ ...current, currentPageIndex: frameImageCandidatePreview.previousPageIndex }));
+    setFrameImageCandidatePreview(null);
+  };
+
+  const applyFrameImageCandidatePreview = () => {
+    if (!frameImageCandidatePreview) return;
+    const candidate = state.candidates.find((item) => item.id === frameImageCandidatePreview.candidateId);
+    if (!candidate || candidate.status !== "available") {
+      setFrameImageCandidatePreview(null);
+      setToast("这个候选已经终结，不能重复应用");
+      return;
+    }
+    const target = frameImageCandidateTarget(candidate);
+    if (!target?.id || !target.pageId || target.id !== frameImageCandidatePreview.target.id || target.pageId !== frameImageCandidatePreview.target.pageId) {
+      setToast("预览目标已经变化，请重新打开这个候选");
+      return;
+    }
+    setFrameImageCandidatePreview(null);
+    applyCandidate(candidate, { unitId: target.pageId, frameId: target.id });
+  };
+
+  useEffect(() => {
+    if (!autoPreviewCandidateId) return;
+    setAutoPreviewCandidateId(null);
+    if (frameImageCandidatePreview) return;
+    const candidate = state.candidates.find((item) => item.id === autoPreviewCandidateId);
+    const target = candidate ? frameImageCandidateTarget(candidate) : undefined;
+    const targetPageIndex = resolveReadingUnitIndex(state.fixture.working.document, target?.pageId);
+    if (!candidate || candidate.status !== "available" || targetPageIndex < 0 || !isCandidatePreviewTargetVisible(
+      pageDisplayGroups(state.fixture.working.document, pageDisplayMode),
+      state.currentPageIndex,
+      targetPageIndex,
+    )) return;
+    startFrameImageCandidatePreview(candidate);
+  // The candidate id is a one-shot completion event; current workspace state is revalidated inside the effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPreviewCandidateId]);
+
   const discardCandidate = (candidateId: string) => {
+    if (frameImageCandidatePreview?.candidateId === candidateId) cancelFrameImageCandidatePreview();
     if (runtimeAdapter === "server") {
       void apiDiscardCandidate(candidateId)
         .then(() => refreshServerWorkbench())
-        .then(() => setToast("候选已丢弃，工作稿未改变"))
         .catch((error) => setToast(error instanceof Error ? error.message : "候选丢弃失败"));
       return;
     }
     setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidateId ? { ...item, status: "discarded" } : item) }));
-    setToast("候选已丢弃，工作稿未改变");
-  };
-
-  const saveCandidateVariant = (candidate: Candidate) => {
-    if (runtimeAdapter === "server") {
-      void apiSaveCandidateVariant(candidate.id)
-        .then(() => refreshServerWorkbench())
-        .then(() => setToast(`已保存页面方案「${candidate.title}」`))
-        .catch((error) => setToast(error instanceof Error ? error.message : "页面方案保存失败"));
-      return;
-    }
-    const commands = candidate.commands ?? (candidate.document ? [{ type: candidate.kind === "page_layout" ? "replace_chapter_layout" as const : "replace_chapter_presentation" as const, document: candidate.document }] : []);
-    if (!commands.length) { setToast("这个候选没有可保存的页面变更"); return; }
-    const unitId = "unitId" in commands[0] && typeof commands[0].unitId === "string" ? commands[0].unitId : candidate.document?.reading.unitOrder[0] ?? page?.id ?? "chapter";
-    const variant: PageVariant = {
-      id: uid("page-variant"), projectId: state.fixture.working.projectId, unitId, name: candidate.title,
-      kind: candidate.kind === "page_layout" ? "layout_only" : "partial_frames", baseRevision: candidate.baseRevision,
-      scope: candidate.scope ?? { type: "presentation_unit", unitId }, commands, sourceCandidateId: candidate.id,
-      createdAt: new Date().toISOString(), status: "saved",
-    };
-    setState((current) => ({ ...current, pageVariants: [...current.pageVariants, variant] }));
-    setToast(`已保存页面方案「${candidate.title}」`);
-  };
-
-  const applySavedVariant = (variant: PageVariant) => {
-    if (runtimeAdapter === "server") {
-      void apiApplyPageVariant(variant.id, state.fixture.working.revision).then(() => refreshServerWorkbench()).then(() => { setPreviewVariantId(null); setCandidatePreviewMode("original"); setToast(`已应用页面方案「${variant.name}」`); }).catch((error) => setToast(error instanceof Error ? error.message : "页面方案应用失败"));
-      return;
-    }
-    if (commitOperations(variant.commands, `应用页面方案「${variant.name}」`, "candidate", variant.id)) { setState((current) => ({ ...current, pageVariants: current.pageVariants.map((item) => item.id === variant.id ? { ...item, status: "applied" } : item) })); setPreviewVariantId(null); setCandidatePreviewMode("original"); }
-  };
-
-  const removeSavedVariant = (variant: PageVariant) => {
-    if (runtimeAdapter === "server") {
-      void apiDeletePageVariant(variant.id).then(() => refreshServerWorkbench()).then(() => setToast("页面方案已删除")).catch((error) => setToast(error instanceof Error ? error.message : "页面方案删除失败"));
-      return;
-    }
-    setState((current) => ({ ...current, pageVariants: current.pageVariants.filter((item) => item.id !== variant.id) }));
-    if (previewVariantId === variant.id) setPreviewVariantId(null);
-    setToast("页面方案已删除");
-  };
-
-  const revertCandidate = (candidate: Candidate) => {
-    if (candidate.status !== "applied") return;
-    if (runtimeAdapter === "server") {
-      void apiRevertCandidate(candidate.id)
-        .then(() => refreshServerWorkbench())
-        .then(() => setToast(`已撤回「${candidate.title}」的应用`))
-        .catch((error) => setToast(error instanceof Error ? error.message : "候选回退失败"));
-      return;
-    }
-    const entry = history[history.length - 1];
-    if (!entry || !entry.label.includes(candidate.title)) {
-      setToast("应用后已有其他修改，请使用版本历史回退");
-      return;
-    }
-    undo();
-    setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? { ...item, status: "reverted" } : item) }));
   };
 
   const saveChapter = () => {
@@ -1889,7 +2208,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         collapsed: patch.collapsed,
         pinned: patch.pinned,
       }).then(() => setToast(label)).catch((error) => {
-        setToast(error instanceof Error ? error.message : "参考卡保存失败");
+        setToast(error instanceof Error ? error.message : "图片卡保存失败");
         void refreshServerWorkbench().catch(() => undefined);
       });
       return;
@@ -2000,7 +2319,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const addCanvasAssetReference = (reference: ReferencePlacement) => {
     const asset = state.assets?.find((item) => item.id === reference.assetId || item.name === reference.name);
     if (asset) addAssetReference(asset);
-    else setToast("这个画布参考还没有可引用的资产版本。");
+    else setToast("这个画布图片还没有可引用的资产版本。");
   };
 
   const addSelectionReference = (targetSelection: Selection = selection) => {
@@ -2053,20 +2372,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     addComposerReference({ id: `canvas:${targetElement.id}`, objectType: "canvas_element", objectId: targetElement.id, label: targetSelection.label, kind: "canvas_element" });
     setAgentOpen(true);
-  };
-
-  const navigateToCandidateImage = (candidate: Candidate) => {
-    const reference = state.fixture.references.find((item) => item.assetId === candidate.metadata?.outputAssetId);
-    setAgentOpen(true);
-    if (!reference) {
-      setToast("生成图已保留在主画布；刷新后可定位");
-      return;
-    }
-    const stage = stageRef.current?.getBoundingClientRect();
-    if (stage) setCanvasOffset({ x: Math.round(stage.width * 0.5 - reference.x - 120), y: Math.round(stage.height * 0.45 - reference.y - 100) });
-    setSelection({ type: "reference_card", id: reference.id, label: reference.name });
-    setScope("生成图片");
-    setToast(`已定位「${reference.name}」`);
   };
 
   const applyInspectorEdit = () => {
@@ -2271,13 +2576,24 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     commitCapabilities(capabilitiesForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, shape } }), "调整对白气泡样式");
   };
 
-  const handleAgentUpload = (file?: File) => {
+  const handleAgentUpload = async (file?: File) => {
     if (!file) return;
+    if (composerAttachments.length >= 3) {
+      setToast("一轮对话最多添加 3 张图片");
+      return;
+    }
     const imageUrl = URL.createObjectURL(file);
-    const attachment = { id: uid("chat-image"), name: file.name, imageUrl };
+    const attachment: ComposerAttachment = { id: uid("chat-image"), name: file.name, imageUrl, status: runtimeAdapter === "server" ? "uploading" : "ready" };
     setComposerAttachments((items) => [attachment, ...items]);
     setComposerReferenceOrder((items) => [`attachment:${attachment.id}`, ...items]);
-    setToast("图片已作为本轮对话引用");
+    if (runtimeAdapter !== "server" || !runtimeIds) return;
+    try {
+      const uploaded = await apiUploadAgentAttachment(runtimeIds.projectId, file);
+      setComposerAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, ...uploaded, status: "ready" } : item));
+    } catch (error) {
+      setComposerAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, status: "failed" } : item));
+      setToast(error instanceof Error ? error.message : "图片附件上传失败");
+    }
   };
 
   const removeComposerAttachment = (id: string) => {
@@ -2315,7 +2631,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         id: uid("reference-upload"),
         kind: "reference_image",
         name,
-        detail: "手动上传 · 画布参考",
+        detail: "手动上传 · 画布图片",
         imageSrc: asset.url,
         assetId,
         assetVersionId: asset.id,
@@ -2361,7 +2677,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       try {
         await apiPlaceAsset(runtimeIds.projectId, asset.id, x, y);
         await refreshServerWorkbench();
-        setToast(`「${asset.name}」已放到画布参考层`);
+        setToast(`「${asset.name}」已放到画布图片层`);
       } catch (error) {
         setToast(error instanceof Error ? error.message : "资产放置失败");
       }
@@ -2381,11 +2697,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       collapsed: false,
       pinned: false,
     };
-    commitPlacement([...state.fixture.references, reference], `把「${asset.name}」放到画布参考层`);
+    commitPlacement([...state.fixture.references, reference], `把「${asset.name}」放到画布图片层`);
   };
 
   const openSaveAssetForm = (asset: AssetSummary, position?: { x: number; y: number }) => {
-    if (!asset.canvasListItemId || asset.libraryStatus === "library") return;
+    if (!asset.canvasListItemId || isAssetVisibleInAssetSpace(asset)) return;
     const savedKind: CanvasAssetSaveKind = asset.kind === "character" || asset.kind === "scene" || asset.kind === "prop" ? asset.kind : "reference_image";
     setAssetSaveDraft({ name: asset.name, kind: savedKind });
     setAssetMenuId(null);
@@ -2484,16 +2800,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const applyAssetCandidate = async (candidate: Candidate) => {
     if (runtimeAdapter === "server") {
-      const result = await apiApplyCandidate(candidate.id, state.fixture.working.revision);
-      const loaded = await refreshServerWorkbench();
-      const savedAsset = result.asset?.id ? loaded.state.assets?.find((asset) => asset.id === result.asset?.id) : undefined;
-      if (savedAsset) router.push(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&asset=${encodeURIComponent(savedAsset.id)}`);
-      setToast(`「${candidate.title}」已保存到资产，并可回到主画布引用`);
+      await apiApplyCandidate(candidate.id, state.fixture.working.revision);
+      await refreshServerWorkbench();
       return;
     }
     let imageSrc = candidate.metadata?.imageSrc;
     if (!imageSrc) {
-      setToast("这个候选还没有可用参考图。");
+      setToast("这个候选还没有可用图片。");
       return;
     }
     let localAssetId = candidate.metadata?.localAssetId;
@@ -2508,8 +2821,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       }
     }
     const localAssetSource = localAssetId ? (candidate.metadata?.localAssetSource === "upload" ? "upload" : "generated") : undefined;
-    const reference: ReferencePlacement = { id: uid("reference"), kind: "sketch", name: candidate.metadata?.name ?? "新草稿", detail: "已确认 · 构图参考", imageSrc, localAssetId, localAssetSource, x: 24, y: 220, zoom: 1, collapsed: false, pinned: false };
-    commitPlacement([...state.fixture.references, reference], "把草稿放到画布参考区");
+    const reference: ReferencePlacement = { id: uid("reference"), kind: "sketch", name: candidate.metadata?.name ?? "新草稿", detail: "已确认 · 构图图片", imageSrc, localAssetId, localAssetSource, x: 24, y: 220, zoom: 1, collapsed: false, pinned: false };
+    commitPlacement([...state.fixture.references, reference], "把草稿放到画布图片区");
     setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? { ...item, status: "applied" } : item) }));
   };
 
@@ -2518,14 +2831,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     scenarioHandled.current = true;
     const scenario = new URLSearchParams(window.location.search).get("scenario");
     const timer = window.setTimeout(() => {
-      if (scenario === "failure") runTask("failure");
-      if (scenario === "stale") {
-        const stale = { ...createStoryboardLayoutCandidate(Math.max(0, state.fixture.working.revision - 1)), id: uid("candidate-stale"), status: "stale" as const, title: "基于旧工作稿的编排" };
-        setState((current) => ({ ...current, candidates: [...current.candidates, stale] }));
-        addMessage({ role: "agent", kind: "candidate", text: "这个候选基于旧工作稿，不能直接应用。", scope: "已过期", candidateId: stale.id });
-      }
       if (scenario === "story") {
-        setComposer("我想做一个雨夜末班车的轻悬疑短篇");
+        setComposer("完善当前格的雨夜悬疑画面");
       }
     }, 0);
     return () => window.clearTimeout(timer);
@@ -2539,6 +2846,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const switchCanvasMode = (mode: CanvasMode) => {
+    if (frameImageCandidatePreview) cancelFrameImageCandidatePreview();
     exitMultiSelection();
     setCreationMode(null);
     setCreationPointer(null);
@@ -2548,7 +2856,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setCanvasScale(1);
       setToast("聚焦模式 · 页面回到画面中心");
     } else {
-      setToast("自由模式 · 拖动画布查看参考和页面");
+      setToast("自由模式 · 拖动画布查看图片和页面");
     }
   };
 
@@ -2633,6 +2941,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if (frameImageCandidatePreview) return;
     if (event.button !== 0) return;
     if (creationMode) return;
     const stage = stageRef.current;
@@ -2803,6 +3112,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const handleStageClick = () => {
+    if (frameImageCandidatePreview) return;
     if (creationMode) {
       setCreationMode(null);
       setCreationPointer(null);
@@ -2818,8 +3128,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const handleWorkbenchPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (comicContextMenu && !target?.closest(".comic-context-menu, .comic-frame-bleed-menu, .comic-image-more-menu, .object-toolbar")) {
+      setComicContextMenu(null);
+      setSelection(noSelection);
+    }
     if (!verticalSegmentMenuPosition) return;
-    if (event.target instanceof Element && event.target.closest(".drawer-add-page, .vertical-segment-ratio-menu")) return;
+    if (target?.closest(".drawer-add-page, .vertical-segment-ratio-menu")) return;
     setVerticalSegmentMenuPosition(null);
   };
 
@@ -2941,8 +3256,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const nextPageIndex = Math.min(activePageEditorIndex, currentPages.length - 2);
     if (commitCapability("delete_presentation_unit", { unitId: activePageEditorPage.id }, `删除「${activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)}」`, nextPageIndex)) {
       setSelection(noSelection);
-      setPreviewCandidateId(null);
-      setPreviewVariantId(null);
       setPageEditor(null);
     }
   };
@@ -2976,6 +3289,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const displayGroups = pageDisplayGroups(canvasDocument, pageDisplayMode);
   const currentDisplayGroup = displayGroupForUnit(displayGroups, state.currentPageIndex);
+  const currentDisplayGroupIndex = Math.max(0, displayGroups.indexOf(currentDisplayGroup));
   const displayedPageIndices = isVerticalCanvas
     ? canvasDocument.reading.unitOrder.map((_, index) => index)
     : currentDisplayGroup?.unitIndices ?? [state.currentPageIndex].filter((index) => index < currentPages.length);
@@ -2985,7 +3299,25 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     return unit ? orderedUnitSurfaces(unit, canvasDocument.reading.direction).map((surface) => surface.pageNumber).filter((number): number is number => typeof number === "number") : [];
   });
   const setCurrentComicPage = (index: number) => {
-    setState((current) => ({ ...current, currentPageIndex: clampValue(index, 0, Math.max(0, current.fixture.working.document.units.length - 1)) }));
+    if (frameImageCandidatePreview) cancelFrameImageCandidatePreview();
+    const nextPageIndex = clampValue(index, 0, Math.max(0, state.fixture.working.document.units.length - 1));
+    if (nextPageIndex !== state.currentPageIndex) {
+      setSelection(noSelection);
+      setInspectorOpen(false);
+      setObjectInteractionMode("select");
+    }
+    setState((current) => ({ ...current, currentPageIndex: nextPageIndex }));
+  };
+  const turnCanvasPage = (direction: -1 | 1) => {
+    const nextPageIndex = displayGroups[currentDisplayGroupIndex + direction]?.unitIndices[0];
+    if (nextPageIndex === undefined) {
+      setToast(direction < 0 ? "已经是第一页" : "已经是最后一页");
+      return;
+    }
+    closeFloatingMenus();
+    setSelection(noSelection);
+    setInspectorOpen(false);
+    setCurrentComicPage(nextPageIndex);
   };
   const togglePageDisplayMode = () => {
     const previous = pageDisplayMode;
@@ -3007,17 +3339,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setEditingStoryboardTarget(null);
     setInspectorOpen(false);
     const element = workingPages.find((item) => item.id === next.pageId)?.elements.find((item) => item.id === next.id);
-    setScope(next.type === "presentation_unit" ? "当前页" : next.type === "reference_card" ? "仅参考" : next.type === "comic_frame" ? "当前漫画格" : next.type === "image" ? "格内图片裁切" : next.type === "speech_balloon" ? "当前气泡" : next.type === "text" ? "当前旁白" : "当前格");
+    setScope(next.type === "presentation_unit" ? "当前页" : next.type === "reference_card" ? "仅图片" : next.type === "comic_frame" ? "当前漫画格" : next.type === "image" ? "格内图片裁切" : next.type === "speech_balloon" ? "当前气泡" : next.type === "text" ? "当前旁白" : "当前格");
     if (element?.linkedStoryboardBeatId) setEditDraft({});
   };
-  const availableCandidates = state.candidates.filter((candidate) => candidate.status === "available" || candidate.status === "stale");
-  const canvasCandidates = state.candidates
-    .filter((candidate) => candidate.kind !== "asset" && candidate.kind !== "frame_image" && (candidate.status === "available" || candidate.status === "stale") && (candidate.id === previewCandidateId || (candidate.metadata?.canvasX && candidate.metadata?.canvasY)))
-    .slice(-6);
   const canvasReferences = state.fixture.references.filter(isCanvasReference);
   // The sidebar is the asset library. Canvas objects are merely placements
   // linking back to these assets, so removing one never removes its row here.
-  const canvasAssetLibrary = (state.assets ?? []).filter((asset) => asset.kind !== "generated_image").sort((left, right) => {
+  const canvasAssetLibrary = [...(state.assets ?? [])].sort((left, right) => {
     if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
     if ((left.sortIndex ?? 0) !== (right.sortIndex ?? 0)) return (left.sortIndex ?? 0) - (right.sortIndex ?? 0);
     const leftIndex = assetListOrder.indexOf(left.id);
@@ -3104,6 +3432,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   })();
   const contextImagePurpose = contextTargetElement?.type === "image" && contextTargetElement.location.space === "overlay" ? contextTargetElement.location.purpose : undefined;
   const contextImageIsPaperOwned = contextTargetElement?.type === "image" && contextTargetElement.location.space === "overlay" && contextTargetElement.location.anchor.type === "unit";
+  const contextImageAlreadyInAssetList = contextTargetElement?.type === "image" && Boolean(state.assets?.some((asset) => asset.id === contextTargetElement.assetId));
   const contextBalloonPurpose = contextTargetElement?.type === "speech_balloon" && contextTargetElement.location.space === "overlay" ? contextTargetElement.location.purpose : undefined;
   const contextImageReplaceLabel = contextTargetElement?.type === "image"
     ? "更换格内图片"
@@ -3232,29 +3561,129 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     });
   };
 
+  const resolveAgentCard = (messageId: string) => {
+    setResolvedCardIds((current) => new Set(current).add(messageId));
+    if (runtimeAdapter === "server") {
+      void apiResolveAgentMessage(messageId).catch((error) => setToast(error instanceof Error ? error.message : "卡片状态保存失败"));
+    }
+  };
+
+  const confirmAgentAction = (message: AgentMessage) => {
+    if (activeTask?.status === "running") {
+      setToast("当前会话已有任务运行中");
+      return;
+    }
+    const actionSelection = message.selection ?? selection;
+    const instruction = message.instruction ?? [...state.messages].reverse().find((item) => item.role === "user")?.text ?? message.text;
+    setResolvedCardIds((current) => new Set(current).add(message.id));
+    if (runtimeAdapter === "server" && runtimeIds) {
+      void apiCreateTask(runtimeIds, {
+        taskType: message.taskName === "asset_parse" ? "asset_parse" : "storyboard",
+        instruction,
+        scope: message.scope ?? scope,
+        selection: actionSelection,
+        explicitReferences: message.explicitReferences,
+        confirmationMessageId: message.id,
+      }).then(() => refreshServerWorkbench()).catch((error) => {
+        setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
+        setToast(error instanceof Error ? error.message : "任务创建失败");
+      });
+      return;
+    }
+    runTask(message.taskName ?? "storyboard", undefined, instruction, message.scope, actionSelection);
+  };
+
+  const retryAgentTask = (message: AgentMessage) => {
+    if (runtimeAdapter === "server" && message.taskId) {
+      setResolvedCardIds((current) => new Set(current).add(message.id));
+      void apiRetryTask(message.taskId).then(() => apiResolveAgentMessage(message.id)).then(() => refreshServerWorkbench()).catch((error) => {
+        setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
+        setToast(error instanceof Error ? error.message : "重试失败");
+      });
+      return;
+    }
+    if (runtimeAdapter === "server") {
+      setResolvedCardIds((current) => new Set(current).add(message.id));
+      void apiRetryAgentInteraction(message.id).then(() => refreshServerWorkbench()).catch((error) => {
+        setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
+        void refreshServerWorkbench().catch(() => undefined);
+        setToast(error instanceof Error ? error.message : "重试失败");
+      });
+      return;
+    }
+    runTask(message.taskName ?? "failure", undefined, message.instruction);
+  };
+
   const renderAgentMessageContent = (message: AgentMessage, candidate: Candidate | undefined, resolved: boolean) => {
-    if (resolved && (message.kind === "confirmation" || message.kind === "question" || message.kind === "failed")) return <div className="muted-card">这张卡片已经处理，不能重复操作。</div>;
+    if (resolved && message.kind === "failed") return null;
+    if (resolved && message.kind === "confirmation") return <div className="muted-card">这张卡片已经处理，不能重复操作。</div>;
     if (message.kind === "task") {
       const runningHere = activeTask?.status === "running" && (!message.taskId || message.taskId === activeTask.id);
-      return runningHere ? <div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{message.text} · {activeTask.progress}%</small></span><button type="button" onClick={() => void stopActiveTask()}>停止</button></div> : <div className="muted-card">{message.text} {message.taskName === "frame_image_generate" || message.taskName === "frame_image_refine" ? "生成完成后图片会保留在画布，并在下方决定是否应用到漫画格。" : "任务状态与结果已同步。"}</div>;
+      const stageLabel = activeTask?.stage === "preparing" ? "正在准备上下文" : activeTask?.stage === "queued" ? "等待生成资源" : activeTask?.stage === "validating" ? "正在校验结果" : activeTask?.stage === "saving" ? "正在保存候选" : "模型生成中";
+      return runningHere ? <div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{stageLabel}</small></span><button type="button" className="task-cancel-trigger" aria-label="取消任务" onClick={() => setTaskCancelConfirmOpen(true)}><Icon name="x" /></button></div> : <div className="muted-card">{message.text}</div>;
     }
-    if (message.kind === "failed") return <div className="failed-card"><strong>生成失败</strong><p>{message.text}</p><div className="card-actions"><button type="button" onClick={() => runTask(message.taskName ?? "failure")}>重试</button><button type="button" onClick={() => setResolvedCardIds((current) => new Set(current).add(message.id))}>关闭</button></div></div>;
+    if (message.kind === "failed") return <div className="failed-card"><strong>生成失败</strong><p>{message.text}</p><div className="card-actions failed-card-actions"><button type="button" className="failed-retry" onClick={() => retryAgentTask(message)}>重试</button><button type="button" className="failed-close" onClick={() => resolveAgentCard(message.id)}>关闭</button></div></div>;
     if (message.kind === "canceled") return <div className="muted-card">{message.text}</div>;
-    if (message.kind === "confirmation") return <div className="confirmation-card"><div><strong>执行前确认</strong><span>{message.scope}</span></div><p>{message.text}</p><div className="card-actions"><button type="button" className="confirm-run" onClick={() => { setResolvedCardIds((current) => new Set(current).add(message.id)); runTask(message.taskName ?? "storyboard"); }}>确认并生成</button><button type="button" onClick={() => setResolvedCardIds((current) => new Set(current).add(message.id))}>取消</button></div></div>;
-    if (message.kind === "question") return <div className="question-card"><p>{message.text}</p><div>{message.options?.map((option) => <button type="button" key={option} onClick={() => { setResolvedCardIds((current) => new Set(current).add(message.id)); runTask(message.taskName ?? "storyboard", option); }}>{option}</button>)}<button type="button" className="cancel-card" onClick={() => setResolvedCardIds((current) => new Set(current).add(message.id))}>取消</button></div></div>;
+    if (message.kind === "confirmation") return <div className="confirmation-card"><div><strong>执行前确认</strong><span>{message.scope}</span></div><p>{message.text}</p><div className="card-actions"><button type="button" className="confirm-run" onClick={() => confirmAgentAction(message)}>确认并生成</button><button type="button" onClick={() => resolveAgentCard(message.id)}>取消</button></div></div>;
+    if (message.kind === "question") return <div className="agent-inline-question"><p>{message.text}</p>{!resolved && message.options?.length ? <div>{message.options.map((option) => <button type="button" key={option} onClick={() => { resolveAgentCard(message.id); setComposer(option); }}>{option}</button>)}</div> : null}</div>;
     if (message.kind === "candidate" && candidate) {
       const isAsset = candidate.kind === "asset";
+      const isStoryboard = candidate.kind === "storyboard";
       const isFrameImage = candidate.kind === "frame_image";
-      const isPreviewing = previewCandidateId === candidate.id;
-      return <div className={`candidate-card ${candidate.status} ${isFrameImage ? "frame-image-decision" : ""}`}>
-        <div className="candidate-title"><strong>{candidate.title}</strong><span>{candidate.status === "available" ? candidate.targetLabel : candidate.status === "applied" ? "已应用" : candidate.status === "reverted" ? "已回退" : candidate.status === "stale" ? "基于旧版本" : "已取消"}</span></div>
-        <p>{isFrameImage ? "图片已经生成并保留在主画布，可定位查看；是否应用到目标漫画格由你决定。" : candidate.changeSummary}</p>
-        {isFrameImage && candidate.status === "available" ? <button type="button" className="candidate-navigate" onClick={() => navigateToCandidateImage(candidate)}>定位到画布图片 →</button> : null}
-        {candidate.status === "available" ? isFrameImage ? <div className="candidate-actions frame-image-actions">
-          <button type="button" className="apply-candidate" onClick={() => applyCandidate(candidate, true)}>应用</button>
-          <button type="button" onClick={() => { setPreviewCandidateId(isPreviewing ? null : candidate.id); setToast(isPreviewing ? "已取消格内预览，画布图片仍然保留" : "正在目标漫画格内临时预览"); }}>{isPreviewing ? "取消预览" : "预览"}</button>
-          <button type="button" className="discard-candidate" onClick={() => discardCandidate(candidate.id)}>取消</button>
-        </div> : <div className="candidate-actions"><button type="button" className="apply-candidate" onClick={() => { setPreviewCandidateId(candidate.id); if (!isAsset) setAgentOpen(false); setToast(isAsset ? "资产候选将在确认保存后进入资产空间" : "候选已在画布展开，预览后可应用"); }}>{isAsset ? "查看候选" : "在画布预览"}</button><button type="button" className="discard-candidate" onClick={() => discardCandidate(candidate.id)}>丢弃</button></div> : candidate.status === "applied" && !isAsset ? <button type="button" className="revert-candidate" onClick={() => revertCandidate(candidate)}>撤回本次应用</button> : candidate.status === "stale" ? <button type="button" onClick={() => runTask("storyboard")}>基于当前工作稿重新生成</button> : null}
+      if (candidate.kind === "storyboard" && !candidate.metadata?.storyboardMode) return null;
+      const frameImageTarget = isFrameImage ? frameImageCandidateTarget(candidate) : undefined;
+      const frameImagePageIndex = resolveReadingUnitIndex(state.fixture.working.document, frameImageTarget?.pageId);
+      const frameImageUnit = frameImageTarget?.pageId
+        ? state.fixture.working.document.units.find((unit) => unit.id === frameImageTarget.pageId)
+        : undefined;
+      const frameImagePageLabel = frameImageUnit ? presentationUnitNumberLabel(frameImageUnit, frameImagePageIndex) : undefined;
+      const frameImageTargetLabel = frameImagePageLabel && !candidate.targetLabel.includes(frameImagePageLabel)
+        ? `${frameImagePageLabel} · ${candidate.targetLabel}`
+        : candidate.targetLabel;
+      const candidateCardTitle = isStoryboard
+        ? `编辑分镜条目 · ${candidate.targetLabel}`
+        : isFrameImage && frameImagePageLabel
+          ? `${candidate.title.split("·")[0].trim()} · ${frameImageTargetLabel}`
+          : candidate.title;
+      const terminalCandidate = candidate.status !== "available";
+      const terminalStartsCollapsed = candidate.status === "discarded" || candidate.status === "stale";
+      const terminalExpanded = expandedTerminalCandidateIds.has(candidate.id);
+      const terminalCollapsed = terminalCandidate && (terminalStartsCollapsed ? !terminalExpanded : collapsedTerminalCandidateIds.has(candidate.id));
+      const toggleTerminalCandidate = () => setExpandedTerminalCandidateIds((current) => {
+        const next = new Set(current);
+        if (next.has(candidate.id)) next.delete(candidate.id);
+        else next.add(candidate.id);
+        return next;
+      });
+      const toggleCollapsedTerminalCandidate = () => setCollapsedTerminalCandidateIds((current) => {
+        const next = new Set(current);
+        if (next.has(candidate.id)) next.delete(candidate.id);
+        else next.add(candidate.id);
+        return next;
+      });
+      const openSavedAsset = candidate.metadata?.outputAssetId
+        ? () => router.push(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&asset=${encodeURIComponent(candidate.metadata?.outputAssetId ?? "")}`)
+        : undefined;
+      const candidateStatusLabel = candidate.status === "available"
+        ? isStoryboard ? "待应用" : candidate.targetLabel
+        : candidate.status === "saved" || (candidate.status === "applied" && isAsset)
+          ? "已保存"
+          : candidate.status === "applied"
+            ? "已应用"
+            : candidate.status === "reverted"
+              ? "已回退"
+              : candidate.status === "stale"
+                ? "已过期"
+                : "已丢弃";
+      const toggleTerminal = terminalStartsCollapsed ? toggleTerminalCandidate : toggleCollapsedTerminalCandidate;
+      const showSavedAssetView = isAsset && (candidate.status === "saved" || candidate.status === "applied") && openSavedAsset;
+      return <div className={`candidate-card ${candidate.status} ${terminalCollapsed ? "terminal-collapsed compact" : ""}`}>
+        <div className="candidate-title"><strong>{candidateCardTitle}</strong><span>{candidateStatusLabel}</span></div>
+        {!terminalCollapsed && (candidate.metadata?.previewUrl || candidate.metadata?.imageSrc) ? <button type="button" className="candidate-result-preview-button" aria-label={`查看${candidate.title}图片`} onClick={() => setImageViewer({ images: [{ id: candidate.id, src: candidate.metadata?.previewUrl ?? candidate.metadata?.imageSrc ?? "", alt: `${candidate.title}预览` }] })}><img className="candidate-result-preview" src={candidate.metadata.previewUrl ?? candidate.metadata.imageSrc} alt={`${candidate.title}预览`} /></button> : null}
+        {!terminalCollapsed && candidate.metadata?.storyboardTitle ? <strong className="candidate-storyboard-title">{candidate.metadata.storyboardTitle}</strong> : null}
+        {!terminalCollapsed && candidate.metadata?.storyboardDescription ? <p className="candidate-storyboard-description">{candidate.metadata.storyboardDescription}</p> : null}
+        {!terminalCollapsed ? <p>{candidate.changeSummary}</p> : null}
+        {candidate.status === "available" ? <div className="candidate-actions"><button type="button" className="candidate-primary-action" onClick={() => { if (isFrameImage) startFrameImageCandidatePreview(candidate); else if (isAsset) void applyAssetCandidate(candidate); else applyCandidate(candidate); }}>{isFrameImage ? "预览" : isAsset ? "保存到资产" : "应用"}</button><button type="button" className="candidate-secondary-action" onClick={() => discardCandidate(candidate.id)}>丢弃</button></div> : terminalCandidate ? <div className="terminal-candidate-actions">{showSavedAssetView ? <button type="button" className="saved-asset-view" onClick={openSavedAsset}>查看</button> : null}<button type="button" className="terminal-candidate-toggle" aria-expanded={!terminalCollapsed} onClick={toggleTerminal}>{terminalCollapsed ? "展开" : "收起"}<Icon name={terminalCollapsed ? "chevronDown" : "chevronUp"} /></button></div> : null}
       </div>;
     }
     return <p>{message.text}</p>;
@@ -3306,9 +3735,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <div className="asset-reference-items">
             {canvasAssetLibrary.map((asset) => {
               const placement = canvasReferences.find((reference) => reference.assetId === asset.id);
-              const glyph = asset.kind === "character" ? "人" : asset.kind === "scene" ? "景" : asset.kind === "prop" ? "物" : "图";
+              const thumbnail = canvasAssetThumbnail(asset);
+              const kindTag = assetKindTag(asset.kind);
+              const thumbnailNode = <span className="asset-row-thumbnail">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} /> : <Icon name="asset" />}</span>;
               return <div className={`asset-row ${placement && selection.id === placement.id ? "active" : ""}`} key={asset.id}>
-                {assetRenameId === asset.id ? <form className="asset-row-rename" onSubmit={(event) => { event.preventDefault(); renameAssetInList(asset); }}><input autoFocus value={assetRenameDraft} onChange={(event) => setAssetRenameDraft(event.target.value)} maxLength={120}/><button type="submit">保存</button><button type="button" aria-label="取消重命名" onClick={() => { setAssetRenameId(null); setAssetRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" onClick={() => { if (placement) setSelection({ type: "reference_card", id: placement.id, label: asset.name }); else setToast(`「${asset.name}」尚未添加到当前画布`); }}><span>{glyph}</span><b>{asset.name}</b></button>
+                {assetRenameId === asset.id ? <form className="asset-row-rename" onSubmit={(event) => { event.preventDefault(); renameAssetInList(asset); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><input autoFocus value={assetRenameDraft} onChange={(event) => setAssetRenameDraft(event.target.value)} maxLength={120}/><button type="submit">保存</button><button type="button" aria-label="取消重命名" onClick={() => { setAssetRenameId(null); setAssetRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="asset-row-main" onClick={() => { if (!thumbnail) { setToast(`「${asset.name}」还没有可查看的图片`); return; } closeFloatingMenus(); setImageViewer({ images: [{ id: asset.id, src: thumbnail, alt: asset.name }] }); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><b>{asset.name}</b></button>
                 <button className="asset-more" type="button" aria-label={`${asset.name}更多选项`} onClick={(event) => { const workbench = event.currentTarget.closest<HTMLElement>(".workbench"); const button = event.currentTarget.getBoundingClientRect(); const workbenchRect = workbench?.getBoundingClientRect(); closeFloatingMenus("asset"); setAssetMenuPosition({ x: button.right - (workbenchRect?.left ?? 0) + 16, y: button.top - (workbenchRect?.top ?? 0) - 4 }); setAssetMenuId((id) => id === asset.id ? null : asset.id); }}><Icon name="moreVertical" /></button></>}
               </div>;
             })}
@@ -3316,11 +3747,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           </div>
         </section> : null}
         {leftView === "storyboard" ? <section className="drawer-view">
-          <h2><span><Icon name="layout" /></span>页面方案</h2>
-          <div className="layout-grid">
-            {availableCandidates.filter((candidate) => candidate.kind === "page_layout").slice(-6).map((candidate) => <button type="button" key={candidate.id} className="layout-card" onClick={() => { setPreviewVariantId(null); setPreviewCandidateId(candidate.id); setToast(`已在画布展开「${candidate.title}」`); }}><span className="page-layout-preview"><i/><i/><i/><i/></span><b>{candidate.title}</b><em>{candidate.status === "stale" ? "过期" : "待预览"}</em></button>)}
-            {state.pageVariants.filter((variant) => currentPages.some((comicPage) => comicPage.id === variant.unitId)).map((variant) => <button type="button" key={variant.id} className={`layout-card ${previewVariantId === variant.id ? "active" : ""}`} onClick={() => { setPreviewCandidateId(null); setPreviewVariantId(variant.id); setToast(`正在预览页面方案「${variant.name}」`); }}><span className="page-layout-preview"><i/><i/><i/><i/></span><b>{variant.name}</b><em>{variant.kind === "layout_only" ? "仅编排" : variant.kind === "partial_frames" ? "局部画格" : "完整页面"}</em></button>)}
-          </div>
           <h2><span><Icon name="storyboard" /></span>单格画面</h2>
           <div className="storyboard-frame-list">
             {storyboardFrameRows.map((row, index) => <div className={`storyboard-frame-row ${selection.id === row.frame.id ? "active" : ""}`} key={row.frame.id}>
@@ -3371,6 +3797,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setLeftOpen(true)} aria-label="展开创作流"><Icon name="expand" /></button> : null}
       {activeAssetMenu && assetMenuPosition ? (() => {
         const placement = canvasReferences.find((reference) => reference.assetId === activeAssetMenu.id);
+        const visibleInAssetSpace = isAssetVisibleInAssetSpace(activeAssetMenu);
         return <FloatingMenu className="asset-reference-menu-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }}>
           <MenuSection className="asset-menu-section">
             <button type="button" onClick={() => { addAssetReference(activeAssetMenu); setAgentOpen(true); setAssetMenuId(null); }}><span><Icon name="ai" />引用到对话</span></button>
@@ -3378,7 +3805,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           </MenuSection>
           <MenuDivider className="asset-menu-divider" />
           <MenuSection className="asset-menu-section">
-            {(activeAssetMenu.libraryStatus === "library" || activeAssetMenu.kind === "reference_image") ? <button type="button" disabled={activeAssetMenu.libraryStatus === "library"} onClick={() => openSaveAssetForm(activeAssetMenu)}><span><Icon name="save" />{activeAssetMenu.libraryStatus === "library" ? "已关联资产" : "保存为资产"}</span></button> : null}
+            {(activeAssetMenu.libraryStatus === "library" || activeAssetMenu.kind === "reference_image" || activeAssetMenu.kind === "generated_image") ? <button type="button" disabled={visibleInAssetSpace} onClick={() => openSaveAssetForm(activeAssetMenu)}><span><Icon name="save" />{visibleInAssetSpace ? "已关联资产" : "保存为资产"}</span></button> : null}
             <button type="button" onClick={() => { setAssetRenameId(activeAssetMenu.id); setAssetRenameDraft(activeAssetMenu.name); setAssetMenuId(null); }}><span><Icon name="edit" />重命名</span></button>
             <button type="button" onClick={() => pinAssetInList(activeAssetMenu)}><span><Icon name="pin" />置顶</span></button>
             <button type="button" className="asset-list-delete" onClick={() => removeAssetFromList(activeAssetMenu)}><span><Icon name="trash" />从列表移除</span></button>
@@ -3420,6 +3847,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       </form> : null}
       {activePageEditorPage && activePageEditorUnit && pageEditor?.mode === "delete" ? <DeleteConfirmDialog dialogId="page-delete" title={`删除“${activePageEditorPage.name || presentationUnitNumberLabel(activePageEditorUnit, activePageEditorIndex)}”？`} description={currentPages.length <= 1 ? "漫画至少需要保留一个展示单元，当前内容不能删除。" : `${activePageEditorUnit.surfaces.length > 1 ? `其中 ${activePageEditorUnit.surfaces.length} 个物理${activePageEditorUnit.kind === "spread" ? "页" : "段"}和` : "其中"}${activePageEditorPage.elements.filter((element) => element.type === "comic_frame").length} 个画格会一并移除。该操作可以撤销。`} disabled={currentPages.length <= 1} onCancel={() => setPageEditor(null)} onConfirm={deletePage} /> : null}
       {pageStructureConfirm ? <DeleteConfirmDialog dialogId="page-structure-confirm" tone="neutral" icon="pages" title={pageStructureConfirm.action === "merge_pages" ? "与下一页合并为真正双页？" : pageStructureConfirm.action === "split_spread" ? "拆分为两个单页？" : pageStructureConfirm.action === "merge_segments" ? "与下一段合并为跨段画布？" : "拆分为独立滚动段？"} description={pageStructureConfirm.action === "merge_pages" ? "两张物理页会成为一个不可拆开的双页展示单元，原有对象与页码会保留。" : pageStructureConfirm.action === "merge_segments" ? "两个物理段会成为一个连续编辑单元，可放入单个跨段图片。" : "仅当画格和对象都没有跨越分隔线时才能安全拆分。"} confirmLabel={pageStructureConfirm.action.startsWith("merge") ? "确认合并" : "确认拆分"} onCancel={() => setPageStructureConfirm(null)} onConfirm={confirmPageStructureChange} /> : null}
+      {taskCancelConfirmOpen && activeTask?.status === "running" ? <DeleteConfirmDialog dialogId="task-cancel-confirm" tone="neutral" icon="x" title="取消当前任务？" description="任务会立即停止，当前工作稿不会改变，也不会产生新的候选结果。" confirmLabel="确认取消" onCancel={() => setTaskCancelConfirmOpen(false)} onConfirm={async () => { setTaskCancelConfirmOpen(false); await stopActiveTask(); }} /> : null}
       {activeAssetSave && assetMenuPosition ? <form className="asset-save-form-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }} onSubmit={(event) => { event.preventDefault(); void saveCanvasAssetToLibrary(activeAssetSave); }} onPointerDown={(event) => event.stopPropagation()}>
         <header><span>保存为资产</span><button type="button" aria-label="取消保存为资产" onClick={() => setAssetSaveFormId(null)}><Icon name="x" /></button></header>
         <p>将“{activeAssetSave.name}”保存到资产空间</p>
@@ -3449,50 +3877,30 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         onClick={handleStageClick}
       >
         <div className="canvas-world" style={canvasWorldStyle}>
-          {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅参考"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动参考图「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放参考图「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} />)}
+          {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅图片"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动图片「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放图片「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} onView={() => { closeFloatingMenus(); setImageViewer({ images: canvasReferences.map((item) => ({ id: item.id, src: item.imageSrc, alt: item.name })), initialIndex: canvasReferences.findIndex((item) => item.id === reference.id), allowNavigation: true }); }} />)}
           <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : showingSpread ? "spread" : ""} ${currentDisplayGroup?.trueSpread ? "true-spread" : ""}`} style={verticalStageWrapStyle}>
             <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : "滚动段 01") : showingSpread ? `PAGES ${displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0")}`}</span>
-            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={selection} editable={canvasMode === "focus" && !candidateDocument} interactionMode={objectInteractionMode} creationMode={creationMode ?? undefined} multiSelectedIds={activeMultiComicIds} multiMoving={multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={handleCanvasSelection} onContextAction={handleComicContextAction} onObjectDoubleClick={handleComicObjectDoubleClick} onPlaceDialogue={createDialogueBalloon} onPlacePageDialogue={createPageDialogueBalloon} onPlaceNarration={createNarration} onCommitElement={(unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={commitElementPatches} /></div>)}</div>
+            <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={frameImageCandidatePreview?.target ?? selection} editable={canvasMode === "focus"} interactionMode={frameImageCandidatePreview ? "preview" : objectInteractionMode} creationMode={frameImageCandidatePreview ? undefined : creationMode ?? undefined} multiSelectedIds={frameImageCandidatePreview ? undefined : activeMultiComicIds} multiMoving={!frameImageCandidatePreview && multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={frameImageCandidatePreview ? undefined : handleCanvasSelection} onContextAction={frameImageCandidatePreview ? undefined : handleComicContextAction} onObjectDoubleClick={frameImageCandidatePreview ? undefined : handleComicObjectDoubleClick} onPlaceDialogue={frameImageCandidatePreview ? undefined : createDialogueBalloon} onPlacePageDialogue={frameImageCandidatePreview ? undefined : createPageDialogueBalloon} onPlaceNarration={frameImageCandidatePreview ? undefined : createNarration} onCommitElement={frameImageCandidatePreview ? undefined : (unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={frameImageCandidatePreview ? undefined : commitElementPatches} /></div>)}</div>
+            {canvasMode === "free" && !isVerticalCanvas ? <div className="canvas-page-turn-zones" aria-label="自由模式翻页"><button type="button" className="canvas-page-turn-zone previous" aria-label="上一页" onClick={() => turnCanvasPage(-1)} /><button type="button" className="canvas-page-turn-zone next" aria-label="下一页" onClick={() => turnCanvasPage(1)} /></div> : null}
           </div>
-          {candidateDocument && (previewingCandidate || previewingVariant) ? <nav className="candidate-compare-toolbar" aria-label="页面方案对比">
-            <div className="candidate-version-switch"><button type="button" className={candidatePreviewMode === "original" ? "active" : ""} onClick={() => setCandidatePreviewMode("original")}>原稿</button><button type="button" className={candidatePreviewMode === "candidate" ? "active" : ""} onClick={() => setCandidatePreviewMode("candidate")}>新方案</button></div>
-            {previewingCandidate ? <button type="button" onClick={() => saveCandidateVariant(previewingCandidate)}>保存方案</button> : null}
-            <button type="button" className="primary" onClick={() => previewingCandidate ? applyCandidate(previewingCandidate, true) : previewingVariant ? applySavedVariant(previewingVariant) : undefined}>应用</button>
-            {previewingVariant ? <button type="button" onClick={() => removeSavedVariant(previewingVariant)}>删除方案</button> : <button type="button" onClick={() => { setPreviewCandidateId(null); setCandidatePreviewMode("original"); }}>取消</button>}
-          </nav> : null}
         </div>
         {isVerticalCanvas && canvasMode === "focus" && activeVerticalViewport ? <div className="device-viewport-guide" style={verticalViewportStyle} aria-hidden="true" /> : null}
         {isVerticalCanvas && canvasMode === "focus" ? <aside ref={verticalNavigatorRef} className="vertical-scroll-navigator" aria-hidden="true"><div className="vertical-scroll-map" style={verticalNavigatorPaperStyle}>{canvasUnits.map((unit) => <span key={unit.id} style={{ flexGrow: unit.canvas.height }} />)}<i /></div></aside> : null}
         {marquee && marqueeStyle ? <div className="canvas-marquee" style={marqueeStyle} aria-hidden="true" /> : null}
 
-        {canvasMode === "focus" && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setIntent("创作"); setAgentOpen(true); }}><Icon name="ai" /></button>
+        {frameImageCandidatePreview && toolbarPlacement ? <ObjectToolbar className={`candidate-preview-toolbar side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="候选图片预览工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" className="candidate-preview-apply" onClick={applyFrameImageCandidatePreview}><Icon name="save" />应用</button>
+          <button type="button" className="candidate-preview-toggle" aria-pressed={frameImageCandidatePreview.mode === "candidate"} onClick={() => setFrameImageCandidatePreview((current) => current ? { ...current, mode: current.mode === "candidate" ? "original" : "candidate" } : current)}><Icon name={frameImageCandidatePreview.mode === "candidate" ? "undo" : "preview"} />{frameImageCandidatePreview.mode === "candidate" ? "还原" : "预览"}</button>
+          <button type="button" className="candidate-preview-cancel" onClick={cancelFrameImageCandidatePreview}><Icon name="x" />取消</button>
+        </ObjectToolbar> : null}
+        {canvasMode === "focus" && !frameImageCandidatePreview && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setAgentOpen(true); }}><Icon name="ai" /></button>
           <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : selection.type === "text" ? "开启或关闭旁白移动和换行宽度调整" : selection.type === "image" ? "开启或关闭纸面图片移动和缩放" : "开启或关闭移动画格"} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay")) || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
           <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? "旋转旁白" : selection.type === "speech_balloon" ? "旋转对白气泡" : "裁切格内图片并调整画格角度"} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
           <button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selection.type === "text" ? "编辑旁白文字和字号" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button>
           <button type="button" aria-label="管理当前对象" aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
         </ObjectToolbar> : null}
-        {canvasCandidates.map((candidate, index) => {
-          const expanded = previewCandidateId === candidate.id;
-          const x = Number(candidate.metadata?.canvasX ?? 300 + (index % 2) * 210);
-          const y = Number(candidate.metadata?.canvasY ?? 84 + Math.floor(index / 2) * 150);
-          const previewUrl = candidate.metadata?.previewUrl;
-          const statusLabel = candidate.status === "available" ? "候选" : candidate.status === "applied" ? "已应用" : candidate.status === "reverted" ? "已回退" : candidate.status === "discarded" ? "已丢弃" : "已过期";
-          return <article key={candidate.id} className={`canvas-candidate-card ${candidate.status} ${expanded ? "expanded" : ""}`} style={{ left: x, top: y }} data-testid={`canvas-candidate-${candidate.id}`} onClick={(event) => event.stopPropagation()}>
-            {previewUrl ? <img src={previewUrl} alt={`${candidate.title} 预览`} /> : <span className="candidate-storyboard-preview"><i/><i/><i/><i/></span>}
-            <div className="canvas-candidate-head"><strong>{candidate.title}</strong><em>{statusLabel}</em></div>
-            {expanded ? <p>{candidate.changeSummary}</p> : null}
-            {candidate.status === "available" ? <div className="canvas-candidate-actions">
-              {!expanded ? <button type="button" onClick={() => setPreviewCandidateId(candidate.id)}>预览</button> : <>
-                <button type="button" className="primary" onClick={() => candidate.kind === "asset" ? void applyAssetCandidate(candidate) : applyCandidate(candidate)}>{candidate.kind === "asset" ? "保存到资产" : "应用到工作稿"}</button>
-                <button type="button" onClick={() => { setComposer(`继续完善「${candidate.title}」：`); setIntent(candidate.kind === "asset" ? "资产" : "创作"); setAgentOpen(true); }}>继续完善</button>
-              </>}
-              <button type="button" className="danger" onClick={() => discardCandidate(candidate.id)}>丢弃</button>
-            </div> : candidate.status === "applied" && candidate.kind !== "asset" ? <button type="button" className="revert-candidate" onClick={() => revertCandidate(candidate)}>撤回本次应用</button> : candidate.status === "applied" ? <span className="candidate-terminal-state">已保存到资产库</span> : null}
-          </article>;
-        })}
-
-        {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />编辑画格 · {editingStoryboardTarget.label}</span><button type="button" aria-label="关闭画格编辑" onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><section className="frame-editor-section"><strong>分镜条目</strong><label>标题<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder="例如：空站来信" onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>描述<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder="描述这一格的场景、人物、动作、情绪或叙事作用" onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? "保存" : "创建并绑定"}</button></section><section className="frame-editor-section"><strong>画格</strong><label>边框粗细<NumberStepper ariaLabel="画格边框粗细" step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><div className="frame-bleed-editor"><span>延伸至页边</span><div>{(["top", "right", "bottom", "left"] as const).map((edge) => <button key={edge} type="button" className={editingStoryboardFrame.bleedEdges?.[edge] ? "active" : ""} aria-pressed={Boolean(editingStoryboardFrame.bleedEdges?.[edge])} onClick={() => toggleFrameBleedEdge({ type: "comic_frame", id: editingStoryboardTarget.frameId, pageId: editingStoryboardTarget.unitId, label: editingStoryboardTarget.label }, edge)}>{{ top: "上", right: "右", bottom: "下", left: "左" }[edge]}</button>)}</div></div><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>保存边框</button></section></aside> : null}
+        {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />编辑画格 · {editingStoryboardTarget.label}</span><button type="button" aria-label="关闭画格编辑" onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><section className="frame-editor-section"><strong>分镜条目</strong><label>标题<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder="例如：空站来信" onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>描述<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder="描述这一格的场景、人物、动作、情绪或叙事作用" onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? "保存" : "创建并绑定"}</button></section><section className="frame-editor-section"><strong>画格</strong><label>边框粗细<NumberStepper ariaLabel="画格边框粗细" step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>保存边框</button></section></aside> : null}
 
         {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label="关闭对象编辑器" onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>拖动图片调整取景，滚轮或下面动作缩放；拖动画格四角可沿横向或纵向调整边线角度。</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>放大</button><button type="button" onClick={() => cropImage("out")}>缩小</button><button type="button" onClick={() => cropImage("left")}>左移</button><button type="button" onClick={() => cropImage("up")}>上移</button><button type="button" onClick={() => cropImage("down")}>下移</button><button type="button" onClick={() => cropImage("right")}>右移</button><button type="button" onClick={() => cropImage("reset")}>重置取景</button></div><button className="text-edit-link" type="button" disabled={!selectedCropFrame || selectedCropFrame.shape.kind === "rect"} onClick={resetFrameShape}>重置画格角度</button><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: `画格 ${selectedElement.comicFrameId.split("-").pop()}` })}>回到画格</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"}</button></> : null}</aside> : null}
       </CanvasStage>
@@ -3515,6 +3923,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           {contextImagePurpose === "cross_page" || contextImagePurpose === "cross_segment" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="collapse" />{contextImagePurpose === "cross_page" ? "取消跨页" : "取消跨段"}</span></button></ComicMenuGroup><MenuDivider /></> : contextImageIsPaperOwned && contextTargetUnit?.kind === "spread" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertImageToCrossSurface(comicContextMenu.target, "cross_page")}><span><Icon name="pageSpread" />设为跨页图片</span></button></ComicMenuGroup><MenuDivider /></> : contextImageIsPaperOwned && contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertImageToCrossSurface(comicContextMenu.target, "cross_segment")}><span><Icon name="pages" />设为跨段图片</span></button></ComicMenuGroup><MenuDivider /></> : null}
           {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => promoteSelectionToOverlay(comicContextMenu.target)}><span><Icon name="expand" />设为破格</span></button><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面图片</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetElement.location.anchor.type === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面图片</span></button><button type="button" onClick={() => returnSelectionToFrame(comicContextMenu.target)}><span><Icon name="collapse" />收回画格</span></button></ComicMenuGroup><MenuDivider /></> : null}
           {contextTargetElement.location.space === "overlay" ? <><ComicMenuGroup label="层级"><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "front")}><span><Icon name="layers" />置于顶层</span></button><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "back")}><span><Icon name="layers" />置于底层</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          <ComicMenuGroup label="更多"><button type="button" aria-haspopup="menu" aria-expanded={Boolean(comicContextMenu.imageMoreMenu)} onClick={(event) => openImageMoreMenu(event.currentTarget)}><span><Icon name="more" />更多选项<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></ComicMenuGroup>
+          <MenuDivider />
           <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "image", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />移除图片</span></button></ComicMenuGroup>
         </> : null}
         {comicContextMenu.target.type === "speech_balloon" && contextTargetElement?.type === "speech_balloon" ? <>
@@ -3532,6 +3942,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </> : null}
       </FloatingMenu> : null}
       {comicContextMenu?.bleedMenu && contextTargetFrameData?.frame ? <FloatingMenu className="reference-context-menu comic-frame-bleed-menu" style={comicContextMenu.bleedMenu} aria-label="选择出血边" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection>{(["top", "right", "bottom", "left"] as const).map((edge) => <button type="button" key={edge} aria-pressed={Boolean(contextTargetFrameData.frame?.bleedEdges?.[edge])} onClick={() => toggleFrameBleedEdge(comicContextMenu.target, edge)}><span><Icon name="expand" />{contextTargetFrameData.frame?.bleedEdges?.[edge] ? "取消" : "延伸至"}{{ top: "上", right: "右", bottom: "下", left: "左" }[edge]}侧页边</span></button>)}</MenuSection></FloatingMenu> : null}
+      {comicContextMenu?.imageMoreMenu && contextTargetElement?.type === "image" ? <FloatingMenu className="reference-context-menu comic-image-more-menu" style={comicContextMenu.imageMoreMenu} aria-label="图片更多选项" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection><button type="button" onClick={() => openCanvasImageViewer(comicContextMenu.target)}><span><Icon name="referenceImage" />查看图片</span></button><button type="button" disabled={Boolean(downloadingCanvasImageId)} onClick={() => void downloadCanvasImage(comicContextMenu.target)}><span><Icon name="download" />{downloadingCanvasImageId === contextTargetElement.id ? "下载中…" : "下载图片"}</span></button><button type="button" disabled={contextImageAlreadyInAssetList || Boolean(addingCanvasImageAssetId)} onClick={() => void addCanvasImageToAssetList(comicContextMenu.target)}><span><Icon name="add" />{contextImageAlreadyInAssetList ? "已添加到资产列表" : addingCanvasImageAssetId === contextTargetElement.assetId ? "添加中…" : "添加到资产列表"}</span></button></MenuSection></FloatingMenu> : null}
 
       {frameImageTarget && frameImagePickerStyle ? <FloatingMenu role="dialog" className="frame-image-picker" style={frameImagePickerStyle} aria-label="选择漫画图片" onPointerDown={(event) => event.stopPropagation()}>
         <header><div><strong>{frameImageTarget.placement === "cross_page" ? "放入跨页图片" : frameImageTarget.placement === "cross_segment" ? "放入跨段图片" : (() => { const image = frameAndImageForSelection(frameImageTarget.selection).image; return image ? image.location.space === "frame" ? "更换格内图片" : image.location.purpose === "cross_page" ? "更换跨页图片" : image.location.purpose === "cross_segment" ? "更换跨段图片" : image.location.anchor.type === "unit" ? "更换纸面图片" : "更换破格图片" : frameImageTarget.selection.type === "presentation_unit" ? "放入纸面图片" : "放入格内图片"; })()}</strong><small>{frameImagePickerSelection?.frame ? "选择当前页、画布或资产中的图片" : "选择左侧资产列表中的图片"}</small></div><button type="button" aria-label="关闭图片选择" onClick={() => setFrameImageTarget(null)}><Icon name="x" /></button></header>
@@ -3553,40 +3964,46 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <div className="agent-head-actions"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label="打开当前画布的会话列表" aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><button type="button" aria-label="收起 Agent 工作区" onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
         </div>
         {sessionDrawerOpen ? <SessionDrawer aria-label="当前画布会话"><header><div><small>当前画布</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label="新建会话" onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder="输入新对话名称" maxLength={80}/><button type="submit">创建</button><button type="button" aria-label="取消新建会话" onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="x" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit">保存</button><button type="button" aria-label="取消重命名" onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={`管理「${conversation.title}」`} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />重命名</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="trash" />删除</button></div> : null}</SessionDrawer> : null}
-        <div className="agent-messages" data-testid="agent-messages">
+        <div ref={agentMessagesRef} className="agent-messages" data-testid="agent-messages">
           {state.messages.map((message) => {
             const candidate = message.candidateId ? state.candidates.find((item) => item.id === message.candidateId) : undefined;
+            if (message.kind === "candidate" && (!candidate || (candidate.kind === "storyboard" && !candidate.metadata?.storyboardMode))) return null;
             const resolved = message.resolved === true || resolvedCardIds.has(message.id);
             const attachments = message.attachments?.length ? (
               <div className="message-attachments">
                 {message.attachments.map((attachment) => (
                   <figure key={attachment.id}>
-                    <img src={attachment.imageUrl} alt={`${attachment.name} 对话引用`} />
+                    <button type="button" className="message-attachment-preview" aria-label={`查看${attachment.name}`} onClick={() => setImageViewer({ images: [{ id: attachment.id, src: attachment.imageUrl, alt: `${attachment.name} 对话引用` }] })}><img src={attachment.imageUrl} alt={`${attachment.name} 对话引用`} /></button>
                     <figcaption>{attachment.name}</figcaption>
                   </figure>
                 ))}
               </div>
             ) : null;
+            const referenceQuote = message.role === "user" && message.explicitReferences?.length ? (
+              <blockquote className="message-reference-quote">{message.explicitReferences.map(referenceMention).join(" ")}</blockquote>
+            ) : null;
             return (
               <div className={`agent-message ${message.role} ${message.kind}`} key={message.id}>
                 {attachments}
+                {referenceQuote}
                 {renderAgentMessageContent(message, candidate, resolved)}
               </div>
             );
           })}
-          {activeTask?.status === "running" && !state.messages.some((message) => message.kind === "task" && (!message.taskId || message.taskId === activeTask.id)) ? <div className="agent-message agent task"><div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{activeTask.scope} · {activeTask.progress}%</small></span><button type="button" onClick={() => void stopActiveTask()}>停止</button></div></div> : null}
+          {activeTask?.status === "running" && !state.messages.some((message) => message.kind === "task" && (!message.taskId || message.taskId === activeTask.id)) ? <div className="agent-message agent task"><div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{activeTask.stage === "preparing" ? "正在准备上下文" : activeTask.stage === "queued" ? "等待生成资源" : activeTask.stage === "validating" ? "正在校验结果" : activeTask.stage === "saving" ? "正在保存候选" : "模型生成中"}</small></span><button type="button" className="task-cancel-trigger" aria-label="取消任务" onClick={() => setTaskCancelConfirmOpen(true)}><Icon name="x" /></button></div></div> : null}
+          {streamingTurn ? <div className="agent-message agent plain streaming" aria-live="polite">{streamingTurn.status === "thinking" ? <span className="agent-thinking" aria-label="Agent 正在思考"><i/><i/><i/></span> : <p>{streamingTurn.text}<span className="streaming-cursor" aria-hidden="true" /></p>}</div> : null}
         </div>
         <div className="composer-box">
-          <div className="reference-tags">{composerReferenceItems.map((item) => { if (item.type === "attachment") { const attachment = item.value; return <button type="button" className="composer-image-reference" key={item.key} onClick={() => removeComposerAttachment(attachment.id)}><img src={attachment.imageUrl} alt={`${attachment.name} 待发送`} /><span>{attachment.name}</span><Icon name="x" /></button>; } const reference = item.value; const removeReference = () => { setExplicitReferences((items) => items.filter((current) => current.id !== reference.id)); setComposerReferenceOrder((items) => items.filter((key) => key !== item.key)); }; return reference.kind === "comic_frame" ? <button type="button" className="composer-frame-reference" key={item.key} onClick={removeReference}>{reference.imageUrl ? <img src={reference.imageUrl} alt={`${reference.label} 缩略图`} /> : <span className="frame-reference-placeholder"><Icon name="layout" /></span>}<span>{reference.label}</span><Icon name="x" /></button> : reference.kind === "speech_balloon" ? <button type="button" className="composer-dialogue-reference" key={item.key} onClick={removeReference}><Icon name="reference" /><span>对白 {String(reference.balloonNumber ?? 1).padStart(2, "0")}</span><Icon name="x" /></button> : <button type="button" key={item.key} onClick={removeReference}><Icon name="reference" /> {reference.label} <Icon name="x" /></button>; })}</div>
-          <textarea data-testid="agent-input" value={composer} disabled={activeTask?.status === "running"} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? "当前任务运行中；完成或取消后可继续对话" : "描述你想让 AI 生成、修改或确认的内容…"} />
-          <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" disabled={activeTask?.status === "running"} aria-label="添加对话引用或 Agent 选项" onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><CustomSelect ariaLabel="当前 Agent 工作模式" className="composer-mode-picker" value={intent} options={intentOptions} onChange={(value) => setIntent(value as AgentWorkspaceMode)} /><button type="button" className="at-button" disabled={activeTask?.status === "running"} aria-label="引用当前对象" onClick={() => addSelectionReference()}><Icon name="reference" /><span>引用</span></button><button type="button" className={`send ${activeTask?.status === "running" ? "stop" : ""}`} aria-label={activeTask?.status === "running" ? "停止任务" : "发送"} onClick={activeTask?.status === "running" ? () => void stopActiveTask() : sendMessage}><Icon name={activeTask?.status === "running" ? "x" : "send"} /></button></div>
+          <div className="reference-tags">{composerReferenceItems.map((item) => { if (item.type === "attachment") { const attachment = item.value; return <div className={`composer-image-reference ${attachment.status}`} key={item.key}><button type="button" className="composer-image-reference-preview" aria-label={`查看${attachment.name}`} onClick={() => setImageViewer({ images: [{ id: attachment.id, src: attachment.imageUrl, alt: `${attachment.name} 待发送` }] })}><img src={attachment.imageUrl} alt={`${attachment.name} 待发送`} /><span>{attachment.status === "uploading" ? "上传中…" : attachment.status === "failed" ? "上传失败" : attachment.name}</span></button><button type="button" className="composer-image-reference-remove" aria-label={`取消引用${attachment.name}`} onClick={() => removeComposerAttachment(attachment.id)}><Icon name="x" /></button></div>; } const reference = item.value; const removeReference = () => { setExplicitReferences((items) => items.filter((current) => current.id !== reference.id)); setComposerReferenceOrder((items) => items.filter((key) => key !== item.key)); }; return reference.kind === "comic_frame" ? <button type="button" className="composer-frame-reference" key={item.key} onClick={removeReference}>{reference.imageUrl ? <img src={reference.imageUrl} alt={`${reference.label} 缩略图`} /> : <span className="frame-reference-placeholder"><Icon name="layout" /></span>}<span>{reference.label}</span><Icon name="x" /></button> : reference.kind === "speech_balloon" ? <button type="button" className="composer-dialogue-reference" key={item.key} onClick={removeReference}><Icon name="reference" /><span>对白 {String(reference.balloonNumber ?? 1).padStart(2, "0")}</span><Icon name="x" /></button> : <button type="button" key={item.key} onClick={removeReference}><Icon name="reference" /> {reference.label} <Icon name="x" /></button>; })}</div>
+          <textarea data-testid="agent-input" value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? "可以继续准备下一条消息；任务结束后再发送" : "描述你想让 AI 生成、修改或确认的内容…"} />
+          <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" aria-label="添加对话引用或 Agent 选项" onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><span className="composer-mode-label"><Icon name="ai" />创作</span><button type="button" className="at-button" aria-label="引用当前对象" onClick={() => addSelectionReference()}><Icon name="reference" /><span>引用</span></button><button type="button" className="send" aria-label={activeTask?.status === "running" ? "任务运行中" : composerAttachments.some((attachment) => attachment.status === "uploading") ? "图片上传中" : "发送"} disabled={activeTask?.status === "running" || composerAttachments.some((attachment) => attachment.status === "uploading")} onClick={sendMessage}><Icon name="send" /></button></div>
         </div>
       </AgentWorkspace>
       {!agentOpen ? <button className="drawer-reopen right" type="button" onClick={() => setAgentOpen(true)} aria-label="展开 Agent 工作区"><Icon name="ai" /></button> : null}
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <CreationDock className={[multiSelection ? "multi-hidden" : "", dockEntering ? "mode-entering" : "", modeSwitching ? "mode-exiting" : ""].filter(Boolean).join(" ")} aria-label="创作工具">
-        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布参考层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" aria-label="画格和页面编排" onClick={() => { setIntent("创作"); setComposer("重新编排当前漫画页，突出最后一个画格"); }}><Icon name="layout" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? "取消放置旁白" : "在纸面放置旁白"} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 修改当前焦点" onClick={() => { setComposer("只精修当前画格的格内成稿图，让动作更自然，不改其他画格"); setIntent("创作"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
+        <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布图片层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? "取消放置旁白" : "在纸面放置旁白"} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 编辑选中画格的分镜条目" onClick={() => { setComposer("编辑选中画格的分镜条目，只改标题和画面描述"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
       </CreationDock>
       <nav className={`multi-selection-dock ${multiSelection ? "active" : ""}`} aria-label="多选工具">
         <button type="button" aria-label="将选中对象引用到对话" disabled={!multiComicActive && !multiCanvasActive} onClick={addMultiSelectionToDialogue}><Icon name="ai" /></button>
@@ -3626,6 +4043,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           </div>
         </section>
       </div> : null}
+      {imageViewer ? <ImageViewer {...imageViewer} onClose={() => setImageViewer(null)} /> : null}
     </WorkbenchShell>
   );
 }

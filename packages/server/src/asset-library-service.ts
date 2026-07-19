@@ -85,7 +85,7 @@ export async function appendComicVisualStyleImage(ownerUserId: string, comicId: 
     return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comic.id));
   }
   const projectId = comic.chapters[0]?.project?.id;
-  if (!projectId) throw new AppError("invalid_state", "请先创建一个漫画章节，再上传视觉风格参考图。", 422);
+  if (!projectId) throw new AppError("invalid_state", "请先创建一个漫画章节，再上传视觉风格图片。", 422);
 
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
@@ -115,7 +115,7 @@ export async function appendComicVisualStyleImage(ownerUserId: string, comicId: 
       data: {
         assetId: asset.id,
         assetVersionId: asset.versions[0].id,
-        label: uploaded.filename.replace(/\.[^.]+$/, "").trim() || "风格参考 1",
+        label: uploaded.filename.replace(/\.[^.]+$/, "").trim() || "风格图片 1",
         sortIndex: 0,
       },
     });
@@ -230,6 +230,40 @@ export async function archiveAssetFamily(ownerUserId: string, assetId: string) {
     await tx.asset.updateMany({ where: { id: { in: familyIds }, ownerUserId, archivedAt: null }, data: { archivedAt } });
     await tx.canvasAssetListItem.updateMany({ where: { assetId: { in: familyIds }, ownerUserId }, data: { hiddenAt: archivedAt } });
     return { id: rootId, deleted: true, archivedAssetIds: familyIds };
+  });
+}
+
+export async function restoreAssetToCanvasList(ownerUserId: string, projectId: string, assetId: string) {
+  return prisma.$transaction(async (tx) => {
+    const project = await tx.project.findFirst({
+      where: { id: projectId, ownerUserId, chapter: { archivedAt: null, comic: { archivedAt: null } } },
+      select: { id: true, chapter: { select: { comicId: true } } },
+    });
+    if (!project) throw new AppError("not_found", "创作空间不存在。", 404);
+
+    const asset = await tx.asset.findFirst({
+      where: { id: assetId, ownerUserId, project: { chapter: { comicId: project.chapter.comicId, archivedAt: null } } },
+      select: { id: true, name: true, kind: true, libraryStatus: true, archivedAt: true, variantOfAssetId: true },
+    });
+    if (!asset || (asset.archivedAt && asset.libraryStatus !== AssetLibraryStatus.LIBRARY)) throw new AppError("not_found", "资产不存在。", 404);
+
+    if (asset.archivedAt) {
+      const rootId = asset.variantOfAssetId ?? asset.id;
+      await tx.asset.updateMany({
+        where: {
+          ownerUserId,
+          libraryStatus: AssetLibraryStatus.LIBRARY,
+          OR: [{ id: rootId, variantOfAssetId: null }, { variantOfAssetId: rootId }],
+        },
+        data: { archivedAt: null },
+      });
+    }
+
+    return tx.canvasAssetListItem.upsert({
+      where: { projectId_assetId: { projectId: project.id, assetId: asset.id } },
+      create: { ownerUserId, projectId: project.id, assetId: asset.id, displayName: asset.name, displayKind: asset.kind },
+      update: { hiddenAt: null },
+    });
   });
 }
 

@@ -1,9 +1,10 @@
-import type { Prisma } from "@prisma/client";
+import { MessageKind, type Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 import { createSignedAssetPath } from "./signed-assets";
 import { applyWorkspaceChangeSet, planEditorCapability } from "../../editor-core/src";
 import { mergeAssetVersionHeads, normalizeStoryboardBeats, validateComicDocument, type StoryboardBeat, type WorkspaceChangeSet, type WorkspaceCommand } from "../../shared/src";
+import { isWorkbenchAgentCandidateVisible, workbenchAgentCandidateKinds, workbenchAgentTaskTypes } from "./workbench-agent-visibility";
 
 function json<T>(value: Prisma.JsonValue) {
   return structuredClone(value) as T;
@@ -68,6 +69,7 @@ export async function restoreLatestSnapshot(args: { ownerUserId: string; project
       source: "undo",
       commands: plan.commands,
     },
+    revertCandidatesAppliedAfterRevision: snapshot.sourceWorkingRevision,
   });
 }
 
@@ -163,20 +165,57 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
   const [working, snapshot, candidates, tasks, pageVariants] = await Promise.all([
     getLatestWorking(project.id),
     prisma.savedSnapshot.findFirst({ where: { projectId: project.id, ownerUserId }, orderBy: { createdAt: "desc" } }),
-    prisma.candidate.findMany({ where: { projectId: project.id, ownerUserId, conversationId: conversation?.id }, orderBy: { createdAt: "asc" }, take: 80 }),
-    prisma.generationTask.findMany({ where: { projectId: project.id, ownerUserId, conversationId: conversation?.id }, orderBy: { createdAt: "desc" }, take: 20, include: { attempts: { orderBy: { attempt: "desc" }, take: 1 } } }),
+    prisma.candidate.findMany({ where: { projectId: project.id, ownerUserId, conversationId: conversation?.id, kind: { in: [...workbenchAgentCandidateKinds] } }, orderBy: { createdAt: "asc" }, take: 80 }),
+    prisma.generationTask.findMany({ where: { projectId: project.id, ownerUserId, conversationId: conversation?.id, type: { in: [...workbenchAgentTaskTypes] } }, orderBy: { createdAt: "desc" }, take: 20, include: { attempts: { orderBy: { attempt: "desc" }, take: 1 } } }),
     prisma.pageVariant.findMany({ where: { projectId: project.id, ownerUserId, archivedAt: null }, orderBy: { createdAt: "asc" }, take: 100 }),
   ]);
   const messages = conversation
     ? await prisma.message.findMany({ where: { conversationId: conversation.id, ownerUserId }, orderBy: { createdAt: "asc" }, take: 300 })
     : [];
-  const [resolvedWorking, resolvedSnapshot] = await Promise.all([
+  const visibleCandidates = candidates.filter((candidate) => {
+    const payload = candidate.payload && typeof candidate.payload === "object" && !Array.isArray(candidate.payload)
+      ? json<Record<string, unknown>>(candidate.payload)
+      : {};
+    return isWorkbenchAgentCandidateVisible(candidate.kind, payload);
+  });
+  const visibleCandidateIds = new Set(visibleCandidates.map((candidate) => candidate.id));
+  const visibleTaskIds = new Set(tasks.map((task) => task.id));
+  const visibleMessages = messages.filter((message) => {
+    const metadata = json<Record<string, unknown>>(message.metadata);
+    if (message.kind === MessageKind.CANDIDATE && typeof metadata.candidateId === "string") return visibleCandidateIds.has(metadata.candidateId);
+    if ((message.kind === MessageKind.TASK || message.kind === MessageKind.FAILED || message.kind === MessageKind.CANCELED) && typeof metadata.taskId === "string") return visibleTaskIds.has(metadata.taskId);
+    if (message.kind === MessageKind.CONFIRMATION) {
+      return (metadata.taskType === "storyboard" && metadata.scope === "selected_comic_frame")
+        || (metadata.taskType === "asset_parse" && metadata.scope === "reference_only");
+    }
+    return true;
+  });
+  const messageAttachments = new Map(visibleMessages.map((message) => {
+    const metadata = json<Record<string, unknown>>(message.metadata);
+    const attachments = Array.isArray(metadata.imageAttachments)
+      ? metadata.imageAttachments.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const attachment = value as Record<string, unknown>;
+        return typeof attachment.assetId === "string" && typeof attachment.versionId === "string" && typeof attachment.name === "string"
+          ? [{ assetId: attachment.assetId, versionId: attachment.versionId, name: attachment.name }]
+          : [];
+      })
+      : [];
+    return [message.id, attachments] as const;
+  }));
+  const attachmentVersionIds = [...new Set([...messageAttachments.values()].flat().map((attachment) => attachment.versionId))];
+  const [resolvedWorking, resolvedSnapshot, attachmentVersions] = await Promise.all([
     withResolvedResources(working.document),
     snapshot ? withResolvedResources(snapshot.document) : Promise.resolve(undefined),
+    prisma.assetVersion.findMany({
+      where: { id: { in: attachmentVersionIds }, asset: { ownerUserId, projectId: project.id } },
+      select: { id: true, assetId: true, objectKey: true },
+    }),
   ]);
+  const attachmentVersionMap = new Map(attachmentVersions.map((version) => [version.id, version]));
   const resolvedActionMessages = new Set<string>();
   let pendingActionMessageId: string | undefined;
-  for (const message of messages) {
+  for (const message of visibleMessages) {
     if (message.kind === "QUESTION" || message.kind === "CONFIRMATION") {
       if (pendingActionMessageId) resolvedActionMessages.add(pendingActionMessageId);
       pendingActionMessageId = message.id;
@@ -269,15 +308,21 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
       };
     }),
     conversation,
-    messages: messages.map((message) => ({
+    messages: visibleMessages.map((message) => ({
       id: message.id,
       role: message.role.toLowerCase(),
       kind: message.kind.toLowerCase(),
       text: message.content,
       metadata: { ...json<Record<string, unknown>>(message.metadata), ...(resolvedActionMessages.has(message.id) ? { resolved: true } : {}) },
+      attachments: (messageAttachments.get(message.id) ?? []).flatMap((attachment) => {
+        const version = attachmentVersionMap.get(attachment.versionId);
+        return version?.objectKey && version.assetId === attachment.assetId
+          ? [{ id: attachment.versionId, name: attachment.name, imageUrl: createSignedAssetPath(attachment.versionId) }]
+          : [];
+      }),
       createdAt: message.createdAt.toISOString(),
     })),
-    candidates: candidates.map((candidate) => ({
+    candidates: visibleCandidates.map((candidate) => ({
       id: candidate.id,
       kind: candidate.kind.toLowerCase(),
       title: candidate.title,
@@ -416,6 +461,7 @@ export async function commitChangeSet(args: {
   expectedRevision: number;
   changeSet: WorkspaceChangeSet;
   candidateId?: string;
+  revertCandidatesAppliedAfterRevision?: number;
 }) {
   await getOwnedProject(args.ownerUserId, args.projectId);
   return prisma.$transaction(async (tx) => {
@@ -471,9 +517,19 @@ export async function commitChangeSet(args: {
     if (args.candidateId) {
       await tx.candidate.update({ where: { id: args.candidateId }, data: { status: "APPLIED", appliedRevision: next.revision } });
     }
-    // Every still-available candidate built from the previous revision is now
-    // stale, including sibling storyboard options. Mark them together so the
-    // UI never offers a card that can only fail after the user clicks it.
+    if (args.revertCandidatesAppliedAfterRevision !== undefined) {
+      await tx.candidate.updateMany({
+        where: {
+          projectId: args.projectId,
+          ownerUserId: args.ownerUserId,
+          status: "APPLIED",
+          appliedRevision: { gt: args.revertCandidatesAppliedAfterRevision },
+        },
+        data: { status: "REVERTED" },
+      });
+    }
+    // Any unhandled candidate built from an older revision is no longer safe
+    // to apply after the work changes, regardless of which action advanced it.
     await tx.candidate.updateMany({
       where: {
         projectId: args.projectId,

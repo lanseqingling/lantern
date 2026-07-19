@@ -221,6 +221,25 @@ export async function renderPagePng(document: ComicDocument, unit: PresentationU
   return renderSurface(document, unit, surface ?? presentationUnitSurface(unit), await assetDataByVersion(document));
 }
 
+export async function renderPreviewPageGroupPng(document: ComicDocument, units: PresentationUnit[]) {
+  if (!units.length || units.length > 2) throw new Error("preview page group must contain one or two units");
+  const assets = await assetDataByVersion(document);
+  const surfaces = units.map(presentationUnitSurface);
+  const targetHeight = Math.max(...surfaces.map((surface) => surface.geometry.height));
+  const widths = surfaces.map((surface) => Math.max(1, Math.round(surface.geometry.width / surface.geometry.height * targetHeight)));
+  const rendered = await Promise.all(units.map(async (unit, index) => {
+    const bytes = await renderSurface(document, unit, surfaces[index], assets);
+    return sharp(bytes).resize({ width: widths[index], height: targetHeight, fit: "fill" }).png().toBuffer();
+  }));
+  let left = 0;
+  const composite = rendered.map((input, index) => {
+    const item = { input, left, top: 0 };
+    left += widths[index];
+    return item;
+  });
+  return sharp({ create: { width: left, height: targetHeight, channels: 4, background: "#ffffff" } }).composite(composite).png().toBuffer();
+}
+
 export function createStructuredExportPayload(args: { document: ComicDocument; storyboardBeats: unknown; assetVersions: unknown; exportedAt?: string }) {
   return { protocol: "lantern-export-0.2", lcd: args.document, storyboardBeats: args.storyboardBeats, assetVersions: args.assetVersions, exportedAt: args.exportedAt ?? new Date().toISOString() };
 }

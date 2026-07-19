@@ -9,6 +9,7 @@ import {
   renderChapterLongPng,
   renderChapterPngPages,
   renderPagePng,
+  renderPreviewPageGroupPng,
   renderSurfaceSvg,
 } from "../packages/server/src/export-renderer";
 import { projectBalloonStrokeWidths, projectComicRenderScene, projectImageCrop, scaleImageCrop, type ComicDocument, type StoryboardBeat } from "../packages/shared/src";
@@ -268,6 +269,21 @@ test("true spread page download renders the complete presentation canvas", async
   const physicalMetadata = await sharp(await renderPagePng(document, unit, unit.surfaces[1])).metadata();
   assert.equal(physicalMetadata.width, 200);
   assert.equal(physicalMetadata.height, 300);
+});
+
+test("spread preview download combines two ordinary pages into one visible group", async () => {
+  const document = renderFixture();
+  const first = document.units[0];
+  const second = structuredClone(first);
+  second.id = "unit-second-page";
+  second.surfaces = [{ ...second.surfaces[0], id: "surface-second-page", pageNumber: 2 }];
+  document.units.push(second);
+  document.reading.unitOrder.push(second.id);
+  document.resources = [];
+
+  const metadata = await sharp(await renderPreviewPageGroupPng(document, [first, second])).metadata();
+  assert.equal(metadata.width, first.canvas.width + second.canvas.width);
+  assert.equal(metadata.height, first.canvas.height);
 });
 
 test("PNG, long PNG and structured JSON match the persistent runtime export golden", async () => {

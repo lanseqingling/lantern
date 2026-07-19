@@ -18,7 +18,7 @@ export function DeleteConfirmDialog({
   description: string;
   confirmLabel?: string;
   tone?: "danger" | "neutral";
-  icon?: "trash" | "pages";
+  icon?: "trash" | "pages" | "x";
   disabled?: boolean;
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;
@@ -33,7 +33,7 @@ export function DeleteConfirmDialog({
       <p id={descriptionId}>{description}</p>
       <div className="delete-confirm-actions">
         <button type="button" disabled={disabled} onClick={onCancel}>取消</button>
-        <button type="button" className={tone === "danger" ? "danger" : undefined} disabled={disabled} onClick={() => void onConfirm()}>{confirmLabel}</button>
+        <button type="button" className={tone === "danger" ? "danger" : "neutral-primary"} disabled={disabled} onClick={() => void onConfirm()}>{confirmLabel}</button>
       </div>
     </section>
   </div>;

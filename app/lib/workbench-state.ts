@@ -1,4 +1,4 @@
-import { normalizeStoryboardBeats, type AssetSummary, type Candidate, type PageVariant, type WorkbenchFixture } from "@/packages/shared/src";
+import { normalizeStoryboardBeats, type AssetSummary, type Candidate, type WorkbenchFixture } from "@/packages/shared/src";
 import { createInitialFixture } from "@/packages/demo-runtime/src";
 
 export type Selection = {
@@ -20,6 +20,9 @@ export type AgentMessage = {
   taskName?: string;
   taskId?: string;
   resolved?: boolean;
+  instruction?: string;
+  selection?: Selection;
+  explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string; label?: string }>;
 };
 
 export type ActiveTaskLike = {
@@ -29,12 +32,16 @@ export type ActiveTaskLike = {
   scope: string;
   progress: number;
   status: "running" | "failed" | "canceled";
+  stage?: "preparing" | "queued" | "generating" | "validating" | "saving";
+  targetLabel?: string;
+  createdAt?: string;
+  elapsedSeconds?: number;
+  selection?: Selection;
 };
 
 export type PersistedWorkbench = {
   fixture: WorkbenchFixture;
   candidates: Candidate[];
-  pageVariants: PageVariant[];
   messages: AgentMessage[];
   currentPageIndex: number;
   assets?: AssetSummary[];
@@ -44,18 +51,10 @@ export type PersistedWorkbench = {
 
 export const defaultMessages: AgentMessage[] = [
   {
-    id: "user-initial-story",
-    role: "user",
-    kind: "plain",
-    text: "我想做一个雨夜末班车的轻悬疑短篇，先完成两页。",
-  },
-  {
-    id: "agent-initial-option",
+    id: "agent-initial-guide",
     role: "agent",
-    kind: "question",
-    text: "我先按页漫做一页四格，保留角色和教室参考；你可以从这里继续生成或直接编辑画面。",
-    options: ["生成分镜"],
-    taskName: "storyboard",
+    kind: "plain",
+    text: "可以直接和我讨论漫画内容；选择画格后可以创建或编辑该格的分镜条目，也可以直接描述要创建的角色或场景图片。",
   },
 ];
 
@@ -71,7 +70,6 @@ export function createDefaultWorkbench(): PersistedWorkbench {
   return {
     fixture,
     candidates: [],
-    pageVariants: [],
     messages: structuredClone(defaultMessages),
     currentPageIndex: 0,
     assets: fixture.references.map((reference) => ({
@@ -108,7 +106,6 @@ function normalizeWorkbench(state: PersistedWorkbench): PersistedWorkbench {
   const shouldResetDemoConversation = fromUiVersion < 5;
   return {
     ...state,
-    pageVariants: state.pageVariants ?? [],
     fixture: normalizeFixture(state.fixture, fromUiVersion),
     messages: shouldResetDemoConversation ? structuredClone(defaultMessages) : state.messages,
     uiVersion: CURRENT_UI_VERSION,
@@ -153,6 +150,9 @@ export function persistWorkbench(state: PersistedWorkbench) {
         taskName: message.taskName,
         taskId: message.taskId,
         resolved: message.resolved,
+        instruction: message.instruction,
+        selection: message.selection,
+        explicitReferences: message.explicitReferences,
       })),
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));

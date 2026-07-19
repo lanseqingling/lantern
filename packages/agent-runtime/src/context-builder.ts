@@ -1,8 +1,140 @@
 import { AssetKind, AssetLibraryStatus } from "@prisma/client";
 import { prisma } from "../../server/src/db";
 import { AppError } from "../../server/src/errors";
-import { agentContextSnapshotSchema, workspaceRefSchema } from "./schemas";
-import { createComicPageViews, normalizeStoryboardBeats, validateComicDocument } from "../../shared/src";
+import { agentContextSnapshotSchema, workspaceRefSchema, type WorkspaceReference } from "./schemas";
+import { createComicPageViews, normalizeStoryboardBeats, unitElements, validateComicDocument, type ComicPage, type StoryboardBeat } from "../../shared/src";
+
+export type ContextSelection = { type: string; id?: string; pageId?: string; label?: string; canvasX?: number; canvasY?: number };
+
+function numberedLabel(prefix: string, index: number) {
+  return `${prefix} ${String(index).padStart(2, "0")}`;
+}
+
+function compactAliases(values: Array<string | undefined>) {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))].slice(0, 8);
+}
+
+function compactSummary(values: Array<string | undefined>) {
+  return values.map((value) => value?.trim()).filter(Boolean).join("；").slice(0, 600);
+}
+
+function buildPageTargetCatalog(page: ComicPage, storyboardBeats: StoryboardBeat[], pagePosition: number) {
+  const elements = page.elements;
+  const frames = elements.filter((element) => element.type === "comic_frame").sort((left, right) => left.readingOrder - right.readingOrder);
+  const frameLabels = new Map(frames.map((frame, index) => [frame.id, numberedLabel(frame.surfaceScope === "unit" ? "跨页格" : "画格", index + 1)]));
+  const balloons = elements.filter((element) => element.type === "speech_balloon");
+  const images = elements.filter((element) => element.type === "image");
+  const texts = elements.filter((element) => element.type === "text");
+  const storyboardBeatById = new Map(storyboardBeats.map((storyboardBeat) => [storyboardBeat.id, storyboardBeat]));
+  const pageLabel = page.name?.trim() || `${page.kind === "vertical_segment" ? "滚动段" : "Page"} ${String(page.pageIndex + 1).padStart(2, "0")}`;
+  const handlePrefix = `current-page:${pagePosition}`;
+  const frameResources = (frameId: string) => elements.flatMap((element) =>
+    "comicFrameId" in element && element.comicFrameId === frameId && "assetVersionId" in element && typeof element.assetVersionId === "string"
+      ? [element.assetVersionId]
+      : []);
+  const frameDialogues = (frameId: string) => balloons.flatMap((balloon) => balloon.comicFrameId === frameId ? [balloon.dialogueId] : []);
+  return [
+    ...frames.map((frame, index) => {
+      const label = frameLabels.get(frame.id) ?? numberedLabel("画格", index + 1);
+      const storyboardBeat = storyboardBeatById.get(frame.linkedStoryboardBeatId);
+      return {
+        handle: `${handlePrefix}:frame:${index + 1}`,
+        type: "comic_frame" as const,
+        label,
+        aliases: compactAliases([`${pageLabel}${label}`, `画格${index + 1}`, `画格${String(index + 1).padStart(2, "0")}`, `第${index + 1}格`, frame.name, storyboardBeat?.title]),
+        summary: compactSummary([storyboardBeat?.title, storyboardBeat?.description]),
+        pageId: page.id,
+        pageLabel,
+        elementId: frame.id,
+        frameId: frame.id,
+        frameLabel: label,
+        ...(storyboardBeat ? { storyboardBeatId: storyboardBeat.id } : {}),
+        assetVersionIds: frameResources(frame.id).slice(0, 12),
+        dialogueIds: frameDialogues(frame.id).slice(0, 12),
+      };
+    }),
+    ...frames.flatMap((frame, index) => {
+      const storyboardBeat = storyboardBeatById.get(frame.linkedStoryboardBeatId);
+      if (!storyboardBeat) return [];
+      const frameLabel = frameLabels.get(frame.id) ?? numberedLabel("画格", index + 1);
+      return [{
+        handle: `${handlePrefix}:storyboard:${index + 1}`,
+        type: "storyboard_beat" as const,
+        label: storyboardBeat.title,
+        aliases: compactAliases([storyboardBeat.title, `${pageLabel}${storyboardBeat.title}`, `分镜${index + 1}`, `分镜条目${index + 1}`, `${frameLabel}分镜`]),
+        summary: compactSummary([storyboardBeat.title, storyboardBeat.description]),
+        pageId: page.id,
+        pageLabel,
+        frameId: frame.id,
+        frameLabel,
+        storyboardBeatId: storyboardBeat.id,
+        assetVersionIds: frameResources(frame.id).slice(0, 12),
+        dialogueIds: frameDialogues(frame.id).slice(0, 12),
+      }];
+    }),
+    ...balloons.map((balloon, index) => {
+      const localNumber = index + 1;
+      const frameLabel = balloon.comicFrameId ? frameLabels.get(balloon.comicFrameId) : undefined;
+      const label = numberedLabel("对白", localNumber);
+      return {
+        handle: `${handlePrefix}:dialogue:${localNumber}`,
+        type: "speech_balloon" as const,
+        label,
+        aliases: compactAliases([`${pageLabel}${label}`, `对白${localNumber}`, `对白${String(localNumber).padStart(2, "0")}`, `气泡${localNumber}`, `气泡${String(localNumber).padStart(2, "0")}`]),
+        summary: balloon.content.text.slice(0, 600),
+        pageId: page.id,
+        pageLabel,
+        elementId: balloon.id,
+        ...(balloon.comicFrameId ? { frameId: balloon.comicFrameId } : {}),
+        ...(frameLabel ? { frameLabel } : {}),
+        ...(balloon.linkedStoryboardBeatId ? { storyboardBeatId: balloon.linkedStoryboardBeatId } : {}),
+        assetVersionIds: balloon.appearance?.assetVersionId ? [balloon.appearance.assetVersionId] : [],
+        dialogueIds: [balloon.dialogueId],
+      };
+    }),
+    ...images.map((element, index) => ({
+      handle: `${handlePrefix}:image:${index + 1}`,
+      type: "image" as const,
+      label: element.name?.trim() || numberedLabel("图片", index + 1),
+      aliases: compactAliases([`${pageLabel}图片${index + 1}`, element.name, `图片${index + 1}`, `图${index + 1}`]),
+      summary: element.comicFrameId ? `${frameLabels.get(element.comicFrameId) ?? "当前画格"}中的图片` : "当前页图片",
+      pageId: page.id,
+      pageLabel,
+      elementId: element.id,
+      ...(element.comicFrameId ? { frameId: element.comicFrameId } : {}),
+      ...(element.comicFrameId && frameLabels.get(element.comicFrameId) ? { frameLabel: frameLabels.get(element.comicFrameId) } : {}),
+      ...(element.linkedStoryboardBeatId ? { storyboardBeatId: element.linkedStoryboardBeatId } : {}),
+      assetVersionIds: [element.assetVersionId],
+      dialogueIds: [],
+    })),
+    ...texts.map((element, index) => ({
+      handle: `${handlePrefix}:text:${index + 1}`,
+      type: "text" as const,
+      label: numberedLabel(element.content.role === "narration" ? "旁白" : "文字", index + 1),
+      aliases: compactAliases([`${pageLabel}文字${index + 1}`, `旁白${index + 1}`, `文字${index + 1}`, element.content.text.slice(0, 40)]),
+      summary: element.content.text.slice(0, 600),
+      pageId: page.id,
+      pageLabel,
+      elementId: element.id,
+      ...(element.comicFrameId ? { frameId: element.comicFrameId } : {}),
+      ...(element.comicFrameId && frameLabels.get(element.comicFrameId) ? { frameLabel: frameLabels.get(element.comicFrameId) } : {}),
+      ...(element.linkedStoryboardBeatId ? { storyboardBeatId: element.linkedStoryboardBeatId } : {}),
+      assetVersionIds: element.appearance?.assetVersionId ? [element.appearance.assetVersionId] : [],
+      dialogueIds: [],
+    })),
+  ];
+}
+
+export function normalizeSelectionForCurrentView(
+  selection: ContextSelection | undefined,
+  currentPageId: string | undefined,
+  visiblePageIds: string[],
+): ContextSelection {
+  if (visiblePageIds.length && selection?.pageId && !visiblePageIds.includes(selection.pageId)) {
+    return { type: "none", ...(currentPageId ? { pageId: currentPageId, label: "当前页面" } : {}) };
+  }
+  return selection ?? { type: "none" };
+}
 
 export type ContextRequest = {
   ownerUserId: string;
@@ -11,8 +143,10 @@ export type ContextRequest = {
   taskType: string;
   instruction: string;
   scope: string;
-  selection?: { type: string; id?: string; pageId?: string; label?: string; canvasX?: number; canvasY?: number };
-  explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string }>;
+  currentPageId?: string;
+  visiblePageIds?: string[];
+  selection?: ContextSelection;
+  explicitReferences?: WorkspaceReference[];
 };
 
 export async function buildAgentContext(request: ContextRequest) {
@@ -70,7 +204,7 @@ export async function buildAgentContext(request: ContextRequest) {
     take: 1,
   });
   const regularAssets = project.assets.filter((asset) => asset.kind !== AssetKind.STYLE);
-  const contextAssets = comicStyleAssets.length
+  const availableContextAssets = comicStyleAssets.length
     ? [...regularAssets.slice(0, 23), ...comicStyleAssets]
     : regularAssets.slice(0, 24);
   const working = await prisma.workingRevision.findFirst({
@@ -121,31 +255,86 @@ export async function buildAgentContext(request: ContextRequest) {
   }));
 
   const storyboardBeats = normalizeStoryboardBeats(working.storyboardBeats);
-  const requestedPage = pages.find((page) => page.id === request.selection?.pageId);
+  const explicitCanvasMatches = explicitReferences.flatMap((reference) => {
+    if (reference.objectType !== "canvas_element") return [];
+    for (const page of pages) {
+      const element = page.elements.find((candidate) => candidate.id === reference.objectId);
+      if (element) return [{ reference, page, element }];
+    }
+    return [];
+  });
+  const explicitComicFrameReferences = [...new Map(explicitCanvasMatches.flatMap(({ reference, page, element }) => {
+    const frame = element.type === "comic_frame"
+      ? element
+      : "comicFrameId" in element && typeof element.comicFrameId === "string"
+        ? page.elements.find((candidate) => candidate.type === "comic_frame" && candidate.id === element.comicFrameId)
+        : undefined;
+    if (!frame || frame.type !== "comic_frame") return [];
+    const storyboardBeat = frame.linkedStoryboardBeatId
+      ? storyboardBeats.find((candidate) => candidate.id === frame.linkedStoryboardBeatId)
+      : undefined;
+    return [[frame.id, {
+      frameId: frame.id,
+      pageId: page.id,
+      pageIndex: page.pageIndex,
+      readingOrder: frame.readingOrder,
+      ...(reference.label ? { label: reference.label } : {}),
+      ...(storyboardBeat ? { storyboardBeat } : {}),
+    }] as const];
+  })).values()];
+  const requestedVisiblePages = [...new Set(request.visiblePageIds ?? [])]
+    .slice(0, 2)
+    .flatMap((pageId) => {
+      const page = pages.find((candidate) => candidate.id === pageId);
+      return page ? [page] : [];
+    });
+  const requestedCurrentPage = pages.find((page) => page.id === request.currentPageId) ?? requestedVisiblePages[0];
   const pageContainingSelectedElement = request.selection?.id
     ? pages.find((page) => page.elements?.some((element) => element.id === request.selection?.id))
     : undefined;
-  const currentPage = requestedPage ?? pageContainingSelectedElement ?? pages[0];
-  const selectedElement = request.selection?.id
-    ? currentPage?.elements?.find((element) => element.id === request.selection?.id)
+  const pageContainingExplicitReference = explicitCanvasMatches[0]?.page;
+  const selectedPage = pages.find((page) => page.id === request.selection?.pageId) ?? pageContainingSelectedElement;
+  const currentPage = requestedCurrentPage ?? selectedPage ?? pageContainingExplicitReference ?? pages[0];
+  const currentUnit = document.units.find((unit) => unit.id === currentPage?.id);
+  const visiblePages = requestedVisiblePages.length ? requestedVisiblePages : currentPage ? [currentPage] : [];
+  const effectiveSelection = normalizeSelectionForCurrentView(
+    request.selection,
+    currentPage?.id,
+    requestedVisiblePages.map((page) => page.id),
+  );
+  const effectiveSelectedPage = effectiveSelection.id
+    ? pages.find((page) => page.elements?.some((element) => element.id === effectiveSelection.id))
+    : pages.find((page) => page.id === effectiveSelection.pageId);
+  const selectedElement = effectiveSelection.id
+    ? effectiveSelectedPage?.elements?.find((element) => element.id === effectiveSelection.id)
     : undefined;
   const selectedComicFrame = selectedElement?.type === "comic_frame"
     ? selectedElement
     : selectedElement && "comicFrameId" in selectedElement && typeof selectedElement.comicFrameId === "string"
-      ? currentPage?.elements?.find((element) => element.id === selectedElement.comicFrameId && element.type === "comic_frame")
+      ? effectiveSelectedPage?.elements?.find((element) => element.id === selectedElement.comicFrameId && element.type === "comic_frame")
       : undefined;
   const selectedFrame = selectedComicFrame?.type === "comic_frame" ? selectedComicFrame : undefined;
-  const selectedStoryboardBeatId = request.selection?.type === "storyboard_beat"
-    ? request.selection.id
+  const selectedStoryboardBeatId = effectiveSelection.type === "storyboard_beat"
+    ? effectiveSelection.id
     : selectedFrame?.linkedStoryboardBeatId ?? (selectedElement && "linkedStoryboardBeatId" in selectedElement ? selectedElement.linkedStoryboardBeatId : undefined);
   const selectedIndex = selectedStoryboardBeatId
     ? storyboardBeats.findIndex((storyboardBeat) => typeof storyboardBeat === "object" && storyboardBeat !== null && "id" in storyboardBeat && storyboardBeat.id === selectedStoryboardBeatId)
     : -1;
-  const localStoryboardBeats = selectedIndex >= 0 ? storyboardBeats.slice(Math.max(0, selectedIndex - 2), selectedIndex + 3) : storyboardBeats.slice(0, 12);
+  const interactionPlanning = request.taskType === "interaction";
+  const visibleUnits = visiblePages.flatMap((page) => {
+    const unit = document.units.find((candidate) => candidate.id === page.id);
+    return unit ? [unit] : [];
+  });
+  const contextUnits = interactionPlanning && visibleUnits.length ? visibleUnits : currentUnit ? [currentUnit] : [];
+  const currentPageStoryboardBeatIds = new Set(contextUnits.flatMap((unit) => unit.frames.flatMap((frame) => frame.storyRefs.map((reference) => reference.storyboardBeatId))));
+  const pageStoryboardBeats = storyboardBeats.filter((storyboardBeat) => currentPageStoryboardBeatIds.has(storyboardBeat.id));
+  const localStoryboardBeats = selectedIndex >= 0
+    ? storyboardBeats.slice(Math.max(0, selectedIndex - 2), selectedIndex + 3)
+    : pageStoryboardBeats.slice(0, 12);
   const currentStoryboardBeat = selectedIndex >= 0 ? storyboardBeats[selectedIndex] : undefined;
   const pageFrameCount = currentPage?.elements?.filter((element) => element.type === "comic_frame").length ?? 0;
   const frameChildren = selectedFrame
-    ? currentPage?.elements?.filter((element) => "comicFrameId" in element && element.comicFrameId === selectedFrame.id) ?? []
+    ? effectiveSelectedPage?.elements?.filter((element) => "comicFrameId" in element && element.comicFrameId === selectedFrame.id) ?? []
     : [];
   const speechBalloons = pages.flatMap((page) => page.elements
     .filter((element) => element.type === "speech_balloon")
@@ -160,21 +349,52 @@ export async function buildAgentContext(request: ContextRequest) {
       dialogueId: matched.element.dialogueId,
       pageId: matched.page.id,
       pageIndex: matched.page.pageIndex,
-      comicFrameId: matched.element.comicFrameId,
+      ...(matched.element.comicFrameId ? { comicFrameId: matched.element.comicFrameId } : {}),
       balloonNumber: index + 1,
       text: matched.element.content.text,
       shape: matched.element.content.shape,
     }];
   });
-  const comicSettings = project.chapter.comic.settings.slice(0, 24).map((setting) => ({
+  const pageContextTask = request.taskType === "storyboard" || request.taskType === "frame_image_generate" || interactionPlanning;
+  const basicContextTask = request.taskType === "asset_parse" || pageContextTask;
+  const settingsLimit = basicContextTask ? 6 : 12;
+  const settingContentLimit = basicContextTask ? 1200 : 4000;
+  const comicSettings = project.chapter.comic.settings.slice(0, settingsLimit).map((setting) => ({
     id: setting.id,
     title: setting.title,
-    content: setting.content.slice(0, 4000),
+    content: setting.content.slice(0, settingContentLimit),
   }));
+  const currentViewElements = contextUnits.flatMap((unit) => unitElements(unit));
+  const primaryPageElements = currentUnit ? unitElements(currentUnit) : [];
+  const currentViewAssetIds = new Set(currentViewElements.flatMap((element) => "assetId" in element && typeof element.assetId === "string" ? [element.assetId] : []));
+  const primaryPageAssetVersionIds = new Set(primaryPageElements.flatMap((element) => "assetVersionId" in element && typeof element.assetVersionId === "string" ? [element.assetVersionId] : []));
+  const explicitAssetIds = new Set(explicitReferences.filter((reference) => ["asset", "character", "scene", "style"].includes(reference.objectType)).map((reference) => reference.objectId));
+  const basicContextAssets = [
+    ...availableContextAssets.filter((asset) => asset.kind === AssetKind.STYLE),
+    ...availableContextAssets.filter((asset) => asset.kind !== AssetKind.STYLE && (explicitAssetIds.has(asset.id) || (pageContextTask && currentViewAssetIds.has(asset.id)))),
+  ];
+  const contextAssets = basicContextTask
+    ? basicContextAssets.slice(0, 6)
+    : availableContextAssets;
+  const recentConversationLimit = basicContextTask ? 4 : 16;
+  const recentConversation = (project.conversations[0]?.messages ?? []).slice(0, recentConversationLimit).reverse().map((message) => ({
+    role: message.role.toLowerCase(),
+    content: message.content,
+  }));
+  const primaryPageDialogueIds = new Set(primaryPageElements.flatMap((element) => "dialogueId" in element && typeof element.dialogueId === "string" ? [element.dialogueId] : []));
+  const targetPages = interactionPlanning && visiblePages.length ? visiblePages : currentPage ? [currentPage] : [];
+  const allCurrentPageTargets = targetPages.flatMap((page, index) => buildPageTargetCatalog(page, storyboardBeats, index + 1));
+  const currentPageTargets = allCurrentPageTargets.slice(0, 64);
+  const includeCurrentPageLcd = request.taskType === "storyboard" || request.taskType === "frame_image_generate" || interactionPlanning;
+  const contextStoryboardBeats = request.taskType === "asset_parse" ? [] : localStoryboardBeats;
   const omittedContext = [
-    ...(storyboardBeats.length > localStoryboardBeats.length ? [{ type: "storyboard_beat", reason: `仅发送与当前任务最相关的 ${localStoryboardBeats.length} 个分镜条目` }] : []),
+    ...(storyboardBeats.length > contextStoryboardBeats.length ? [{ type: "storyboard_beat", reason: contextStoryboardBeats.length ? `仅发送与当前任务最相关的 ${contextStoryboardBeats.length} 个分镜条目` : "当前任务不需要分镜历史，未发送分镜条目" }] : []),
     ...(project.chapter.comic.settings.length > comicSettings.length ? [{ type: "comic_setting", reason: `仅发送排序最前的 ${comicSettings.length} 张漫画设定卡` }] : []),
-    ...(project.chapter.comic.settings.some((setting) => setting.content.length > 4000) ? [{ type: "comic_setting_content", reason: "过长的漫画设定卡正文按 4000 字符截取" }] : []),
+    ...(project.chapter.comic.settings.some((setting) => setting.content.length > settingContentLimit) ? [{ type: "comic_setting_content", reason: `过长的漫画设定卡正文按 ${settingContentLimit} 字符截取` }] : []),
+    ...(availableContextAssets.length > contextAssets.length ? [{ type: "asset", reason: basicContextTask ? interactionPlanning ? "规划上下文只发送视觉风格、当前页关联资产与用户显式引用" : pageContextTask ? "页面创作任务只发送视觉风格、当前页关联资产与用户显式引用" : "资产任务只发送视觉风格与用户显式引用的资产" : `仅发送最近更新的 ${contextAssets.length} 个资产` }] : []),
+    ...((project.conversations[0]?.messages.length ?? 0) > recentConversation.length ? [{ type: "conversation", reason: `仅保留最近 ${recentConversation.length} 条对话用于短期连续性` }] : []),
+    ...(allCurrentPageTargets.length > currentPageTargets.length ? [{ type: "current_page_target", reason: `当前页目标目录仅保留前 ${currentPageTargets.length} 个元素` }] : []),
+    ...(!includeCurrentPageLcd && currentUnit ? [{ type: "lcd", reason: "当前任务不需要画面结构，未发送当前页 LCD" }] : []),
   ];
 
   return agentContextSnapshotSchema.parse({
@@ -196,21 +416,47 @@ export async function buildAgentContext(request: ContextRequest) {
     },
     projectId: project.id,
     workingRevision: working.revision,
-    selection: request.selection ?? { type: "none" },
-    storyboardBeats: localStoryboardBeats,
-    currentPage: currentPage ? {
+    selection: effectiveSelection,
+    storyboardBeats: contextStoryboardBeats,
+    currentView: includeCurrentPageLcd && visibleUnits.length ? {
+      unitIds: visibleUnits.map((unit) => unit.id),
+      label: (() => {
+        const pageNumbers = visibleUnits.flatMap((unit) => unit.surfaces.flatMap((surface) => typeof surface.pageNumber === "number" ? [surface.pageNumber] : [])).sort((left, right) => left - right);
+        if (!pageNumbers.length) return visibleUnits.map((unit) => unit.name ?? unit.id).join("、");
+        const range = pageNumbers.length > 1 ? `${String(pageNumbers[0]).padStart(2, "0")}–${String(pageNumbers.at(-1)).padStart(2, "0")}` : String(pageNumbers[0]).padStart(2, "0");
+        return project.chapter.comic.format === "VERTICAL" ? `滚动段 ${range}` : `Page ${range}`;
+      })(),
+      physicalPageNumbers: visibleUnits.flatMap((unit) => unit.surfaces.flatMap((surface) => typeof surface.pageNumber === "number" ? [surface.pageNumber] : [])).sort((left, right) => left - right),
+    } : undefined,
+    currentPage: includeCurrentPageLcd && currentPage ? {
       id: currentPage.id ?? "",
       pageIndex: typeof currentPage.pageIndex === "number" ? currentPage.pageIndex : 0,
       kind: typeof currentPage.kind === "string" ? currentPage.kind : "page",
       comicFrameCount: pageFrameCount,
     } : undefined,
-    currentComicFrame: selectedFrame && currentPage ? {
+    currentPageTargets: includeCurrentPageLcd ? currentPageTargets : [],
+    currentPageLcd: includeCurrentPageLcd && currentUnit ? {
+      unit: currentUnit,
+      resources: document.resources.filter((resource) => primaryPageAssetVersionIds.has(resource.assetVersionId)),
+      dialogues: document.dialogues.filter((dialogue) => primaryPageDialogueIds.has(dialogue.id)),
+    } : undefined,
+    visiblePageLcd: includeCurrentPageLcd ? contextUnits.map((unit) => {
+      const elements = unitElements(unit);
+      const assetVersionIds = new Set(elements.flatMap((element) => "assetVersionId" in element && typeof element.assetVersionId === "string" ? [element.assetVersionId] : []));
+      const dialogueIds = new Set(elements.flatMap((element) => "dialogueId" in element && typeof element.dialogueId === "string" ? [element.dialogueId] : []));
+      return {
+        unit,
+        resources: document.resources.filter((resource) => assetVersionIds.has(resource.assetVersionId)),
+        dialogues: document.dialogues.filter((dialogue) => dialogueIds.has(dialogue.id)),
+      };
+    }) : [],
+    currentComicFrame: selectedFrame && effectiveSelectedPage ? {
       id: selectedFrame.id ?? "",
-      pageId: currentPage.id ?? "",
-      pageIndex: typeof currentPage.pageIndex === "number" ? currentPage.pageIndex : 0,
+      pageId: effectiveSelectedPage.id ?? "",
+      pageIndex: typeof effectiveSelectedPage.pageIndex === "number" ? effectiveSelectedPage.pageIndex : 0,
       readingOrder: selectedFrame.readingOrder,
-      linkedStoryboardBeatId: selectedFrame.linkedStoryboardBeatId ?? "",
-      linkedStoryboardBeatVersionId: selectedFrame.linkedStoryboardBeatVersionId ?? "",
+      ...(selectedFrame.linkedStoryboardBeatId ? { linkedStoryboardBeatId: selectedFrame.linkedStoryboardBeatId } : {}),
+      ...(selectedFrame.linkedStoryboardBeatVersionId ? { linkedStoryboardBeatVersionId: selectedFrame.linkedStoryboardBeatVersionId } : {}),
       hasFrameImage: frameChildren.some((element) => element.type === "image"),
       dialogueElementCount: frameChildren.filter((element) => element.type === "speech_balloon" || element.type === "text").length,
     } : undefined,
@@ -224,11 +470,9 @@ export async function buildAgentContext(request: ContextRequest) {
       images: asset.images.map((image, index) => ({ versionId: image.assetVersionId, isPrimary: index === 0 })),
     })),
     explicitReferences,
+    explicitComicFrameReferences,
     explicitDialogueReferences,
-    recentConversation: (project.conversations[0]?.messages ?? []).reverse().map((message) => ({
-      role: message.role.toLowerCase(),
-      content: message.content,
-    })),
+    recentConversation,
     omittedContext,
   });
 }
@@ -348,13 +592,15 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
     .map((asset) => ({ id: asset.id, versionId: asset.versionId, images: asset.images, name: asset.name, description: asset.description }));
 
   return {
-    debugContractVersion: "context-debug-0.4",
+    debugContractVersion: "context-debug-0.5",
     computedAt: new Date().toISOString(),
     note: "这是只读即时快照。modelInput 与主流程共用 buildAgentContext；不会创建消息、任务或候选。",
     clientInput: {
       instruction: request.instruction,
       intentOrTaskType: request.taskType,
       scope: request.scope,
+      currentPageId: request.currentPageId,
+      visiblePageIds: request.visiblePageIds ?? [],
       selection: request.selection ?? { type: "none" },
       explicitReferences: request.explicitReferences ?? [],
       currentPageIndex: clientState.currentPageIndex ?? 0,
@@ -395,7 +641,11 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
       layout: {
         format: modelInput.comic.format,
         readingDirection: modelInput.comic.readingDirection,
+        currentView: modelInput.currentView,
         currentPage: modelInput.currentPage,
+        currentPageTargets: modelInput.currentPageTargets,
+        currentPageLcd: modelInput.currentPageLcd,
+        visiblePageLcd: modelInput.visiblePageLcd,
         currentComicFrame: modelInput.currentComicFrame,
         pages: pages.map((page) => ({
           id: page.id,
@@ -424,7 +674,8 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
     },
     resolvedWorkspace: {
       workingRevision: working.revision,
-      currentPage: pages[clientState.currentPageIndex ?? 0]?.id,
+      currentPage: modelInput.currentPage?.id ?? pages[clientState.currentPageIndex ?? 0]?.id,
+      visiblePages: modelInput.currentView?.unitIds ?? [],
       pages,
       assets: modelInput.assets,
       taskHistory: tasks.map((task) => ({

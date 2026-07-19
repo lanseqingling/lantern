@@ -3,14 +3,42 @@ import { normalizeStoryboardBeats } from "../../shared/src";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 
+type FrameCandidateApplicationTarget = { unitId: string; frameId: string };
+
+export function assertFrameCandidateApplicationTarget(
+  kind: CandidateKind,
+  targetValue: Prisma.JsonValue,
+  operationsValue: Prisma.JsonValue,
+  expectedTarget?: FrameCandidateApplicationTarget,
+) {
+  if (kind !== CandidateKind.FRAME_IMAGE && kind !== CandidateKind.FRAME_IMAGE_PATCH) return;
+  if (!expectedTarget) throw new AppError("validation", "缺少单格图片候选的预览目标。", 422);
+  const target = targetValue as { type?: unknown; pageId?: unknown; id?: unknown };
+  if (target.type !== "comic_frame" || target.pageId !== expectedTarget.unitId || target.id !== expectedTarget.frameId) {
+    throw new AppError("conflict", "预览目标已经变化，请重新打开这个候选。", 409);
+  }
+  const operations = operationsValue as Array<{ unitId?: unknown; frameId?: unknown }>;
+  const targetedOperations = operations.filter((operation) => operation.unitId !== undefined || operation.frameId !== undefined);
+  if (!targetedOperations.length || targetedOperations.some((operation) => operation.unitId !== expectedTarget.unitId || operation.frameId !== expectedTarget.frameId)) {
+    throw new AppError("validation", "候选操作与预览画格不一致，已拒绝应用。", 422);
+  }
+}
+
 export async function applyAssetCandidate(userId: string, candidateId: string, expectedRevision: number) {
+  const candidateState = await prisma.candidate.findFirst({ where: { id: candidateId, ownerUserId: userId, kind: CandidateKind.ASSET } });
+  if (!candidateState) throw new AppError("not_found", "资产候选不存在。", 404);
+  const workingState = await prisma.workingRevision.findFirst({ where: { projectId: candidateState.projectId }, orderBy: { revision: "desc" } });
+  if (!workingState) throw new AppError("not_found", "工作稿不存在。", 404);
+  if (workingState.revision !== expectedRevision || candidateState.baseRevision !== workingState.revision || candidateState.status !== CandidateStatus.AVAILABLE) {
+    if (candidateState.status === CandidateStatus.AVAILABLE) await prisma.candidate.update({ where: { id: candidateState.id }, data: { status: CandidateStatus.STALE } });
+    throw new AppError("conflict", "资产候选已过期。", 409);
+  }
   return prisma.$transaction(async (tx) => {
     const candidate = await tx.candidate.findFirst({ where: { id: candidateId, ownerUserId: userId, kind: CandidateKind.ASSET } });
     if (!candidate) throw new AppError("not_found", "资产候选不存在。", 404);
     const working = await tx.workingRevision.findFirst({ where: { projectId: candidate.projectId }, orderBy: { revision: "desc" } });
     if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
     if (working.revision !== expectedRevision || candidate.baseRevision !== working.revision || candidate.status !== CandidateStatus.AVAILABLE) {
-      await tx.candidate.update({ where: { id: candidate.id }, data: { status: CandidateStatus.STALE } });
       throw new AppError("conflict", "资产候选已过期。", 409);
     }
     const draft = candidate.payload as { kind: string; name: string; description: string; sourceAssetVersionIds?: string[] };

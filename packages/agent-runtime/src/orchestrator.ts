@@ -1,122 +1,185 @@
-import { getConfig } from "../../server/src/config";
+import { getAgentCapability, type AgentCapabilityId } from "./capability-registry";
+import { buildPlannerSystemPrompt } from "./prompts/planner";
 import { DeepSeekProvider } from "./providers/deepseek";
-import { interactionDecisionSchema, type InteractionDecision } from "./schemas";
+import { currentPageTargetSchema, interactionPlanSchema, type CurrentPageTarget, type InteractionDecision, type InteractionPlan } from "./schemas";
 
 export type InteractionInput = {
   message: string;
   intent?: string;
   scope?: string;
-  selection: { type: string; id?: string; label?: string };
+  selection: { type: string; id?: string; pageId?: string; label?: string };
   contextSummary: unknown;
+  imageAttachments?: Array<{ handle: string; label: string }>;
+  observations?: Array<{ tool: string; output: unknown }>;
+  currentPageTargets?: CurrentPageTarget[];
 };
 
-const wholeChapterPattern = /整话|全部|所有页|全篇|切换格式/;
-const currentUnitPattern = /整页|当前页|重排|重新编排/;
-const localRefinePattern = /只改|当前格|当前图|精修|表情|动作|背景|构图/;
-const imagePattern = /生成.*图|画一格|出图|生图|图片|草稿成图|修图/;
-const storyboardPattern = /生成分镜|创建分镜|新建分镜|分镜方案|拆(?:成)?分镜/;
-const dialoguePattern = /对白|台词|气泡|语气|压缩文字/;
-const assetPattern = /创建(?:一个|新)?角色|新建角色|新角色|角色设定|创建(?:一个|新)?场景|新建场景|场景设定|解析.*参考/;
-const advicePattern = /建议|为什么|解释|状态|检查|怎么看/;
-const greetingPattern = /^(你好|您好|嗨|哈[喽啰]|hello|hi|在吗|早上好|下午好|晚上好)[！!。,.，\s？?]*$/i;
-const thanksPattern = /^(谢谢|感谢|明白了|知道了|好的|好)[！!。,.，\s]*$/;
-const capabilityPattern = /^(你能做什么|怎么用|可以帮我什么|你是谁)[？?。\s]*$/;
+export type InteractionPlanningTrace = {
+  prompt: ReturnType<typeof buildPlannerSystemPrompt>["manifest"];
+  plan: InteractionPlan;
+};
 
-export function enforceSafetyDecision(input: InteractionInput, decision: InteractionDecision): InteractionDecision {
-  const assetIntent = input.intent === "资产" || assetPattern.test(input.message);
-  if ((assetPattern.test(input.message) && decision.kind !== "needs_confirmation") || (assetIntent && (decision.kind === "needs_input" || decision.kind === "ready_to_run"))) {
-    return {
-      kind: "ready_to_run",
-      message: "我会先按当前描述生成可编辑的资产候选；细节可以在资产画布中继续完善。",
-      scope: "reference_only",
-      taskType: "asset_parse",
-    };
-  }
-  if (wholeChapterPattern.test(input.message)) {
-    return {
-      kind: "needs_confirmation",
-      message: "这会影响整话已经确认的内容；旧保存快照不会被覆盖。",
-      summary: input.message,
-      scope: "whole_chapter",
-      taskType: input.message.includes("图") ? "frame_image_generate" : "page_layout",
-    };
-  }
-  if (storyboardPattern.test(input.message) && !currentUnitPattern.test(input.message)) {
-    return {
-      kind: "ready_to_run",
-      message: "我会先生成分镜候选；应用前不会改变当前工作稿。",
-      scope: input.scope === "after_current" ? "after_current" : "current_page",
-      taskType: "storyboard",
-    };
-  }
-  if (currentUnitPattern.test(input.message)) {
-    return {
-      kind: "needs_confirmation",
-      message: "这会调整当前呈现单元，但不会静默覆盖保存快照。",
-      summary: input.message,
-      scope: "current_page",
-      taskType: "page_layout",
-    };
-  }
-  if (localRefinePattern.test(input.message) && input.selection.type === "none") {
-    return {
-      kind: "needs_input",
-      message: "我需要知道要修改哪一格，才能确保不影响其他内容。",
-      questions: [{ id: "target", field: "selection", prompt: "请先选择画布上的漫画格或格内图片。", required: true }],
-    };
-  }
-  return decision;
+export type PlannedInteraction = {
+  route: InteractionRoute;
+  trace: InteractionPlanningTrace;
+};
+
+export type InteractionRoute =
+  | { kind: "decision"; decision: InteractionDecision; targetSelection?: InteractionInput["selection"] }
+  | { kind: "tool_call"; capabilityId: AgentCapabilityId; targetHandles: string[] };
+
+function contextRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function deterministicDecision(input: InteractionInput): InteractionDecision {
-  if (greetingPattern.test(input.message)) return { kind: "direct_answer", message: "你好，我在。你可以直接讲故事、创建角色或场景，也可以选中画布上的分镜再告诉我想改什么；我只会在需要生成作品候选时启动任务。" };
-  if (thanksPattern.test(input.message)) return { kind: "direct_answer", message: "不客气。当前没有作品变更；你准备好后继续描述创作意图即可。" };
-  if (capabilityPattern.test(input.message)) return { kind: "direct_answer", message: "我可以帮你整理故事、创建角色与场景、生成或调整分镜、编排页面、生成单格图片和修改对白。所有作品改动都会先成为候选，由你预览后决定是否应用。" };
-  if (advicePattern.test(input.message)) return { kind: "direct_answer", message: "我会围绕当前对象和工作稿给建议，不会修改作品。" };
-  const scope = localRefinePattern.test(input.message)
-    ? input.selection.type === "storyboard_beat" ? "selected_storyboard_beat" : "selected_comic_frame"
-    : input.scope === "after_current" ? "after_current" : "current_page";
-  const taskType = assetPattern.test(input.message)
-    ? "asset_parse"
-    : dialoguePattern.test(input.message)
-      ? "dialogue"
-      : imagePattern.test(input.message)
-        ? localRefinePattern.test(input.message) ? "frame_image_refine" : "frame_image_generate"
-        : "storyboard";
-  return { kind: "ready_to_run", message: "我会先生成候选；应用前不会改变工作稿。", scope, taskType };
+function planningReferences(contextSummary: unknown) {
+  const references = contextRecord(contextSummary).explicitReferences;
+  if (!Array.isArray(references)) return [];
+  return references.flatMap((value, index) => {
+    const reference = contextRecord(value);
+    if (typeof reference.objectType !== "string" || typeof reference.objectId !== "string") return [];
+    return [{
+      handle: `ref:${index}`,
+      type: reference.objectType,
+      label: typeof reference.label === "string" ? reference.label : reference.objectType,
+      versioned: typeof reference.versionId === "string",
+    }];
+  });
+}
+
+function planningCurrentPageTargets(contextSummary: unknown) {
+  const values = contextRecord(contextSummary).currentPageTargets;
+  if (!Array.isArray(values)) return [];
+  return values.flatMap((value) => {
+    const parsed = currentPageTargetSchema.safeParse(value);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+function missingTargetDecision(message: string): InteractionDecision {
+  return {
+    kind: "needs_input",
+    message,
+    questions: [{ id: "target", field: "selection", prompt: message, required: true }],
+  };
+}
+
+export function guardInteractionPlan(input: InteractionInput, plan: InteractionPlan): InteractionRoute {
+  if (plan.outcome === "respond" || plan.outcome === "unsupported") {
+    return { kind: "decision", decision: { kind: "direct_answer", message: plan.message } };
+  }
+  if (plan.outcome === "ask_user") {
+    return {
+      kind: "decision",
+      decision: {
+        kind: "needs_input",
+        message: plan.message,
+        questions: plan.missingInputs.map((missing, index) => ({
+          id: `missing-${index + 1}`,
+          field: missing.field,
+          prompt: missing.description,
+          required: true,
+        })),
+      },
+    };
+  }
+
+  const capability = getAgentCapability(plan.capabilityId);
+  if (!capability) {
+    return { kind: "decision", decision: { kind: "direct_answer", message: "这项操作目前还不能直接完成。你可以继续描述期望的创作结果，我会协助整理可行方案。" } };
+  }
+  if (capability.execution === "observation") {
+    const attachmentHandles = (input.imageAttachments ?? []).map((attachment) => attachment.handle);
+    const availableHandles = new Set([
+      ...attachmentHandles,
+      ...(input.currentPageTargets ?? []).filter((target) => target.assetVersionIds.length > 0).map((target) => target.handle),
+    ]);
+    const requestedHandles = plan.targetHandles.length ? plan.targetHandles : attachmentHandles;
+    const targetHandles = [...new Set(requestedHandles.filter((handle) => availableHandles.has(handle)))];
+    if (!targetHandles.length) {
+      return { kind: "decision", decision: missingTargetDecision(capability.missingTargetMessage ?? "请先添加图片，或指明当前页中包含图片的对象。") };
+    }
+    return { kind: "tool_call", capabilityId: capability.id, targetHandles };
+  }
+  if (capability.target.required) {
+    const currentSelection = input.selection.id && capability.target.selectionTypes.includes(input.selection.type)
+      ? input.selection
+      : undefined;
+    const requestedCurrentPageTargets = (input.currentPageTargets ?? []).filter((target) => plan.targetHandles.includes(target.handle));
+    const resolvedFrames = [...new Map(requestedCurrentPageTargets.flatMap((target) => target.frameId ? [[target.frameId, {
+      type: "comic_frame",
+      id: target.frameId,
+      pageId: target.pageId,
+      label: target.pageLabel ? `${target.pageLabel} · ${target.frameLabel ?? target.label}` : target.frameLabel ?? target.label,
+    }] as const] : [])).values()];
+    const explicitlyUsesSelection = plan.targetHandles.includes("selection");
+    const targetSelection = requestedCurrentPageTargets.length
+      ? resolvedFrames.length === 1 ? resolvedFrames[0] : undefined
+      : explicitlyUsesSelection || !plan.targetHandles.length ? currentSelection : undefined;
+    if (!targetSelection) {
+      const message = requestedCurrentPageTargets.length && !resolvedFrames.length
+        ? "你指的当前页对象没有绑定漫画格，请再指定要处理的画格。"
+        : requestedCurrentPageTargets.length && resolvedFrames.length > 1
+          ? "这段描述对应当前页的多个画格，请再说明具体是哪一格。"
+          : capability.missingTargetMessage ?? "请先选择要处理的目标。";
+      return { kind: "decision", decision: missingTargetDecision(message) };
+    }
+    if (!capability.taskType || !capability.scope) throw new Error(`AGENT_CAPABILITY_TASK_CONTRACT_INVALID:${capability.id}`);
+    return {
+      kind: "decision",
+      decision: {
+        kind: "ready_to_run",
+        message: capability.userMessage,
+        scope: capability.scope,
+        taskType: capability.taskType,
+      },
+      targetSelection,
+    };
+  }
+  if (!capability.taskType || !capability.scope) throw new Error(`AGENT_CAPABILITY_TASK_CONTRACT_INVALID:${capability.id}`);
+  return {
+    kind: "decision",
+    decision: {
+      kind: "ready_to_run",
+      message: capability.userMessage,
+      scope: capability.scope,
+      taskType: capability.taskType,
+    },
+  };
+}
+
+export async function planInteraction(input: InteractionInput): Promise<PlannedInteraction> {
+  const prompt = buildPlannerSystemPrompt();
+  const currentPageTargets = input.currentPageTargets ?? planningCurrentPageTargets(input.contextSummary);
+  const { currentPageTargets: _currentPageTargets, ...plannerContext } = contextRecord(input.contextSummary);
+  const plan = await new DeepSeekProvider().generateJson({
+    schema: interactionPlanSchema,
+    maxTokens: 1400,
+    system: prompt.system,
+    user: JSON.stringify({
+      turn: { message: input.message },
+      requestedScope: input.scope,
+      focus: input.selection.type === "none" ? null : {
+        handle: "selection",
+        type: input.selection.type,
+        label: input.selection.label,
+      },
+      workspaceView: contextRecord(input.contextSummary).currentView ?? null,
+      currentPageTargetCatalog: currentPageTargets,
+      explicitReferences: planningReferences(input.contextSummary),
+      attachments: input.imageAttachments ?? [],
+      observations: input.observations ?? [],
+      context: plannerContext,
+    }),
+  });
+  return {
+    route: guardInteractionPlan({ ...input, currentPageTargets }, plan),
+    trace: { prompt: prompt.manifest, plan },
+  };
 }
 
 export async function decideInteraction(input: InteractionInput) {
-  if (greetingPattern.test(input.message) || thanksPattern.test(input.message) || capabilityPattern.test(input.message)) {
-    return enforceSafetyDecision(input, deterministicDecision(input));
-  }
-  const config = getConfig();
-  if (config.TEXT_MODEL_PROVIDER === "test") return enforceSafetyDecision(input, deterministicDecision(input));
-
-  const provider = new DeepSeekProvider();
-  const decision = await provider.generateJson({
-    schema: interactionDecisionSchema,
-    maxTokens: 900,
-    system: `你是 Lantern AI 的交互编排器。Lantern 是个人漫画创作工作台。判断用户是在询问、缺少必要输入、需要高风险确认，还是可以创建候选任务。
-规则：先判断输入是不是寒暄、感谢、产品能力询问或创作建议，这些必须 direct_answer，绝不能恢复旧任务或创建任务。普通局部生成可直接执行；修改已确认内容、跨格、整页、整话和格式切换必须确认；不要假装已经修改作品；少追问；所有会改变作品的结果先成为候选。
-只允许以下四种 JSON 形状之一：
-{"kind":"direct_answer","message":"回答"}
-{"kind":"needs_input","message":"说明","questions":[{"id":"format","field":"format","prompt":"问题","required":true,"options":[{"id":"page","label":"页漫","value":"page"}]}]}
-{"kind":"needs_confirmation","message":"风险说明","summary":"影响摘要","scope":"current_page","taskType":"page_layout"}
-{"kind":"ready_to_run","message":"执行说明","scope":"selected_comic_frame","taskType":"frame_image_generate"}
-不要增加字段，不要把 taskType 写成 task。`,
-    user: JSON.stringify({
-      message: input.message,
-      intent: input.intent,
-      requestedScope: input.scope,
-      selection: input.selection,
-      context: input.contextSummary,
-      outputContract: {
-        kinds: ["direct_answer", "needs_input", "needs_confirmation", "ready_to_run"],
-        scopes: ["reference_only", "selected_storyboard_beat", "selected_comic_frame", "selected_element", "current_page", "after_current", "whole_chapter"],
-        taskTypes: ["storyboard", "page_layout", "frame_image_generate", "frame_image_refine", "asset_parse", "dialogue", "export"],
-      },
-    }),
-  });
-  return enforceSafetyDecision(input, decision);
+  const planned = await planInteraction(input);
+  if (planned.route.kind !== "decision") throw new Error(`INTERACTION_REQUIRES_TOOL:${planned.route.capabilityId}`);
+  return planned.route.decision;
 }

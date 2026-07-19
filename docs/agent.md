@@ -119,6 +119,27 @@ Capability 的 Agent 权限分为 `disabled`、`observe`、`preview` 和 `execut
 
 常规对话默认只开放当前元素、当前画格或当前展示单元。明确的画布级请求最多覆盖四个 `PresentationUnit`；整话操作只能进入 Workflow。读取范围可以大于写入范围，但每个写入目标必须在执行前显式解析并在结果中展示。
 
+### 3.4 外置 Agent、MCP 与 Skill
+
+Lantern 可以接入 Codex 等用户选择的外置 Agent，让它们使用自身的推理、视觉检查和图像生成能力参与创作。外置 Agent 是另一种规划与交互入口，不是拥有额外权限的后端；内置与外置 Agent 通过同一 Agent Gateway 复用 Context Builder、Capability Registry、Task、Candidate 和 revision 校验。
+
+```text
+内置 Agent ───────────────┐
+                         → Agent Gateway → Agent Core
+外置 Agent + Skill → MCP ┘
+```
+
+首要接入方向是由 Lantern 提供 MCP Server。MCP 只暴露以下语义能力：
+
+- 根据目标与范围构建只读上下文，并返回固定版本引用和省略说明。
+- 查询允许的 Capability、输入约束和风险，执行 dry-run 或受控计划。
+- 创建、查询和取消异步任务，提交外部生成结果并登记新的 `AssetVersion`。
+- 创建、读取、继续修订和丢弃 Candidate；应用仍由 Lantern 完成权限、确认和 revision 校验。
+
+MCP 不暴露 Prisma、对象存储凭证、任意 LCD 写入或原始 `WorkspaceCommand`。连接使用用户身份与 Project 范围授权，默认最小权限；私有图片只通过短期签名资源传递。外置调用必须记录 actor、客户端、连接与工具版本，幂等、取消、stale 和审计规则与内置 Agent 相同。外部生成的图片只能成为新的资源版本和 Candidate，不能覆盖已有图片。
+
+Lantern Skill 是面向外置 Agent 的版本化使用说明，描述对象语义、范围判断、标准协作流程和 MCP 工具用法。Skill 不拥有权限，不复制 Capability schema，也不能代替用户确认；可执行定义始终由 MCP 工具 schema 和 Capability Registry 提供。Skill 与 MCP 契约需要声明兼容版本，契约不匹配时拒绝写入能力。
+
 ## 4. 上下文设计
 
 ### 4.1 上下文组成
@@ -182,6 +203,7 @@ Context Planner 按以下步骤构建上下文：
 
 一个 Task 必须记录：
 
+- 发起方身份、内置或外置通道，以及适用的连接和工具版本。
 - 用户意图、结构化目标、作用范围和保护约束。
 - base revision、context snapshot 和计划调用的 Capability。
 - Provider、模型、尝试次数、幂等键、进度与取消信号。
@@ -223,6 +245,7 @@ Candidate 卡片必须回答四个问题：
 - 建立范围优先的 Context v1：当前输入、显式引用、选择、目标附近分镜、相关资产、项目基线、base revision 与 omitted context。
 - 首批闭环覆盖：回答创作问题；缺少目标时追问；创建角色或场景候选；针对当前格生成图片或调整对白；候选预览、应用、继续修订、丢弃；任务停止、失败和重试。
 - 只开放少量已有且可验证的 Capability。所有生成结果进入 Candidate；确定性低风险动作只有在原子 Undo 和权限测试完整后才允许直接执行。
+- 将 Agent Core 收口为与模型和传输无关的服务；内置调用也经过 Agent Gateway，并记录统一 actor 与审计信息，为外置接入保留稳定边界。
 - 对话显示行动说明、关键进度、结果摘要和下一步；恢复页面后可以继续查看任务与未应用候选。
 - 删除或永久旁路已经由新闭环覆盖的旧写入路径，确保不存在两个可写主入口。
 
@@ -236,9 +259,10 @@ P0 的验收是：Agent 能可靠地区分“回答、追问、行动”，完�
 - 建立可解释的引用排序、摘要、遗漏记录、冲突检测与上下文评估；`context-debug` 与任务 snapshot 保持同源。
 - 支持选区、遮罩、扩图、局部重画、对白改写、页面节奏建议和少量多对象计划；原稿与候选可以并排比较。
 - 支持候选派生、多个可比较方案，以及最多四个展示单元内的 staged Candidate；每阶段基于最新 revision 继续。
+- 提供首批 MCP Server：开放上下文读取、Capability 查询与 dry-run、任务生命周期、外部图片版本登记和 Candidate 暂存；Candidate 应用仍回到 Lantern 用户确认。
 - 建立回归集，衡量目标识别、错误修改范围、无效追问、上下文引用准确率、Candidate 应用率和 stale 率。
 
-P1 的验收是：用户不必重复说明关键角色和前后剧情，Agent 仍能解释为什么选择这些参考；“只改指定区域”不会改变范围外对象，复杂请求可以被拆成可独立接受的阶段。
+P1 的验收是：用户不必重复说明关键角色和前后剧情，Agent 仍能解释为什么选择这些参考；“只改指定区域”不会改变范围外对象，复杂请求可以被拆成可独立接受的阶段；外置 Agent 可以完成一次读取上下文、生成资源和暂存 Candidate 的闭环，但不能绕过确认写入作品。
 
 ### P2：精修模式与 Workflow
 
@@ -247,6 +271,7 @@ P1 的验收是：用户不必重复说明关键角色和前后剧情，Agent �
 - 开放聚焦精修模式：锁定目标、保护范围和比较基线，连续生成派生候选，并支持回到任一可用方案。
 - 建立持久 Workflow：父流程保存目标和阶段图，步骤使用普通 Task、Context snapshot、Capability 与 Candidate；支持暂停、恢复、取消、失败重试和从检查点重规划。
 - 覆盖续写、整页重编排、跨页结构、整话分镜到逐格生成等流程；结构与生成分阶段确认，已确认前文默认只读。
+- 发布版本化 Lantern Skill，并让外置 Agent 复用精修与 Workflow；需要无界面应用时使用 Lantern 签发的一次性确认凭证，不接受外置 Agent 自报用户已同意。
 - 根据创作需求提供“探索多个方向”“保持一致性优先”“局部精修”等策略，但它们只调整规划与上下文权重，不建立另一套作品协议。
 - 只有职责具备独立输入输出、评估标准和稳定边界时才拆分专门 Planner；不以 Agent 数量或模型数量作为产品能力。
 
@@ -256,11 +281,11 @@ P2 的验收是：长流程可以中途停止并安全恢复，用户能看懂�
 
 Agent 的正式实现需要同时保留以下可观测信息：决策类型、目标解析证据、写入范围、context snapshot 标识、Capability 计划、校验结果、Candidate 状态和最终 revision。诊断信息用于重放和评估，但不保存模型思维链，也不把完整私有内容写入普通日志。
 
-上线以垂直场景评估，而不是以“模型能回答”作为完成标准。每个开放能力至少验证：目标识别、越界保护、缺失信息处理、工具 schema、取消与重试、stale、候选应用、Undo、工作台/预览/导出一致性。任何新 Capability 都先完成编辑器执行与测试，再决定 Agent 是仅观察、可预览还是可执行。
+上线以垂直场景评估，而不是以“模型能回答”作为完成标准。每个开放能力至少验证：目标识别、越界保护、缺失信息处理、工具 schema、取消与重试、stale、候选应用、Undo、工作台/预览/导出一致性。外置接入额外验证 Project 授权隔离、签名资源过期、伪造确认、重复请求、旧版 Skill 和完整审计。任何新 Capability 都先完成编辑器执行与测试，再决定 Agent 是仅观察、可预览还是可执行。
 
 ## 8. 漫画编辑与 Agent 能力矩阵
 
-本表只记录对话 Agent 相关能力的用户入口、实现路径和 Capability 状态，不覆盖整话 Workflow。状态以 [`packages/shared/src/lcd/`](../packages/shared/src/lcd/)、[`workspace-schema.ts`](../packages/shared/src/workspace-schema.ts)、[`capabilities.ts`](../packages/editor-core/src/capabilities.ts) 和实际入口为准；能力或权限变化时同步更新。
+本表记录内置与外置对话 Agent 共用能力的用户入口、实现路径和 Capability 状态，不覆盖整话 Workflow。状态以 [`packages/shared/src/lcd/`](../packages/shared/src/lcd/)、[`workspace-schema.ts`](../packages/shared/src/workspace-schema.ts)、[`capabilities.ts`](../packages/editor-core/src/capabilities.ts) 和实际入口为准；能力或权限变化时同步更新。
 
 `核心`、`增强`、`后置`表示实现优先级，`AI 专属`表示必须由模型产出结果。`混合`能力由模型或图像 SDK 生成 Candidate，其余能力复用确定性 Capability；`已登记（禁用）`表示工具已存在但尚未向 Agent 开放，当前所有漫画编辑 Capability 均处于禁用状态。
 

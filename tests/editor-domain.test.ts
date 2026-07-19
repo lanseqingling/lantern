@@ -330,6 +330,8 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "create_page",
     "create_vertical_segment",
     "update_presentation_unit",
+    "duplicate_presentation_unit",
+    "move_presentation_unit",
     "delete_presentation_unit",
     "restore_workspace_version",
   ]);
@@ -405,7 +407,7 @@ test("true spreads stay indivisible, preserve physical surfaces and block unsafe
   assert.equal(crossLayer?.elements.length, 1);
   assert.deepEqual(crossLayer?.elements[0]?.transform, { x: 0, y: 0, width: spread.canvas.width, height: spread.canvas.height });
   assert.throws(() => dryRunEditorCapability("replace_frame_image", { unitId: spread.id, layerId: crossLayer!.id, elementId: crossLayer!.elements[0].id, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context()), /不能直接更换/);
-  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨页对象/);
+  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨越分隔线的对象/);
   const crossImageId = crossLayer!.elements[0].id;
   fixture.working = dryRunEditorCapability("convert_element_to_page", { unitId: spread.id, layerId: crossLayer!.id, elementId: crossImageId }, context()).result.working;
   const restoredUnit = fixture.working.document.units.find((unit) => unit.id === spread.id)!;
@@ -445,7 +447,7 @@ test("spread merge accepts different overlap policies and preserves the permissi
   assert.equal(result.result.working.document.units.find((unit) => unit.kind === "spread")?.layoutPolicy.frameOverlap, "allow");
 });
 
-test("frames and balloons can explicitly cross a true spread", () => {
+test("spread splitting follows actual frame and balloon geometry", () => {
   const fixture = createInitialFixture();
   let sequence = 0;
   const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-cross-object-${++sequence}`, actor: "human" as const });
@@ -456,8 +458,14 @@ test("frames and balloons can explicitly cross a true spread", () => {
   const frame = spread.frames[0];
 
   fixture.working = dryRunEditorCapability("set_frame_cross_page", { unitId: spread.id, frameId: frame.id, enabled: true }, context()).result.working;
-  assert.equal(fixture.working.document.units.find((unit) => unit.id === spread.id)?.frames.find((candidate) => candidate.id === frame.id)?.surfaceScope, "unit");
-  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨页格/);
+  const crossFrame = fixture.working.document.units.find((unit) => unit.id === spread.id)!.frames.find((candidate) => candidate.id === frame.id)!;
+  assert.equal(crossFrame.surfaceScope, "unit");
+  const containedFrameSplit = dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context());
+  assert.equal(containedFrameSplit.result.working.document.units.flatMap((unit) => unit.frames).find((candidate) => candidate.id === frame.id)?.surfaceScope, undefined);
+  const originalFrameGeometry = structuredClone(crossFrame.geometry);
+  crossFrame.geometry = { ...crossFrame.geometry, x: spread.canvas.width / 2 - 20, width: 40 };
+  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨越分隔线的画格/);
+  crossFrame.geometry = originalFrameGeometry;
   fixture.working = dryRunEditorCapability("set_frame_cross_page", { unitId: spread.id, frameId: frame.id, enabled: false }, context()).result.working;
 
   const created = dryRunEditorCapability("create_dialogue_balloon", { unitId: spread.id, frameId: frame.id, position: { x: .3, y: .2 } }, context());
@@ -471,8 +479,14 @@ test("frames and balloons can explicitly cross a true spread", () => {
   const crossLayer = fixture.working.document.units.find((unit) => unit.id === spread.id)!.overlayLayers.find((layer) => layer.purpose === "cross_page")!;
   assert.equal(crossLayer.anchor.type, "unit");
   assert.equal(crossLayer.elements.some((element) => element.id === balloonId && element.kind === "balloon"), true);
-  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨页对象/);
-  fixture.working = dryRunEditorCapability("convert_element_to_page", { unitId: spread.id, layerId: crossLayer.id, elementId: balloonId }, context()).result.working;
+  const containedBalloonSplit = dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context());
+  const splitBalloonLayer = containedBalloonSplit.result.working.document.units.flatMap((unit) => unit.overlayLayers).find((layer) => layer.elements.some((element) => element.id === balloonId));
+  assert.equal(splitBalloonLayer?.purpose, "page_content");
+  const crossBalloon = crossLayer.elements.find((element) => element.id === balloonId)!;
+  const originalBalloonTransform = structuredClone(crossBalloon.transform);
+  crossBalloon.transform = { ...crossBalloon.transform, x: spread.canvas.width / 2 - 10, width: 20 };
+  assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨越分隔线的对象/);
+  crossBalloon.transform = originalBalloonTransform;
   assert.equal(dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()).result.working.document.reading.unitOrder.length, 2);
 });
 
@@ -546,7 +560,7 @@ test("compound vertical segments support one cross-segment image and remain phys
   assert.equal(crossLayer?.elements.length, 1);
   assert.equal(crossLayer?.surfaceId, undefined);
   fixture.working = crossed.result.working;
-  assert.throws(() => dryRunEditorCapability("split_vertical_segments", { unitId: compound.id }, context()), /跨段对象/);
+  assert.throws(() => dryRunEditorCapability("split_vertical_segments", { unitId: compound.id }, context()), /跨越分隔线的对象/);
 });
 
 test("human frame, image and dialogue management capabilities form valid atomic revisions", () => {
@@ -953,6 +967,40 @@ test("vertical segment editing refuses a ratio that would crop an existing frame
     createId: (prefix) => `${prefix}-test`,
     actor: "human",
   }), /现有画格会被裁切/);
+});
+
+test("presentation units duplicate after their source and move as complete units", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-unit-copy-${++sequence}`, actor: "human" as const });
+  const source = fixture.working.document.units[0];
+  const frame = source.frames[0];
+  fixture.working = dryRunEditorCapability("create_dialogue_balloon", { unitId: source.id, frameId: frame.id, position: { x: .2, y: .2 } }, context()).result.working;
+  if (!fixture.working.document.units[0].frames[0].storyRefs.some((reference) => reference.role === "primary")) {
+    fixture.working = dryRunEditorCapability("create_frame_storyboard_beat", { unitId: source.id, frameId: frame.id, title: "原分镜", description: "原页面的画面描述。" }, context()).result.working;
+  }
+
+  const duplicated = dryRunEditorCapability("duplicate_presentation_unit", { unitId: source.id }, context());
+  const [sourceId, copyId] = duplicated.result.working.document.reading.unitOrder;
+  const copied = duplicated.result.working.document.units.find((unit) => unit.id === copyId)!;
+  const sourceAfterPreparation = duplicated.result.working.document.units.find((unit) => unit.id === sourceId)!;
+  assert.equal(duplicated.commands.some((command) => command.type === "add_presentation_unit"), true);
+  assert.notEqual(copied.id, sourceAfterPreparation.id);
+  assert.notEqual(copied.surfaces[0].id, sourceAfterPreparation.surfaces[0].id);
+  assert.notEqual(copied.frames[0].id, sourceAfterPreparation.frames[0].id);
+  const sourceBalloon = frameElements(sourceAfterPreparation.frames[0]).find((element) => element.kind === "balloon");
+  const copiedBalloon = frameElements(copied.frames[0]).find((element) => element.kind === "balloon");
+  assert.ok(sourceBalloon?.kind === "balloon" && copiedBalloon?.kind === "balloon");
+  if (sourceBalloon?.kind !== "balloon" || copiedBalloon?.kind !== "balloon") throw new Error("missing copied balloon");
+  assert.notEqual(copiedBalloon.dialogueId, sourceBalloon.dialogueId);
+  assert.equal(duplicated.result.working.document.dialogues.find((dialogue) => dialogue.id === copiedBalloon.dialogueId)?.content, duplicated.result.working.document.dialogues.find((dialogue) => dialogue.id === sourceBalloon.dialogueId)?.content);
+  assert.notEqual(copied.frames[0].storyRefs[0]?.storyboardBeatId, sourceAfterPreparation.frames[0].storyRefs[0]?.storyboardBeatId);
+
+  const movedFixture = { ...fixture, working: duplicated.result.working, storyboardBeats: duplicated.result.storyboardBeats };
+  const moved = dryRunEditorCapability("move_presentation_unit", { unitId: copyId, direction: "up" }, { fixture: movedFixture, createId: (prefix) => `${prefix}-move`, actor: "human" });
+  assert.deepEqual(moved.result.working.document.reading.unitOrder, [copyId, sourceId]);
+  assert.deepEqual(moved.result.working.document.reading.unitOrder.flatMap((id) => moved.result.working.document.units.find((unit) => unit.id === id)?.surfaces.map((surface) => surface.pageNumber) ?? []), [1, 2]);
+  assert.throws(() => dryRunEditorCapability("move_presentation_unit", { unitId: copyId, direction: "up" }, { fixture: moved.result, createId: (prefix) => `${prefix}-move`, actor: "human" }), /最前面/);
 });
 
 test("presentation unit deletion updates reading order and keeps one page minimum", () => {

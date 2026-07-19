@@ -1,6 +1,8 @@
 import type { ReactElement, ReactNode, SVGProps } from "react";
 import {
   AtSign,
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   BookOpenCheck,
   Braces,
@@ -99,6 +101,8 @@ const glyphs = {
   download: Download,
   publish: FileUp,
   add: Plus,
+  moveUp: ArrowUp,
+  moveDown: ArrowDown,
   chevronDown: ChevronDown,
   panelRightClose: PanelRightClose,
   storyboard: PanelsTopLeft,

@@ -1438,8 +1438,6 @@ const mergeVerticalSegmentsCapability = defineCapability({
 
 function splitCompositeCommands(context: EditorCapabilityContext, unit: PresentationUnit): WorkspaceCommand[] {
   const crossPurpose = unit.kind === "spread" ? "cross_page" : "cross_segment";
-  if (unit.overlayLayers.some((layer) => layer.purpose === crossPurpose)) throw new Error(unit.kind === "spread" ? "双页仍有跨页对象，请先将其转回纸面对象或移除" : "滚动段仍有跨段对象，请先将其转回段内对象或移除");
-  if (unit.kind === "spread" && unit.frames.some((frame) => frame.surfaceScope === "unit")) throw new Error("双页仍有跨页格，请先取消跨页或移除");
   const surfaces = unit.kind === "spread" ? orderedUnitSurfaces(unit, context.fixture.working.document.reading.direction) : [...unit.surfaces].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0) || a.geometry.y - b.geometry.y);
   const surfaceFor = (geometry: Geometry) => surfaces.find((surface) => containsGeometry(surface.geometry, geometry));
   const frameSurface = new Map<string, PageSurface>();
@@ -1458,7 +1456,8 @@ function splitCompositeCommands(context: EditorCapabilityContext, unit: Presenta
       if (layer.anchor.type === "frame") return frameIds.has(layer.anchor.frameId) ? [{ ...structuredClone(layer), surfaceId: undefined }] : [];
       const elements = layer.elements.filter((element) => surfaceFor(element.transform)?.id === surface.id).map((element) => shiftedOverlayElement(element, -surface.geometry.x, -surface.geometry.y));
       if (!elements.length) return [];
-      return [{ ...structuredClone(layer), id: surfaceIndex === 0 ? layer.id : context.createId(`${layer.purpose}-overlay`), surfaceId: undefined, elements }];
+      const purpose = layer.purpose === crossPurpose ? "page_content" : layer.purpose;
+      return [{ ...structuredClone(layer), id: surfaceIndex === 0 ? layer.id : context.createId(`${purpose}-overlay`), surfaceId: undefined, purpose, elements }];
     });
     const id = context.createId(unit.kind === "spread" ? "page" : "segment");
     return {
@@ -1689,6 +1688,117 @@ const updatePresentationUnitCapability = defineCapability({
   },
 });
 
+function duplicatePresentationUnit(context: EditorCapabilityContext, source: PresentationUnit) {
+  const document = context.fixture.working.document;
+  const unitId = context.createId(source.kind === "vertical_segment" ? "segment" : source.kind === "spread" ? "spread" : "page");
+  const surfaceIds = new Map(source.surfaces.map((surface) => [surface.id, context.createId("surface")]));
+  const frameIds = new Map(source.frames.map((frame) => [frame.id, context.createId("frame")]));
+  const primaryBeats = source.frames.flatMap((frame) => {
+    const reference = frame.storyRefs.find((item) => item.role === "primary");
+    const beat = reference ? context.fixture.storyboardBeats.find((item) => item.id === reference.storyboardBeatId) : undefined;
+    return beat ? [{ frameId: frame.id, beat }] : [];
+  });
+  const beatIds = new Map(primaryBeats.map(({ beat }) => [beat.id, context.createId("storyboard-beat")]));
+  const dialogueIds = new Map<string, string>();
+  const dialogues: Dialogue[] = [];
+  const duplicateDialogueId = (dialogueId: string) => {
+    const existing = dialogueIds.get(dialogueId);
+    if (existing) return existing;
+    const sourceDialogue = document.dialogues.find((item) => item.id === dialogueId);
+    const id = context.createId("dialogue");
+    dialogueIds.set(dialogueId, id);
+    const copiedBeatId = sourceDialogue?.storyboardBeatId ? beatIds.get(sourceDialogue.storyboardBeatId) : undefined;
+    dialogues.push({
+      ...structuredClone(sourceDialogue ?? { content: "" }),
+      id,
+      ...(copiedBeatId ? { storyboardBeatId: copiedBeatId, storyboardBeatVersionId: `${copiedBeatId}-v1` } : {}),
+    });
+    return id;
+  };
+  const duplicateElement = <T extends FrameElement | OverlayElement>(element: T): T => {
+    const copy = { ...structuredClone(element), id: context.createId(element.kind) } as T;
+    if (copy.kind === "balloon") copy.dialogueId = duplicateDialogueId(copy.dialogueId);
+    return copy;
+  };
+  const unit: PresentationUnit = {
+    ...structuredClone(source),
+    id: unitId,
+    ...(source.name ? { name: `${source.name} 副本` } : {}),
+    surfaces: source.surfaces.map((surface) => ({ ...structuredClone(surface), id: surfaceIds.get(surface.id)! })),
+    frames: source.frames.map((frame) => ({
+      ...structuredClone(frame),
+      id: frameIds.get(frame.id)!,
+      storyRefs: [],
+      layers: frame.layers.map((layer) => ({ ...structuredClone(layer), id: context.createId(`${layer.kind}-layer`), elements: layer.elements.map(duplicateElement) } as FrameLayer)),
+    })),
+    overlayLayers: source.overlayLayers.map((layer) => ({
+      ...structuredClone(layer),
+      id: context.createId(`${layer.purpose}-overlay`),
+      anchor: layer.anchor.type === "frame" ? { type: "frame" as const, frameId: frameIds.get(layer.anchor.frameId)! } : { type: "unit" as const },
+      ...(layer.surfaceId ? { surfaceId: surfaceIds.get(layer.surfaceId)! } : {}),
+      elements: layer.elements.map(duplicateElement),
+    })),
+    readingSequence: source.readingSequence.map((entry) => ({ ...structuredClone(entry), frameId: frameIds.get(entry.frameId)! })),
+  };
+  const storyboardCommands: WorkspaceCommand[] = primaryBeats.map(({ frameId, beat }) => {
+    const beatId = beatIds.get(beat.id)!;
+    return {
+      type: "create_frame_storyboard_beat",
+      unitId,
+      frameId: frameIds.get(frameId)!,
+      storyboardBeat: { ...structuredClone(beat), id: beatId, versionId: `${beatId}-v1`, title: `${beat.title} 副本` },
+    };
+  });
+  return { unit, dialogues, storyboardCommands };
+}
+
+const duplicatePresentationUnitCapability = defineCapability({
+  id: "duplicate_presentation_unit",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1) }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["presentation_unit_exists", "copied_object_ids_are_remapped", "resulting_document_is_valid"],
+  outputCommandTypes: ["add_dialogue", "add_presentation_unit", "create_frame_storyboard_beat"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const source = context.fixture.working.document.units.find((unit) => unit.id === input.unitId);
+    if (!source) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    const readingIndex = context.fixture.working.document.reading.unitOrder.indexOf(source.id);
+    if (readingIndex < 0) throw new Error(`PresentationUnit is missing from reading order: ${source.id}`);
+    const copied = duplicatePresentationUnit(context, source);
+    return [
+      ...copied.dialogues.map((dialogue): WorkspaceCommand => ({ type: "add_dialogue", dialogue })),
+      { type: "add_presentation_unit", unit: copied.unit, readingIndex: readingIndex + 1 },
+      ...copied.storyboardCommands,
+    ];
+  },
+});
+
+const movePresentationUnitCapability = defineCapability({
+  id: "move_presentation_unit",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), direction: z.enum(["up", "down"]) }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["presentation_unit_exists", "adjacent_presentation_unit_exists"],
+  outputCommandTypes: ["move_presentation_unit"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const index = context.fixture.working.document.reading.unitOrder.indexOf(input.unitId);
+    if (index < 0) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    if (input.direction === "up" && index === 0) throw new Error("当前展示单元已经在最前面");
+    if (input.direction === "down" && index === context.fixture.working.document.reading.unitOrder.length - 1) throw new Error("当前展示单元已经在最后面");
+    return [{ type: "move_presentation_unit", ...input }];
+  },
+});
+
 const deletePresentationUnitCapability = defineCapability({
   id: "delete_presentation_unit",
   version: 1,
@@ -1780,6 +1890,8 @@ const capabilityRegistry = {
   create_page: createPageCapability,
   create_vertical_segment: createVerticalSegmentCapability,
   update_presentation_unit: updatePresentationUnitCapability,
+  duplicate_presentation_unit: duplicatePresentationUnitCapability,
+  move_presentation_unit: movePresentationUnitCapability,
   delete_presentation_unit: deletePresentationUnitCapability,
   restore_workspace_version: restoreWorkspaceVersionCapability,
 } satisfies Record<string, RegisteredCapability>;

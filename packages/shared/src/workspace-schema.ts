@@ -56,6 +56,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("remove_dialogue"), dialogueId: z.string().min(1) }),
   z.strictObject({ type: z.literal("create_frame_storyboard_beat"), unitId: z.string().min(1), frameId: z.string().min(1), storyboardBeat: storyboardBeatSchema }),
   z.strictObject({ type: z.literal("add_presentation_unit"), unit: presentationUnitSchema, readingIndex: z.number().int().nonnegative().optional() }),
+  z.strictObject({ type: z.literal("move_presentation_unit"), unitId: z.string().min(1), direction: z.enum(["up", "down"]) }),
   z.strictObject({ type: z.literal("set_presentation_unit_name"), unitId: z.string().min(1), name: z.string().min(1).max(80).nullable() }),
   z.strictObject({ type: z.literal("resize_vertical_segment"), unitId: z.string().min(1), canvasHeight: z.number().int().positive() }),
   z.strictObject({ type: z.literal("remove_presentation_unit"), unitId: z.string().min(1) }),

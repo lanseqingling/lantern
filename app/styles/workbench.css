@@ -313,6 +313,8 @@
 .page-item-menu-floating button > span { display: inline-flex; align-items: center; gap: 7px; }
 .page-item-menu-floating button svg { width: 13px; height: 13px; color: #688087; }
 .page-item-menu-floating button:hover { background: var(--cyan-soft); color: var(--cyan-deep); }
+.page-item-menu-floating button:disabled, .page-item-menu-floating button:disabled:hover { color: #a5b0b4; background: transparent; cursor: not-allowed; opacity: .52; }
+.page-item-menu-floating .floating-menu-divider { display: block; height: 1px; margin: 5px 4px; background: rgba(74,121,126,.16); }
 .page-edit-card-floating { position: absolute; z-index: 112; display: grid; gap: 11px; width: 246px; box-sizing: border-box; padding: 13px; border: 1px solid rgba(255,255,255,.92); border-radius: 16px; background: rgba(255,255,255,.97); box-shadow: var(--shadow); color: #405058; backdrop-filter: blur(18px); }
 .page-edit-card-floating header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .page-edit-card-floating header strong { color: #31454d; font-size: 12px; font-weight: 900; }

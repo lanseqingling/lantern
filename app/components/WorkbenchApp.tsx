@@ -2838,6 +2838,24 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
+  const duplicateComicPage = (unitId: string) => {
+    const pageIndex = workingPages.findIndex((page) => page.id === unitId);
+    if (pageIndex < 0) return;
+    if (commitCapability("duplicate_presentation_unit", { unitId }, "复制当前页", pageIndex + 1)) {
+      setSelection(noSelection);
+      setPageMenuId(null);
+    }
+  };
+
+  const moveComicPage = (unitId: string, direction: "up" | "down") => {
+    const pageIndex = workingPages.findIndex((page) => page.id === unitId);
+    const nextPageIndex = pageIndex + (direction === "up" ? -1 : 1);
+    if (pageIndex < 0 || nextPageIndex < 0 || nextPageIndex >= workingPages.length) return;
+    if (commitCapability("move_presentation_unit", { unitId, direction }, direction === "up" ? "上移一页" : "下移一页", nextPageIndex)) {
+      setPageMenuId(null);
+    }
+  };
+
   const addVerticalSegment = (aspectRatio: VerticalSegmentAspectRatio) => {
     setVerticalSegmentMenuPosition(null);
     const pageIndex = state.fixture.working.document.units.length;
@@ -3373,6 +3391,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {activePageMenu && pageMenuPosition ? <FloatingMenu className="page-item-menu-floating" style={{ left: pageMenuPosition.x, top: pageMenuPosition.y }}>
         <MenuSection className="asset-menu-section">
           <button type="button" onClick={() => openPageEditor(activePageMenu, "edit")}><span><Icon name="edit" />编辑页</span></button>
+        </MenuSection>
+        <MenuDivider />
+        <MenuSection className="asset-menu-section">
+          <button type="button" onClick={() => duplicateComicPage(activePageMenu.id)}><span><Icon name="copy" />复制当前页</span></button>
+          <button type="button" disabled={activePageMenuIndex <= 0} onClick={() => moveComicPage(activePageMenu.id, "up")}><span><Icon name="moveUp" />上移一页</span></button>
+          <button type="button" disabled={activePageMenuIndex >= workingPages.length - 1} onClick={() => moveComicPage(activePageMenu.id, "down")}><span><Icon name="moveDown" />下移一页</span></button>
+        </MenuSection>
+        <MenuDivider />
+        <MenuSection className="asset-menu-section">
           {!isVerticalWorkbench && activePageMenuUnit ? <><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "before")}><span><Icon name="add" />向前插入一页</span></button><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "after")}><span><Icon name="add" />向后插入一页</span></button></> : null}
           {activePageMenuUnit?.kind === "single_page" && activePageMenuNextUnit?.kind === "single_page" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_pages" }); setPageMenuId(null); }}><span><Icon name="pageSpread" />合并下一页</span></button> : null}
           {activePageMenuUnit?.kind === "spread" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "split_spread" }); setPageMenuId(null); }}><span><Icon name="pageSingle" />拆分为单页</span></button> : null}

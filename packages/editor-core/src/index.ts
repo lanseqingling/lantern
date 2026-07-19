@@ -114,6 +114,15 @@ export function applyWorkspaceChangeSet(
       document.reading.unitOrder.splice(index, 0, operation.unit.id);
       continue;
     }
+    if (operation.type === "move_presentation_unit") {
+      const currentIndex = document.reading.unitOrder.indexOf(operation.unitId);
+      if (currentIndex < 0) throw new Error(`missing PresentationUnit: ${operation.unitId}`);
+      const nextIndex = currentIndex + (operation.direction === "up" ? -1 : 1);
+      if (nextIndex < 0 || nextIndex >= document.reading.unitOrder.length) throw new Error(operation.direction === "up" ? "当前展示单元已经在最前面" : "当前展示单元已经在最后面");
+      document.reading.unitOrder.splice(currentIndex, 1);
+      document.reading.unitOrder.splice(nextIndex, 0, operation.unitId);
+      continue;
+    }
     if (operation.type === "set_presentation_unit_name") {
       const unit = findUnit(operation.unitId);
       if (operation.name === null) delete unit.name;

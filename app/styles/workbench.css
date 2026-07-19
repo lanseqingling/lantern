@@ -308,7 +308,7 @@
 .draft-page:hover .draft-page-more, .draft-page:focus-within .draft-page-more, .draft-page-more[aria-expanded="true"] { opacity: 1; }
 .draft-page-more:hover { background: rgba(100,200,200,.16); }
 .draft-page-more svg { width: 15px; height: 15px; }
-.page-item-menu-floating { position: absolute; z-index: 106; display: grid; width: 148px; padding: 5px; border: 1px solid rgba(255,255,255,.92); border-radius: 12px; background: #fff; box-shadow: var(--shadow); }
+.page-item-menu-floating { position: absolute; z-index: 106; display: grid; width: 148px; max-height: calc(100vh - 24px); overflow-y: auto; padding: 5px; border: 1px solid rgba(255,255,255,.92); border-radius: 12px; background: #fff; box-shadow: var(--shadow); }
 .page-item-menu-floating button { width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 8px; color: #405058; font: inherit; font-size: 10px; text-align: left; cursor: pointer; }
 .page-item-menu-floating button > span { display: inline-flex; align-items: center; gap: 7px; }
 .page-item-menu-floating button svg { width: 13px; height: 13px; color: #688087; }

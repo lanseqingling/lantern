@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   balloonElementSchema,
   comicDocumentSchema,
+  frameBleedEdgesSchema,
   frameBorderSchema,
   frameElementSchema,
   frameLayerSchema,
@@ -62,7 +63,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("resize_frame"), unitId: z.string().min(1), frameId: z.string().min(1), geometry: geometrySchema }),
   z.strictObject({ type: z.literal("set_frame_surface_scope"), unitId: z.string().min(1), frameId: z.string().min(1), surfaceScope: z.enum(["surface", "unit"]) }),
   z.strictObject({ type: z.literal("reorder_frame"), unitId: z.string().min(1), frameId: z.string().min(1), zIndex: z.number().int() }),
-  z.strictObject({ type: z.literal("set_frame_style"), unitId: z.string().min(1), frameId: z.string().min(1), border: frameBorderSchema.optional(), shape: frameShapeSchema.optional(), mask: frameMaskSchema.optional() }),
+  z.strictObject({ type: z.literal("set_frame_style"), unitId: z.string().min(1), frameId: z.string().min(1), border: frameBorderSchema.optional(), shape: frameShapeSchema.optional(), mask: frameMaskSchema.optional(), bleedEdges: frameBleedEdgesSchema.optional() }),
   z.strictObject({ type: z.literal("replace_presentation_layout"), unitId: z.string().min(1), expectedFrameIds: z.array(z.string().min(1)), layout: presentationUnitLayoutSchema }),
   z.strictObject({ type: z.literal("add_frame"), unitId: z.string().min(1), frame: frameSchema, readingIndex: z.number().int().nonnegative().optional() }),
   z.strictObject({ type: z.literal("remove_frame"), unitId: z.string().min(1), frameId: z.string().min(1) }),

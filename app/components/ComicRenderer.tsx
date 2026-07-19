@@ -5,13 +5,13 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@/packages/shared/src";
 import { balloonCutCornerPoints, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@/packages/shared/src";
 import type { Selection } from "@/app/lib/workbench-state";
-import { snapFrameCornerToNeighborParallel, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
+import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 
 type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
 export type ComicContextPoint = { clientX: number; clientY: number; canvasX: number; canvasY: number };
 type DragState = {
-  mode: "frame_move" | "frame_resize" | "frame_corner" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_rotate" | "balloon_tail" | "text_move" | "text_resize";
+  mode: "frame_move" | "frame_resize" | "frame_corner" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_rotate" | "balloon_tail" | "text_move" | "text_resize" | "text_rotate";
   elementId: string;
   frameId?: string;
   anchorGeometry?: Geometry;
@@ -119,10 +119,20 @@ function FrameShapeVisual({ frame, fill, stroke }: { frame: Frame; fill: string;
   const common = { fill, stroke: strokeColor, strokeWidth, strokeDasharray: frame.border.style === "rough" ? "7 3 2 3" : undefined };
   const width = frame.geometry.width;
   const height = frame.geometry.height;
+  const bleed = frame.bleedEdges;
+  const hasBleed = Boolean(bleed && Object.values(bleed).some(Boolean));
+  const polygonPoints = frame.shape.kind === "polygon"
+    ? frame.shape.points.map((point) => ({ x: point.x * width, y: point.y * height }))
+    : [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: width, y: height }, { x: 0, y: height }];
+  const borderEdges = ["top", "right", "bottom", "left"] as const;
   return <svg className="lcd-frame-shape" aria-hidden="true" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
     {frame.shape.kind === "ellipse" ? <ellipse cx={width / 2} cy={height / 2} rx={width / 2} ry={height / 2} {...common} />
-      : frame.shape.kind === "polygon" ? <polygon points={frame.shape.points.map((point) => `${point.x * width},${point.y * height}`).join(" ")} {...common} />
-        : <rect x="0" y="0" width={width} height={height} rx={frame.shape.radius ?? 0} {...common} />}
+      : hasBleed && stroke ? <>
+        <polygon points={polygonPoints.map((point) => `${point.x},${point.y}`).join(" ")} fill={fill} stroke="none" />
+        {borderEdges.map((edge, index) => bleed?.[edge] ? null : <line key={edge} x1={polygonPoints[index].x} y1={polygonPoints[index].y} x2={polygonPoints[(index + 1) % 4].x} y2={polygonPoints[(index + 1) % 4].y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={common.strokeDasharray} />)}
+      </>
+        : frame.shape.kind === "polygon" ? <polygon points={polygonPoints.map((point) => `${point.x},${point.y}`).join(" ")} {...common} />
+          : <rect x="0" y="0" width={width} height={height} rx={frame.shape.radius ?? 0} {...common} />}
   </svg>;
 }
 
@@ -283,32 +293,41 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       if (!axis) return;
       drag.axis = axis;
       const rawDelta = axis === "x" ? dx : dy;
+      const editedFrame = { id: drag.frameId ?? drag.elementId, geometry: drag.startGeometry, shape: drag.startShape };
       const parallelSnap = drag.frameId ? snapFrameCornerToNeighborParallel(
-        { id: drag.frameId, geometry: drag.startGeometry, shape: drag.startShape },
+        editedFrame,
         drag.cornerIndex,
         axis,
         rawDelta,
         unit.frames,
         snapThreshold[axis],
       ) : { delta: rawDelta };
-      let usedParallelSnap = Boolean(parallelSnap.guide);
-      let reshaped = reshapeFrameCorner(drag.startGeometry, drag.startShape, drag.cornerIndex, axis, parallelSnap.delta, drag.frameBounds);
-      if (reshaped && drag.frameId && !frameGeometryAllowed(drag.frameId, reshaped.geometry) && parallelSnap.guide) {
+      const orthogonalSnap = snapFrameCornerToOrthogonal(editedFrame, drag.cornerIndex, axis, rawDelta, snapThreshold[axis]);
+      const useOrthogonalSnap = Boolean(orthogonalSnap.guide) && (!parallelSnap.guide || Math.abs(orthogonalSnap.delta - rawDelta) <= Math.abs(parallelSnap.delta - rawDelta));
+      const snappedDelta = useOrthogonalSnap ? orthogonalSnap.delta : parallelSnap.delta;
+      let usedSnap = Boolean(useOrthogonalSnap ? orthogonalSnap.guide : parallelSnap.guide);
+      let reshaped = reshapeFrameCorner(drag.startGeometry, drag.startShape, drag.cornerIndex, axis, snappedDelta, drag.frameBounds);
+      if (reshaped && drag.frameId && !frameGeometryAllowed(drag.frameId, reshaped.geometry) && usedSnap) {
         reshaped = reshapeFrameCorner(drag.startGeometry, drag.startShape, drag.cornerIndex, axis, rawDelta, drag.frameBounds);
-        usedParallelSnap = false;
+        usedSnap = false;
       }
       if (!reshaped || !drag.frameId || !frameGeometryAllowed(drag.frameId, reshaped.geometry)) return;
-      if (parallelSnap.guide && usedParallelSnap) {
+      if (usedSnap) {
         const reshapedPoints = frameQuadrilateralPoints(reshaped.shape);
         const actualMoving = reshapedPoints?.[drag.cornerIndex];
         const actualMovingPoint = actualMoving ? {
           x: reshaped.geometry.x + actualMoving.x * reshaped.geometry.width,
           y: reshaped.geometry.y + actualMoving.y * reshaped.geometry.height,
         } : undefined;
-        const activeEdge = parallelSnap.guide.activeEdge;
-        usedParallelSnap = Boolean(actualMovingPoint && [activeEdge.start, activeEdge.end].some((point) => Math.hypot(point.x - actualMovingPoint.x, point.y - actualMovingPoint.y) < 1e-3));
+        if (useOrthogonalSnap && orthogonalSnap.guide) {
+          usedSnap = Boolean(actualMovingPoint && Math.abs(actualMovingPoint[axis] - orthogonalSnap.guide.position) < 1e-3);
+        } else if (parallelSnap.guide) {
+          const activeEdge = parallelSnap.guide.activeEdge;
+          usedSnap = Boolean(actualMovingPoint && [activeEdge.start, activeEdge.end].some((point) => Math.hypot(point.x - actualMovingPoint.x, point.y - actualMovingPoint.y) < 1e-3));
+        }
       }
-      if (parallelSnap.guide && usedParallelSnap) setSnapGuides({ parallelGuide: parallelSnap.guide });
+      if (usedSnap && useOrthogonalSnap && orthogonalSnap.guide) setSnapGuides({ edgeGuides: [orthogonalSnap.guide] });
+      else if (usedSnap && parallelSnap.guide) setSnapGuides({ parallelGuide: parallelSnap.guide });
       patch = reshaped;
     } else if (drag.mode === "image_crop" && drag.startCrop) {
       const frame = drag.frameId ? framesById.get(drag.frameId) : undefined; if (!frame) return;
@@ -339,7 +358,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       };
       if (snapped.guides.length) setSnapGuides({ edgeGuides: snapped.guides });
       patch = { transform };
-    } else if (drag.mode === "balloon_rotate" && drag.startTransform && drag.startSceneGeometry) {
+    } else if ((drag.mode === "balloon_rotate" || drag.mode === "text_rotate") && drag.startTransform && drag.startSceneGeometry) {
       const centerX = bounds.left + (drag.startSceneGeometry.x + drag.startSceneGeometry.width / 2) / unit.canvas.width * bounds.width;
       const centerY = bounds.top + (drag.startSceneGeometry.y + drag.startSceneGeometry.height / 2) / unit.canvas.height * bounds.height;
       const startAngle = Math.atan2(drag.startY - centerY, drag.startX - centerX);
@@ -388,7 +407,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       patch = { transform };
     } else if ((drag.mode === "balloon_resize" || drag.mode === "text_resize") && drag.startTransform) {
       const anchor = drag.anchorGeometry; if (!anchor) return;
-      const minWidth = drag.mode === "balloon_resize" && drag.minimumWidth !== undefined ? drag.minimumWidth : drag.frameId ? .12 : unit.canvas.width * .08;
+      const minWidth = drag.minimumWidth ?? (drag.frameId ? .12 : unit.canvas.width * .08);
       const minHeight = drag.frameId ? .08 : unit.canvas.height * .05;
       const coordinateWidth = drag.frameId ? 1 : anchor.width;
       const coordinateHeight = drag.frameId ? 1 : anchor.height;
@@ -442,7 +461,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const drag = dragRef.current; if (!drag) return;
     if (drag.moved) { suppressClick.current = true; window.setTimeout(() => { suppressClick.current = false; }, 0); }
     const patch = draftsRef.current[drag.elementId];
-    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_corner" ? "调整画格角度" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_rotate" ? "旋转对白气泡" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : drag.mode === "text_resize" ? "调整旁白换行宽度" : drag.mode === "text_move" ? "移动旁白" : "移动画格";
+    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_corner" ? "调整画格角度" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_rotate" ? "旋转对白气泡" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : drag.mode === "text_resize" ? "调整旁白换行宽度" : drag.mode === "text_rotate" ? "旋转旁白" : drag.mode === "text_move" ? "移动旁白" : "移动画格";
     if (patch) {
       if (drag.mode === "frame_move" || drag.mode === "frame_resize" || drag.mode === "frame_corner") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
       else onCommitElement?.(unit.id, drag.elementId, patch, label);
@@ -521,23 +540,29 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     {scene.frames.map(({ frame, borderZIndex }) => {
       const selected = selection?.type === "comic_frame" && selection.id === frame.id;
       const cropEditing = cropFrameId === frame.id;
-      const cornerPoints = cropEditing ? frameQuadrilateralPoints(frame.shape) : undefined;
       const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
-      const retainedSelection = selection?.type === "image" && cropEditing ? selection : frameSelection;
       return <div className={`lcd-frame ${selected ? "selected" : ""} ${cropEditing ? "crop-editing" : ""} ${multiSelectedIds?.has(frame.id) ? "multi-selected" : ""}`} data-element-id={frame.id} data-page-id={unit.id} key={frame.id}
-        // Corner controls live inside the frame stacking context. Lift that
-        // context above the global object-number layer only while editing so
-        // moved handles remain clickable even when they cross another badge.
-        style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: cropEditing ? 2_147_483_646 : borderZIndex }}
+        style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: borderZIndex }}
         onClick={(event) => { event.stopPropagation(); const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
         onDoubleClick={(event) => doubleClick(event, frameSelection)}
         onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection); }}
         onContextMenu={(event) => contextFor(event, frameSelection)}>
         <FrameShapeVisual frame={frame} fill="none" stroke />
-        {cropEditing && editable && cornerPoints ? <div className="frame-corner-controls" aria-label="调整画格角度">{cornerPoints.map((point, index) => <button type="button" key={index} className={`frame-corner-handle corner-${index}`} style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }} aria-label={`调整画格${["左上", "右上", "右下", "左下"][index]}角；使用方向键单轴微调`} onKeyDown={(event) => nudgeFrameCorner(event, frame, index as FrameCornerIndex)} onPointerDown={(event) => startDrag(event, { mode: "frame_corner", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry, startShape: frame.shape, frameBounds: editableBoundsForFrame(frame), cornerIndex: index as FrameCornerIndex }, retainedSelection)} />)}</div> : null}
-        {selected && editable ? <><div className="selection-corners frame-corners" aria-hidden="true"><span className="selection-label">{frameLabel(frame)}</span></div>{interactionMode === "move" ? <button type="button" aria-label="调整画格大小" className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection)}/> : null}</> : null}
+        {selected && editable ? <div className="selection-corners frame-corners" aria-hidden="true"><span className="selection-label">{frameLabel(frame)}</span></div> : null}
       </div>;
     })}
+    {editable ? scene.frames.map(({ frame }) => {
+      const selected = selection?.type === "comic_frame" && selection.id === frame.id;
+      const cropEditing = cropFrameId === frame.id;
+      if (!selected && !cropEditing) return null;
+      const cornerPoints = cropEditing ? frameQuadrilateralPoints(frame.shape) : undefined;
+      const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
+      const retainedSelection = selection?.type === "image" && cropEditing ? selection : frameSelection;
+      return <div className="frame-interaction-layer" key={`controls-${frame.id}`} style={geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height)}>
+        {cropEditing && cornerPoints ? <div className="frame-corner-controls" aria-label="调整画格角度">{cornerPoints.map((point, index) => <button type="button" key={index} className={`frame-corner-handle corner-${index}`} style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }} aria-label={`调整画格${["左上", "右上", "右下", "左下"][index]}角；使用方向键单轴微调`} onKeyDown={(event) => nudgeFrameCorner(event, frame, index as FrameCornerIndex)} onPointerDown={(event) => startDrag(event, { mode: "frame_corner", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry, startShape: frame.shape, frameBounds: editableBoundsForFrame(frame), cornerIndex: index as FrameCornerIndex }, retainedSelection)} />)}</div> : null}
+        {selected && interactionMode === "move" ? <button type="button" aria-label="调整画格大小" className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection)}/> : null}
+      </div>;
+    }) : null}
     {texts.map((node) => {
       const text = node.element;
       const editableNarration = node.source === "overlay" && node.overlayPurpose === "narration";
@@ -545,14 +570,16 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const textSelection: Selection = { type: "text", id: text.id, pageId: unit.id, label: narrationOrderLabel(node) };
       const appearanceSrc = text.appearance ? resolvedResources?.[text.appearance.assetVersionId]?.url : undefined;
       const anchorGeometry = { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+      const oneColumnWidth = Math.max(text.style.fontSize * 1.3, projectTextStrokeWidth(text) * 2 + 6);
+      const minimumWidth = text.style.writingMode === "vertical" ? Math.min(text.transform.width, oneColumnWidth) : undefined;
       return <div className={`lcd-text role-${text.role} ${editableNarration ? "editable-narration" : ""} ${selected ? "selected" : ""}`} data-element-id={text.id} data-page-id={unit.id} key={text.id}
-        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), color: text.style.color, WebkitTextStroke: text.style.stroke ? `${projectTextStrokeWidth(text) / unit.canvas.width * 100}cqw ${text.style.stroke}` : undefined, paintOrder: "stroke fill", fontFamily: text.style.fontFamily, fontSize: `${text.style.fontSize / unit.canvas.width * 100}cqw`, fontWeight: text.style.fontWeight, textAlign: text.style.align, writingMode: text.style.writingMode === "vertical" ? "vertical-lr" : "horizontal-tb" }}
+        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), zIndex: selected && interactionMode === "crop" ? 2_147_483_646 : node.zIndex, color: text.style.color, WebkitTextStroke: text.style.stroke ? `${projectTextStrokeWidth(text) / unit.canvas.width * 100}cqw ${text.style.stroke}` : undefined, paintOrder: "stroke fill", fontFamily: text.style.fontFamily, fontSize: `${text.style.fontSize / unit.canvas.width * 100}cqw`, fontWeight: text.style.fontWeight, textAlign: text.style.align, writingMode: text.style.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb", textOrientation: text.style.writingMode === "vertical" ? "upright" : undefined }}
         onClick={editableNarration ? (event) => { event.stopPropagation(); if (!suppressClick.current) onSelect?.(textSelection); } : undefined}
         onDoubleClick={editableNarration ? (event) => doubleClick(event, textSelection) : undefined}
         onContextMenu={editableNarration ? (event) => contextFor(event, textSelection) : undefined}
         onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; if (selected && interactionMode === "move") startDrag(event, { mode: "text_move", elementId: text.id, anchorGeometry, startTransform: text.transform }, textSelection); }}>
         {appearanceSrc ? <img src={appearanceSrc} alt="" draggable={false} /> : <span>{text.content}</span>}
-        {selected && editable ? <><span className="text-selection-outline" aria-hidden="true" />{interactionMode === "move" ? <span className="text-resize-handle" aria-label="调整旁白宽度" onPointerDown={(event) => startDrag(event, { mode: "text_resize", elementId: text.id, anchorGeometry, startTransform: text.transform }, textSelection)} /> : null}</> : null}
+        {selected && editable ? <><span className="text-selection-outline" aria-hidden="true" />{interactionMode === "move" ? <span className="text-resize-handle" aria-label="调整旁白宽度" onPointerDown={(event) => startDrag(event, { mode: "text_resize", elementId: text.id, anchorGeometry, startTransform: text.transform, minimumWidth }, textSelection)} /> : null}{interactionMode === "crop" ? <span className="text-rotate-handle" aria-label="旋转旁白" onPointerDown={(event) => startDrag(event, { mode: "text_rotate", elementId: text.id, anchorGeometry, startTransform: text.transform, startSceneGeometry: node.geometry }, textSelection)} /> : null}</> : null}
       </div>;
     })}
     {effects.map((node) => {

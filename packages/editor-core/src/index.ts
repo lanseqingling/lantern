@@ -180,6 +180,7 @@ export function applyWorkspaceChangeSet(
       if (operation.border) frame.border = structuredClone(operation.border);
       if (operation.shape) frame.shape = structuredClone(operation.shape);
       if (operation.mask) frame.mask = structuredClone(operation.mask);
+      if (operation.bleedEdges) frame.bleedEdges = structuredClone(operation.bleedEdges);
       continue;
     }
     if (operation.type === "replace_presentation_layout") {

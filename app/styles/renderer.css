@@ -36,6 +36,9 @@
 .lcd-text > span:first-child { position: relative; z-index: 1; width: 100%; height: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .text-selection-outline { position: absolute; z-index: 2; inset: -4px; border: 2px solid rgba(100,200,200,.82); border-radius: 4px; pointer-events: none; -webkit-text-stroke: 0; }
 .text-resize-handle { position: absolute; z-index: 3; right: -9px; bottom: -9px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 4px; background: var(--cyan); box-shadow: 0 3px 9px rgba(36,127,130,.26); pointer-events: auto; cursor: ew-resize; -webkit-text-stroke: 0; }
+.text-rotate-handle { position: absolute; z-index: 35; right: -9px; bottom: -9px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: var(--cyan); box-shadow: 0 3px 9px rgba(36,127,130,.26); pointer-events: auto; cursor: grab; touch-action: none; -webkit-text-stroke: 0; }
+.text-rotate-handle:active { cursor: grabbing; }
+.comic-page.interaction-crop .lcd-text.selected .text-selection-outline { border-color: rgba(225,174,75,.92); box-shadow: 0 0 0 5px rgba(225,174,75,.08), 0 0 14px rgba(225,174,75,.2); }
 .comic-page.interaction-move .lcd-text.selected { cursor: move; }
 .lcd-effect { overflow: hidden; }
 .lcd-effect img { display: block; width: 100%; height: 100%; object-fit: fill; }
@@ -49,6 +52,7 @@
 .comic-page.creation-narration { cursor: text; }
 .comic-page.creation-narration .lcd-image, .comic-page.creation-narration .lcd-balloon, .comic-page.creation-narration .lcd-text, .comic-page.creation-narration .reading-order, .comic-page.creation-narration .image-object-order, .comic-page.creation-narration .balloon-order { pointer-events: none; }
 .object-order-layer { position: absolute; z-index: 2140000000; inset: 0; isolation: isolate; pointer-events: none; }
+.frame-interaction-layer { position: absolute; z-index: 2147483646; box-sizing: border-box; overflow: visible; pointer-events: none; }
 .reading-order { position: absolute; z-index: 10; left: -12px; top: -12px; display: grid; place-items: center; width: 25px; height: 25px; border: 2px solid #fff; border-radius: 50%; background: #172026; color: #fff; box-shadow: 0 6px 15px rgba(23,32,38,.18); font-size: 10px; font-weight: 900; pointer-events: auto; cursor: grab; }
 .reading-order.cross-page { width: auto; min-width: 54px; padding: 0 7px; border-radius: 8px; white-space: nowrap; }
 .frame-order-button { pointer-events: auto; }

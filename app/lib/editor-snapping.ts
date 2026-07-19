@@ -19,6 +19,30 @@ export type ParallelCornerGuide = {
   activeEdge: { start: Point; end: Point };
 };
 
+/** Snaps the edited edge back to a horizontal or vertical axis. */
+export function snapFrameCornerToOrthogonal(
+  frame: SnapFrame,
+  cornerIndex: FrameCornerIndex,
+  axis: FrameCornerAxis,
+  rawDelta: number,
+  threshold: number,
+): { delta: number; guide?: EdgeExtensionGuide } {
+  const corners = absoluteCorners(frame);
+  if (!corners) return { delta: rawDelta };
+  const edgeIndices: [FrameCornerIndex, FrameCornerIndex] = axis === "x"
+    ? cornerIndex === 0 || cornerIndex === 3 ? [0, 3] : [1, 2]
+    : cornerIndex === 0 || cornerIndex === 1 ? [0, 1] : [3, 2];
+  const fixedCornerIndex = edgeIndices[0] === cornerIndex ? edgeIndices[1] : edgeIndices[0];
+  const rawCoordinate = corners[cornerIndex][axis] + rawDelta;
+  const fixedCoordinate = corners[fixedCornerIndex][axis];
+  const correction = fixedCoordinate - rawCoordinate;
+  if (Math.abs(correction) > threshold) return { delta: rawDelta };
+  return {
+    delta: rawDelta + correction,
+    guide: { kind: "edge_extension", axis, position: fixedCoordinate },
+  };
+}
+
 const absoluteCorners = (frame: Pick<SnapFrame, "geometry" | "shape">): [Point, Point, Point, Point] | undefined => {
   const points = frameQuadrilateralPoints(frame.shape);
   if (!points) return undefined;

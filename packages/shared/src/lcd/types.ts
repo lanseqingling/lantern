@@ -285,6 +285,9 @@ export type EffectLayer = FrameLayerBase & { kind: "effect"; elements: EffectEle
 export type FrameLayer = ArtLayer | TextLayer | EffectLayer;
 export type FrameElement = ArtElement | TextElement | BalloonElement | EffectElement;
 
+export type FrameBleedEdge = "top" | "right" | "bottom" | "left";
+export type FrameBleedEdges = Record<FrameBleedEdge, boolean>;
+
 export type Frame = {
   id: string;
   geometry: Geometry;
@@ -295,6 +298,8 @@ export type Frame = {
   border: BorderStyle;
   shape: FrameShape;
   mask: { mode: "clip" | "visible" | "bleed" };
+  /** Edges intentionally extended to the owning surface boundary. */
+  bleedEdges?: FrameBleedEdges;
   layers: FrameLayer[];
   constraints?: Array<"stay_on_surface" | "preserve_aspect" | "locked">;
   visible?: boolean;
@@ -481,6 +486,7 @@ export type ComicFrameElement = CanvasViewBase & {
   border: BorderStyle;
   shape: FrameShape;
   mask: { mode: "clip" | "none" | "bleed"; shape: "rect" };
+  bleedEdges?: FrameBleedEdges;
   layerId?: undefined;
 };
 
@@ -544,7 +550,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
       linkedStoryboardBeatId: primary?.storyboardBeatId ?? "unassigned",
       linkedStoryboardBeatVersionId: primary?.storyboardBeatVersionId ?? "unassigned-v1",
       readingOrder: readingOrder.get(frame.id) ?? 0, border: frame.border, shape: frame.shape,
-      mask: { mode: frame.mask.mode === "visible" ? "none" : frame.mask.mode, shape: "rect" }, visible: frame.visible, name: frame.name,
+      mask: { mode: frame.mask.mode === "visible" ? "none" : frame.mask.mode, shape: "rect" }, bleedEdges: frame.bleedEdges, visible: frame.visible, name: frame.name,
     });
     frame.layers.forEach((layer) => layer.elements.forEach((element) => {
       const geometry = resolveLocalTransform(frame.geometry, element.transform);

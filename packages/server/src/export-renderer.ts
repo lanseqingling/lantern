@@ -29,6 +29,21 @@ function frameShape(frame: Frame, fill: string, stroke: string, strokeWidth: num
   return `<rect x="${g.x}" y="${g.y}" width="${g.width}" height="${g.height}" rx="${frame.shape.radius ?? 0}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"${rough}/>`;
 }
 
+function frameBorderShape(frame: Frame) {
+  const strokeWidth = frame.border.style === "none" ? 0 : frame.border.width;
+  const bleed = frame.bleedEdges;
+  if (!bleed || !Object.values(bleed).some(Boolean) || frame.shape.kind === "ellipse") {
+    return frameShape(frame, "none", escapeXml(frame.border.color), strokeWidth);
+  }
+  const g = frame.geometry;
+  const points = frame.shape.kind === "polygon"
+    ? frame.shape.points.map((point) => ({ x: g.x + point.x * g.width, y: g.y + point.y * g.height }))
+    : [{ x: g.x, y: g.y }, { x: g.x + g.width, y: g.y }, { x: g.x + g.width, y: g.y + g.height }, { x: g.x, y: g.y + g.height }];
+  const edges = ["top", "right", "bottom", "left"] as const;
+  const rough = frame.border.style === "rough" ? ` stroke-dasharray="7 3 2 3"` : "";
+  return edges.map((edge, index) => bleed[edge] ? "" : `<line x1="${points[index].x}" y1="${points[index].y}" x2="${points[(index + 1) % 4].x}" y2="${points[(index + 1) % 4].y}" fill="none" stroke="${escapeXml(frame.border.color)}" stroke-width="${strokeWidth}"${rough}/>`).join("");
+}
+
 function transformAttribute(geometry: Geometry) {
   return geometry.rotate ? ` transform="rotate(${geometry.rotate} ${geometry.x + geometry.width / 2} ${geometry.y + geometry.height / 2})"` : "";
 }
@@ -124,7 +139,7 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>) {
   if (element.kind === "text") {
     const strokeWidth = projectTextStrokeWidth(element);
     const stroke = element.style.stroke && strokeWidth ? { color: element.style.stroke, width: strokeWidth } : undefined;
-    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, { align: element.style.align, stroke, verticalFlow: "lr" })}</g>`;
+    return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${renderAppearance(element.appearance, geometry, assets) ?? renderTextContent(element.content, geometry, element.style, element.style.color, { align: element.style.align, stroke, verticalFlow: "rl" })}</g>`;
   }
   if (element.assetVersionId) {
     const data = assets.get(element.assetVersionId); if (!data) return "";
@@ -140,7 +155,7 @@ export function renderSurfaceSvg(document: ComicDocument, unit: PresentationUnit
     const clipId = `frame-clip-${escapeXml(frame.id)}`;
     defs.push(`<clipPath id="${clipId}">${frameShape(frame, "#fff", "none", 0)}</clipPath>`);
     body.push({ z: fillZIndex, svg: frameShape(frame, "#fff", "none", 0) });
-    body.push({ z: borderZIndex, svg: frameShape(frame, "none", escapeXml(frame.border.color), frame.border.style === "none" ? 0 : frame.border.width) });
+    body.push({ z: borderZIndex, svg: frameBorderShape(frame) });
   }
   scene.elements.forEach((node) => body.push({ z: node.zIndex, svg: renderElement(node, assets) }));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${surface.geometry.width}" height="${surface.geometry.height}" viewBox="${surface.geometry.x} ${surface.geometry.y} ${surface.geometry.width} ${surface.geometry.height}"><defs>${defs.join("")}</defs><rect x="${surface.geometry.x}" y="${surface.geometry.y}" width="${surface.geometry.width}" height="${surface.geometry.height}" fill="${escapeXml(unit.canvas.background.color)}"/>${body.sort((a, b) => a.z - b.z).map((entry) => entry.svg).join("")}</svg>`;

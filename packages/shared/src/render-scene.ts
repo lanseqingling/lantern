@@ -93,7 +93,7 @@ export function projectComicRenderScene(document: ComicDocument, unit: Presentat
           source: "frame",
           frame,
           layerId: layer.id,
-          clipFrame: frame.mask.mode === "clip" && effectiveOverflow(unit.layoutPolicy.defaultOverflow, layer.overflow, element) !== "visible" ? frame : undefined,
+          clipFrame: frame.mask.mode !== "visible" && effectiveOverflow(unit.layoutPolicy.defaultOverflow, layer.overflow, element) !== "visible" ? frame : undefined,
           dialogueText: element.kind === "balloon" ? dialogues.get(element.dialogueId) ?? "" : undefined,
         });
       });

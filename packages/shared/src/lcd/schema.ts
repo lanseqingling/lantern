@@ -64,6 +64,7 @@ export const frameShapeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ellipse") }),
 ]);
 export const frameMaskSchema = z.object({ mode: z.enum(["clip", "visible", "bleed"]) });
+export const frameBleedEdgesSchema = z.object({ top: z.boolean(), right: z.boolean(), bottom: z.boolean(), left: z.boolean() });
 
 export const frameSchema = z.object({
   id: z.string().min(1), geometry: geometrySchema, zIndex: z.number().int(),
@@ -71,7 +72,7 @@ export const frameSchema = z.object({
   storyRefs: z.array(z.object({ storyboardBeatId: z.string().min(1), storyboardBeatVersionId: z.string().min(1), role: z.enum(["primary", "continuity"]) })),
   border: frameBorderSchema,
   shape: frameShapeSchema,
-  mask: frameMaskSchema, layers: z.array(frameLayerSchema),
+  mask: frameMaskSchema, bleedEdges: frameBleedEdgesSchema.optional(), layers: z.array(frameLayerSchema),
   constraints: z.array(z.enum(["stay_on_surface", "preserve_aspect", "locked"])).optional(), ...visibilitySchema,
 });
 const overlayElementSchema = frameElementSchema;

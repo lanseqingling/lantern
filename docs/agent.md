@@ -216,10 +216,10 @@ Agent 上下文和 Candidate 摘要需要说明目标对象、采用的抠图或
 | 增强 | 基础组织 | 复制和重排页面或滚动段 | 通用 | `reading.unitOrder` 与展示单元复制、ID 重映射 | 未接入 | 未登记 |
 | 增强 | 画格编排 | 根据分镜生成 2-3 个页面布局候选 | 通用 | 混合：模型规划布局意图，确定性布局器生成结构 Candidate | 部分接入：旧任务直接替换大范围文档 | 未登记 |
 | 增强 | 画格编排 | 显式允许叠格、取消叠格并调整画格前后层级 | 通用 | `layoutPolicy.frameOverlap / Frame.zIndex`；视觉层级与 `readingSequence` 独立 | 已接入 | 2 项已登记（禁用） |
-| 增强 | 画格表现 | 使用四角斜切、无框、线宽、圆角、基础形状、出血、整页主视觉和局部断框 | 通用 | `Frame.border / shape / mask / geometry`；四角斜切使用轴向锁定的四边形和包围盒重算，局部断框由出格对象或遮罩覆盖 | 部分接入：四角斜切与线宽 | `reshape_frame`、`update_frame_border`（已登记，禁用） |
+| 增强 | 画格表现 | 使用四角斜切、无框、线宽、圆角、基础形状、出血、整页主视觉和局部断框 | 通用 | `Frame.border / shape / mask / geometry / bleedEdges`；四角斜切使用轴向锁定的四边形和包围盒重算，出血按边延伸至所属 surface 并省略页边框，局部断框由出格对象或遮罩覆盖 | 部分接入：四角斜切、线宽与按边出血 | `reshape_frame`、`update_frame_border`、`update_frame_bleed`（已登记，禁用） |
 | 增强 | 页面合成 | 让图片、气泡、文字或效果破格、跨格显示，并调整基础层级和可见性 | 通用 | Frame 锚定的 `UnitOverlay`；设为破格、转为纸面对象和收回画格保持视觉位置且可逆，不开放完整图层软件 | 部分接入：图片与对白可破格、转纸面和收回 | 4 项已登记（禁用） |
 | 增强 | 页面合成 | 创建和编辑无格图、纸面对白、旁白与装饰 | 通用 | Unit 锚定的 `UnitOverlay`；与无框 Frame 明确区分 | 已接入无格图、纸面对白和置顶纸面旁白 | 7 项已登记（禁用） |
-| 增强 | 文字 | 使用旁白、说明字和无气泡对白 | 通用 | 旁白使用无 surface 约束的 `narration` TextElement；说明字和格内无气泡对白仍按所在范围建模 | 部分接入：纸面旁白可创建、编辑、复制和删除 | `create_narration`、`update_narration`、`duplicate_narration`、`delete_narration`（已登记，禁用） |
+| 增强 | 文字 | 使用旁白、说明字和无气泡对白 | 通用 | 旁白使用无 surface 约束的 `narration` TextElement；说明字和格内无气泡对白仍按所在范围建模 | 部分接入：纸面旁白可创建、编辑、移动、缩放换行区域、旋转、复制和删除 | `create_narration`、`update_narration`、`duplicate_narration`、`delete_narration`、`set_element_transform`（已登记，禁用） |
 | 增强 | 对白与气泡 | 自动润色、压缩或改写指定对白 | 通用 | 混合：文本模型返回局部文字候选，确认后复用确定性更新 | 未接入 | 未登记 |
 | 增强 | 对白与气泡 | 使用喊叫、低声和电子声等表现型气泡 | 通用 | `Dialogue / BalloonElement` 保留语义与可编辑参数，`appearance` 引用固定版本的图像外观；三端按同一规则渲染 | 部分接入：协议与基础形状可用，外观入口未接入 | `set_element_appearance`（已登记，禁用） |
 | 增强 | 阅读节奏 | 调整画格与气泡阅读顺序 | 通用 | `readingSequence / textOrder`；只提供编号与前移/后移 | 未接入 | 未登记 |
@@ -228,5 +228,5 @@ Agent 上下文和 Candidate 摘要需要说明目标对象、采用的抠图或
 | 增强 | 画内效果 | 添加具有漫画感的拟声字 | 通用 | `TextElement` 保留文字语义；普通样式直接渲染，复杂变形通过 `appearance` 引用固定图像版本，改字时重新生成外观资源 | 部分接入：协议与渲染可用，创建编辑入口未接入 | `set_element_appearance`（已登记，禁用） |
 | 后置 | 专业编排 | 画格拆分合并、复杂异形格和自由嵌套 | 通用 | 专业结构编辑，不作为普通创作者的前置能力 | 未接入 | 未登记 |
 | 后置 | 专业合成 | 完整图层面板、锁定、混合模式和跨层搬移 | 通用 | 专业图层编辑 | 未接入 | 未登记 |
-| 后置 | 页漫专项 | 单双页合并拆分、装订缝，以及图片、画格和气泡跨页 | 页漫 | 真正双页共享 `PresentationUnit`；跨页格使用 `surfaceScope: unit`，跨页图片和气泡进入 `cross_page` 覆盖层，`PageSurface` 分别裁切 | 已接入；出血/安全区仍未接入 | 6 项已登记（禁用） |
+| 后置 | 页漫专项 | 单双页合并拆分、装订缝，以及图片、画格和气泡跨页 | 页漫 | 真正双页共享 `PresentationUnit`；跨页格使用 `surfaceScope: unit`，跨页图片和气泡进入 `cross_page` 覆盖层，`PageSurface` 分别裁切 | 已接入；按边出血已接入，安全区辅助仍未接入 | 7 项已登记（禁用） |
 | 后置 | 条漫专项 | 滚动段合并拆分、跨段约束和跨段图片 | 条漫 | 复合滚动段共享 `PresentationUnit`；各 segment 仍是独立输出面 | 已接入；段间距和平台切片仍未接入 | 4 项已登记（禁用） |

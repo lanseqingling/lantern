@@ -5,7 +5,7 @@ import { balloonCutCornerPoints, createComicPageView, frameCornerDragAxis, frame
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
 import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
-import { snapFrameCornerToNeighborParallel, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../app/lib/editor-snapping";
+import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../app/lib/editor-snapping";
 
 test("all demo runtime fixtures satisfy executable LCD v0.4", () => {
   Object.values(previewFixtures).forEach((fixture) => assert.equal(validateComicDocument(fixture).protocolVersion, "lcd-0.4"));
@@ -190,6 +190,20 @@ test("corner editing snaps the active facing edge parallel to the nearest neighb
   assert.equal(outsideThreshold.guide, undefined);
 });
 
+test("corner editing snaps an almost-straight edge to a paper-wide orthogonal guide", () => {
+  const frame = { id: "orthogonal", geometry: { x: 20, y: 30, width: 120, height: 100 }, shape: { kind: "polygon" as const, points: [{ x: .08, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] } };
+  const vertical = snapFrameCornerToOrthogonal(frame, 0, "x", -8, 3);
+  assert.ok(Math.abs(vertical.delta + 9.6) < 1e-9);
+  assert.deepEqual(vertical.guide, { kind: "edge_extension", axis: "x", position: 20 });
+  const outsideThreshold = snapFrameCornerToOrthogonal(frame, 0, "x", -4, 3);
+  assert.equal(outsideThreshold.delta, -4);
+  assert.equal(outsideThreshold.guide, undefined);
+  const horizontalFrame = { ...frame, shape: { kind: "polygon" as const, points: [{ x: 0, y: .06 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] } };
+  const horizontal = snapFrameCornerToOrthogonal(horizontalFrame, 0, "y", -5, 2);
+  assert.equal(horizontal.delta, -6);
+  assert.deepEqual(horizontal.guide, { kind: "edge_extension", axis: "y", position: 30 });
+});
+
 test("reshape frame capability applies geometry and four-corner shape atomically", () => {
   const fixture = createInitialFixture();
   const unit = fixture.working.document.units[0];
@@ -221,6 +235,29 @@ test("frame border width accepts half-step values independently from its storybo
   assert.deepEqual(result.commands.map((command) => command.type), ["set_frame_style"]);
   assert.deepEqual(next?.border, { ...frame.border, width: 1.5 });
   assert.deepEqual(next?.storyRefs, frame.storyRefs);
+});
+
+test("frame bleed extends one selected edge to its surface and keeps the other borders", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const result = dryRunEditorCapability("update_frame_bleed", { unitId: unit.id, frameId: frame.id, edge: "top", enabled: true }, {
+    fixture,
+    createId: (prefix) => `${prefix}-bleed`,
+    actor: "human",
+  });
+  const next = result.result.working.document.units[0].frames.find((candidate) => candidate.id === frame.id)!;
+  assert.deepEqual(result.commands.map((command) => command.type), ["resize_frame", "set_frame_style"]);
+  assert.equal(next.geometry.y, unit.surfaces[0].geometry.y);
+  assert.equal(next.geometry.y + next.geometry.height, frame.geometry.y + frame.geometry.height);
+  assert.deepEqual(next.bleedEdges, { top: true, right: false, bottom: false, left: false });
+  assert.deepEqual(next.mask, { mode: "bleed" });
+  const disabled = dryRunEditorCapability("update_frame_bleed", { unitId: unit.id, frameId: frame.id, edge: "top", enabled: false }, {
+    fixture: result.result,
+    createId: (prefix) => `${prefix}-bleed-off`,
+    actor: "human",
+  });
+  assert.deepEqual(disabled.result.working.document.units[0].frames[0].mask, { mode: "clip" });
 });
 
 test("adding a presentation unit appends a valid blank page without changing existing frames", () => {
@@ -275,6 +312,7 @@ test("editor capabilities are registered but remain unavailable to Agent executi
     "resize_frame",
     "reshape_frame",
     "update_frame_border",
+    "update_frame_bleed",
     "set_frame_cross_page",
     "set_element_transform",
     "update_balloon",
@@ -327,6 +365,12 @@ test("paper narration stays frame-free, topmost, editable and independently remo
   assert.equal(updatedText?.kind === "text" ? updatedText.style.fontSize : 0, 22);
   assert.equal(updatedText?.kind === "text" ? updatedText.style.writingMode : "", "vertical");
   assert.deepEqual(updatedText?.transform, { x: 330, y: 48, width: 60, height: 144 });
+
+  assert.ok(updatedText?.kind === "text");
+  const rotated = dryRunEditorCapability("set_element_transform", { unitId: unit.id, layerId: narrationLayer.id, elementId: narration.id, transform: { ...updatedText.transform, rotate: 17.5 } }, context());
+  fixture.working = rotated.result.working;
+  const rotatedText = fixture.working.document.units[0].overlayLayers.flatMap((layer) => layer.elements).find((element) => element.id === narration.id);
+  assert.equal(rotatedText?.kind === "text" ? rotatedText.transform.rotate : undefined, 17.5);
 
   const duplicated = dryRunEditorCapability("duplicate_narration", { unitId: unit.id, layerId: narrationLayer.id, elementId: narration.id }, context());
   fixture.working = duplicated.result.working;
@@ -385,6 +429,20 @@ test("safe spread splitting restores two units without changing object ids", () 
   assert.equal(split.result.working.document.reading.unitOrder.length, 2);
   assert.deepEqual(split.result.working.document.units.flatMap((unit) => unit.frames.map((frame) => frame.id)).sort(), originalFrameIds.sort());
   assert.deepEqual(split.result.working.document.reading.unitOrder.flatMap((unitId) => split.result.working.document.units.find((unit) => unit.id === unitId)?.surfaces.map((surface) => surface.pageNumber) ?? []), [1, 2]);
+});
+
+test("spread merge accepts different overlap policies and preserves the permissive policy", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-mixed-overlap-${++sequence}`, actor: "human" as const });
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  const first = fixture.working.document.units.find((unit) => unit.id === firstId)!;
+  const second = fixture.working.document.units.find((unit) => unit.id === secondId)!;
+  first.layoutPolicy.frameOverlap = "allow";
+  second.layoutPolicy.frameOverlap = "forbid";
+  const result = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, context());
+  assert.equal(result.result.working.document.units.find((unit) => unit.kind === "spread")?.layoutPolicy.frameOverlap, "allow");
 });
 
 test("frames and balloons can explicitly cross a true spread", () => {
@@ -774,6 +832,27 @@ test("create_page plans defaults in the domain executor and dry-runs without mut
   assert.equal(dryRun.result.working.document.units.length, fixture.working.document.units.length + 1);
   assert.equal(dryRun.result.working.document.units.at(-1)?.id, "page-from-capability");
   assert.deepEqual(fixture, before);
+});
+
+test("create_page inserts before or after a page unit and renumbers physical surfaces", () => {
+  const fixture = createInitialFixture();
+  const originalId = fixture.working.document.reading.unitOrder[0];
+  const before = dryRunEditorCapability("create_page", { relativeToUnitId: originalId, side: "before" }, {
+    fixture,
+    createId: () => "page-before",
+    actor: "human",
+  });
+  assert.deepEqual(before.result.working.document.reading.unitOrder.slice(0, 2), ["page-before", originalId]);
+  assert.deepEqual(before.result.working.document.reading.unitOrder.flatMap((id) => before.result.working.document.units.find((unit) => unit.id === id)?.surfaces.map((surface) => surface.pageNumber) ?? []), [1, 2]);
+
+  const afterFixture = { ...fixture, working: before.result.working, storyboardBeats: before.result.storyboardBeats };
+  const after = dryRunEditorCapability("create_page", { relativeToUnitId: originalId, side: "after" }, {
+    fixture: afterFixture,
+    createId: () => "page-after",
+    actor: "human",
+  });
+  assert.deepEqual(after.result.working.document.reading.unitOrder, ["page-before", originalId, "page-after"]);
+  assert.deepEqual(after.result.working.document.reading.unitOrder.flatMap((id) => after.result.working.document.units.find((unit) => unit.id === id)?.surfaces.map((surface) => surface.pageNumber) ?? []), [1, 2, 3]);
 });
 
 test("create_vertical_segment keeps chapter width and applies every supported aspect ratio", () => {

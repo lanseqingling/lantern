@@ -126,6 +126,23 @@ test("export consumes the same render scene semantics", () => {
   assert.match(cutCornerSvg, /<polygon points="[^\"]+" fill="#fffdf8" stroke="#234567"/);
 });
 
+test("bleed frame export clips its content but omits only the selected page-edge borders", () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  const frame = unit.frames[0];
+  frame.geometry = { x: 0, y: 0, width: 180, height: 210 };
+  frame.shape = { kind: "rect" };
+  frame.mask = { mode: "bleed" };
+  frame.bleedEdges = { top: true, right: false, bottom: false, left: true };
+  const scene = projectComicRenderScene(document, unit);
+  assert.equal(scene.elements.find((node) => node.element.id === "image-1")?.clipFrame?.id, frame.id);
+  const svg = renderSurfaceSvg(document, unit, unit.surfaces[0], new Map([["asset-1-v1", "data:image/png;base64,AA=="]]));
+  assert.doesNotMatch(svg, /<line x1="0" y1="0" x2="180" y2="0"/);
+  assert.doesNotMatch(svg, /<line x1="0" y1="210" x2="0" y2="0"/);
+  assert.match(svg, /<line x1="180" y1="0" x2="180" y2="210"/);
+  assert.match(svg, /<line x1="180" y1="210" x2="0" y2="210"/);
+});
+
 test("vertical dialogue export follows the workbench right-to-left column order", () => {
   const document = renderFixture();
   document.dialogues[0].content = "甲乙丙丁戊";
@@ -151,6 +168,27 @@ test("vertical dialogue export follows the workbench right-to-left column order"
   assert.match(balloonMarkup, /dominant-baseline="central"/);
   assert.match(balloonMarkup, /font-weight="720"/);
   assert.doesNotMatch(balloonMarkup, /paint-order="stroke fill"/);
+});
+
+test("vertical narration export follows the workbench right-to-left column order", () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  const textLayer = unit.frames[0].layers.find((layer) => layer.kind === "text");
+  const narration = textLayer?.elements.find((element) => element.kind === "text");
+  assert.ok(narration?.kind === "text");
+  narration.content = "甲乙丙丁戊";
+  narration.style.writingMode = "vertical";
+
+  const svg = renderSurfaceSvg(document, unit, unit.surfaces[0]);
+  const narrationMarkup = svg.match(/<g data-scene-id="text-1"[^>]*>([\s\S]*?)<\/g>/)?.[1];
+  assert.ok(narrationMarkup);
+  const columns = [...narrationMarkup.matchAll(/<text x="([^"]+)" y="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)];
+  assert.equal(columns.length, 3);
+  assert.ok(Number(columns[0][1]) > Number(columns[1][1]));
+  assert.ok(Number(columns[1][1]) > Number(columns[2][1]));
+  assert.match(columns[0][3], />甲<\/tspan>.*>乙<\/tspan>/);
+  assert.match(columns[1][3], />丙<\/tspan>.*>丁<\/tspan>/);
+  assert.match(columns[2][3], />戊<\/tspan>/);
 });
 
 test("cross-page images, frames and balloons are projected into both physical surface exports", () => {

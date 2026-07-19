@@ -1142,6 +1142,55 @@ const updateFrameBorderCapability = defineCapability({
   },
 });
 
+const updateFrameBleedCapability = defineCapability({
+  id: "update_frame_bleed",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    edge: z.enum(["top", "right", "bottom", "left"]),
+    enabled: z.boolean(),
+  }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["frame_exists", "surface_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["resize_frame", "set_frame_style"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, frame } = findFrame(context, input.unitId, input.frameId);
+    if (frame.shape.kind === "ellipse") throw new Error("椭圆画格暂不支持按边出血");
+    const current = frame.bleedEdges ?? { top: false, right: false, bottom: false, left: false };
+    const bleedEdges = { ...current, [input.edge]: input.enabled };
+    const anyBleed = Object.values(bleedEdges).some(Boolean);
+    const commands: WorkspaceCommand[] = [];
+    if (input.enabled) {
+      const center = { x: frame.geometry.x + frame.geometry.width / 2, y: frame.geometry.y + frame.geometry.height / 2 };
+      const surface = frame.surfaceScope === "unit"
+        ? undefined
+        : unit.surfaces.find((item) => center.x >= item.geometry.x && center.x <= item.geometry.x + item.geometry.width && center.y >= item.geometry.y && center.y <= item.geometry.y + item.geometry.height)
+          ?? unit.surfaces[0];
+      const bounds = surface?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+      const geometry = { ...frame.geometry };
+      if (input.edge === "top") { geometry.height += geometry.y - bounds.y; geometry.y = bounds.y; }
+      if (input.edge === "right") geometry.width = bounds.x + bounds.width - geometry.x;
+      if (input.edge === "bottom") geometry.height = bounds.y + bounds.height - geometry.y;
+      if (input.edge === "left") { geometry.width += geometry.x - bounds.x; geometry.x = bounds.x; }
+      commands.push({ type: "resize_frame", unitId: input.unitId, frameId: input.frameId, geometry });
+    }
+    commands.push({
+      type: "set_frame_style",
+      unitId: input.unitId,
+      frameId: input.frameId,
+      bleedEdges,
+      mask: { mode: anyBleed ? "bleed" : "clip" },
+    });
+    return commands;
+  },
+});
+
 const setFrameCrossPageCapability = defineCapability({
   id: "set_frame_cross_page",
   version: 1,
@@ -1311,7 +1360,9 @@ function assertMergeablePair(document: EditorCapabilityContext["fixture"]["worki
   if (first.surfaces.length !== 1 || second.surfaces.length !== 1) throw new Error(kind === "single_page" ? "真正双页不能再次参与合并" : "已合并的滚动段不能再次参与合并");
   if (kind === "single_page" && (first.canvas.width !== second.canvas.width || first.canvas.height !== second.canvas.height)) throw new Error("两个页面尺寸不同，无法合并为双页");
   if (kind === "vertical_segment" && first.canvas.width !== second.canvas.width) throw new Error("两个滚动段宽度不同，无法合并");
-  if (first.canvas.background.color !== second.canvas.background.color || JSON.stringify(first.layoutPolicy) !== JSON.stringify(second.layoutPolicy)) throw new Error("两个展示单元的背景或布局策略不同，无法合并");
+  const firstLayoutBase = { gutter: first.layoutPolicy.gutter, defaultOverflow: first.layoutPolicy.defaultOverflow };
+  const secondLayoutBase = { gutter: second.layoutPolicy.gutter, defaultOverflow: second.layoutPolicy.defaultOverflow };
+  if (first.canvas.background.color !== second.canvas.background.color || JSON.stringify(firstLayoutBase) !== JSON.stringify(secondLayoutBase)) throw new Error("两个展示单元的背景或基础布局策略不同，无法合并");
   if ([...first.overlayLayers, ...second.overlayLayers].some((layer) => layer.purpose === "cross_page" || layer.purpose === "cross_segment")) throw new Error("已有跨 surface 对象，无法再次合并");
   return { first, second, index };
 }
@@ -1345,7 +1396,7 @@ const mergePagesToSpreadCapability = defineCapability({
       frames: [...firstContent.frames, ...secondContent.frames],
       overlayLayers: [...firstContent.overlayLayers, ...secondContent.overlayLayers],
       readingSequence: [...structuredClone(first.readingSequence), ...structuredClone(second.readingSequence)],
-      layoutPolicy: structuredClone(first.layoutPolicy),
+      layoutPolicy: { ...structuredClone(first.layoutPolicy), frameOverlap: first.layoutPolicy.frameOverlap === "allow" || second.layoutPolicy.frameOverlap === "allow" ? "allow" : "forbid" },
     };
     return [
       { type: "add_presentation_unit", unit: spread, readingIndex: index },
@@ -1379,7 +1430,7 @@ const mergeVerticalSegmentsCapability = defineCapability({
       id: context.createId("segment-group"), kind: "vertical_segment",
       canvas: { width: first.canvas.width, height: first.canvas.height + second.canvas.height, background: structuredClone(first.canvas.background) },
       surfaces: [firstSurface, secondSurface], frames: [...firstContent.frames, ...secondContent.frames], overlayLayers: [...firstContent.overlayLayers, ...secondContent.overlayLayers],
-      readingSequence: [...structuredClone(first.readingSequence), ...structuredClone(second.readingSequence)], layoutPolicy: structuredClone(first.layoutPolicy),
+      readingSequence: [...structuredClone(first.readingSequence), ...structuredClone(second.readingSequence)], layoutPolicy: { ...structuredClone(first.layoutPolicy), frameOverlap: first.layoutPolicy.frameOverlap === "allow" || second.layoutPolicy.frameOverlap === "allow" ? "allow" : "forbid" },
     };
     return [{ type: "add_presentation_unit", unit: composite, readingIndex: index }, { type: "remove_presentation_unit", unitId: first.id }, { type: "remove_presentation_unit", unitId: second.id }];
   },
@@ -1522,7 +1573,10 @@ const convertBalloonToCrossPageCapability = defineCapability({
 const createPageCapability = defineCapability({
   id: "create_page",
   version: 1,
-  inputSchema: z.strictObject({}),
+  inputSchema: z.strictObject({
+    relativeToUnitId: z.string().min(1).optional(),
+    side: z.enum(["before", "after"]).optional(),
+  }).refine((input) => Boolean(input.relativeToUnitId) === Boolean(input.side), "relativeToUnitId and side must be provided together"),
   scope: "chapter",
   humanEntry: "available",
   agentAccess: "disabled",
@@ -1531,14 +1585,23 @@ const createPageCapability = defineCapability({
   outputCommandTypes: ["add_presentation_unit"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
-  execute(_input, context) {
+  execute(input, context) {
     const document = context.fixture.working.document;
     if (document.format === "vertical") throw new Error("create_page is unavailable for vertical comics");
-    const readingIndex = document.units.length;
+    const targetIndex = input.relativeToUnitId ? document.reading.unitOrder.indexOf(input.relativeToUnitId) : -1;
+    if (input.relativeToUnitId && targetIndex < 0) throw new Error("找不到插入位置对应的页面");
+    const readingIndex = targetIndex < 0
+      ? document.reading.unitOrder.length
+      : targetIndex + (input.side === "after" ? 1 : 0);
     const kind: PresentationUnit["kind"] = document.format === "four_panel" ? "four_panel_unit" : "single_page";
-    const previousUnit = document.units.at(-1);
-    const canvas = previousUnit?.kind === kind
-      ? structuredClone(previousUnit.canvas)
+    const referenceUnit = input.relativeToUnitId
+      ? document.units.find((unit) => unit.id === input.relativeToUnitId)
+      : document.units.find((unit) => unit.id === document.reading.unitOrder.at(-1));
+    const referenceSurface = referenceUnit?.surfaces[0];
+    const canvas = referenceUnit
+      ? referenceUnit.kind === "spread" && referenceSurface
+        ? { width: referenceSurface.geometry.width, height: referenceSurface.geometry.height, background: structuredClone(referenceUnit.canvas.background) }
+        : structuredClone(referenceUnit.canvas)
       : { width: 720, height: 1080, background: { color: "#ffffff" } };
     const id = context.createId(kind === "four_panel_unit" ? "four-panel-unit" : "page");
     const unit: PresentationUnit = {
@@ -1699,6 +1762,7 @@ const capabilityRegistry = {
   resize_frame: resizeFrameCapability,
   reshape_frame: reshapeFrameCapability,
   update_frame_border: updateFrameBorderCapability,
+  update_frame_bleed: updateFrameBleedCapability,
   set_frame_cross_page: setFrameCrossPageCapability,
   set_element_transform: setElementTransformCapability,
   update_balloon: updateBalloonCapability,

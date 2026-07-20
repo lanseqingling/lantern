@@ -2,7 +2,7 @@
 
 Lantern Agent 是漫画工作台中的创作协作者。它理解当前创作现场，选择必要上下文，回答问题或调用受控创作能力，并把结果以可检查、可拒绝、可恢复的方式交还给用户。它不替用户拥有作品，也不以自动完成整话为目标。
 
-本文是 Agent 整体架构、能力边界、上下文、任务、候选和扩展方向的事实源。作品结构与写入不变量见 [LCD](./lcd.md)，对话、任务卡、候选预览等界面呈现见[编辑器体验](./editor.md)；可执行 schema、Capability 与持久化字段仍以代码为准。
+本文是 Agent 整体架构、能力边界、上下文、任务、候选和扩展方向的事实源。作品结构与写入不变量见 [LCD](./lcd.md)，对话、任务卡、候选预览等界面呈现见[编辑器体验](./editor.md)，MCP、Skill 和外置 Agent 的接入契约见[外置 Agent 接入](./external-agent.md)；可执行 schema、Capability 与持久化字段仍以代码为准。
 
 ## 1. Agent 能力总览
 
@@ -167,9 +167,9 @@ Workflow Run 是 Task 之上的持久编排层：它组合工具和 Task，维�
 
 ## 8. 外置 Agent 与运行规范
 
-Lantern MCP Server 是外置 Agent 的首要接入面。它只暴露版本化语义工具：读取受范围约束的上下文、查询 Capability、创建或管理 Task、登记外部生成资源，以及创建或管理 Candidate。MCP 不暴露 Prisma、对象存储凭证、任意 LCD 写入或原始底层命令；应用 Candidate 仍经过 Lantern 的权限、目标和 revision 校验。
+外置 Agent 复用 Lantern 的 Context、Capability、Task、Candidate 和 revision 边界，不建立独立写入链路。MCP、Skill、外部结果登记、能力版本和同步发布的完整规则见[外置 Agent 接入](./external-agent.md)。
 
-Lantern Skill 描述对象语义、范围判断和标准协作方式，不复制工具 schema，也不拥有权限。内置与外置 Agent 都要记录 actor、客户端、工具版本、决策、scope、context snapshot、工具调用、校验和最终 revision。
+内置与外置 Agent 都要记录 actor、客户端、工具版本、决策、scope、context snapshot、工具调用、校验和最终 revision；任何接入方式都不能暴露数据库、对象存储凭证、任意 LCD 写入或原始底层命令。
 
 ## 9. 评测与可观测性
 

@@ -31,9 +31,11 @@ function errorCode(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 
-function multipartLimitError(error: unknown) {
+function multipartLimitError(error: unknown, request: FastifyRequest) {
   const code = errorCode(error);
-  if (code === "FST_REQ_FILE_TOO_LARGE") return new AppError("payload_too_large", "图片文件太大，请上传 50MB 以内的 PNG、JPEG 或 WebP。", 413);
+  if (code === "FST_REQ_FILE_TOO_LARGE") return request.url.includes("/archive/import")
+    ? new AppError("payload_too_large", "完整 LCD 归档必须小于 512MB。", 413)
+    : new AppError("payload_too_large", "图片文件太大，请上传 50MB 以内的 PNG、JPEG 或 WebP。", 413);
   if (code === "FST_FILES_LIMIT") return new AppError("upload_limit", "一次只能上传一张图片。", 413);
   if (code === "FST_FIELDS_LIMIT" || code === "FST_PARTS_LIMIT") return new AppError("upload_limit", "上传表单字段过多，请只上传图片文件。", 413);
   return undefined;
@@ -79,7 +81,7 @@ export function installErrorHandler(app: FastifyInstance) {
   app.setErrorHandler((error, request, reply) => {
     const known = error instanceof AppError ? error : undefined;
     const validation = error instanceof z.ZodError ? error : undefined;
-    const multipart = multipartLimitError(error);
+    const multipart = multipartLimitError(error, request);
     const reportedStatus = typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : undefined;
     const statusCode = validation ? 400 : known?.statusCode ?? multipart?.statusCode ?? (reportedStatus && reportedStatus >= 400 ? reportedStatus : 500);
     const code = validation ? "validation" : known?.code ?? multipart?.code ?? (statusCode === 400 ? "validation" : "internal");

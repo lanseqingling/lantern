@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { getConfig } from "./config";
@@ -102,6 +102,13 @@ export async function putObject(bytes: Buffer, namespace: string, extension: "pn
 export async function getObject(objectKey: string) {
   assertObjectKey(objectKey);
   return readFile(path.join(storageRoot(), objectKey));
+}
+
+export async function deleteObject(objectKey: string) {
+  assertObjectKey(objectKey);
+  await unlink(path.join(storageRoot(), objectKey)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
 }
 
 export async function assertSupportedUpload(_declaredContentType: string, bytes: Buffer) {

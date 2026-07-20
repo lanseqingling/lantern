@@ -5,7 +5,8 @@ import { renderPagePng, renderPreviewPageGroupPng } from "../../../../packages/s
 import { getObject } from "../../../../packages/server/src/object-storage";
 import { verifySignedAssetPath, verifySignedExportPath } from "../../../../packages/server/src/signed-assets";
 import { getWorkbench } from "../../../../packages/server/src/workbench-service";
-import { currentUser } from "../http";
+import { exportChapterArchive, importChapterArchive } from "../../../../packages/server/src/chapter-archive-service";
+import { currentUser, ok } from "../http";
 
 export function registerExportRoutes(app: FastifyInstance) {
   app.get<{ Params: { versionId: string }; Querystring: { expires: string; signature: string } }>("/v1/objects/:versionId", async (request, reply) => {
@@ -75,6 +76,26 @@ export function registerExportRoutes(app: FastifyInstance) {
       .header("Content-Disposition", `attachment; filename="${request.params.chapterId}-pages-${pageNumbers[0] ?? firstIndex + 1}-${pageNumbers.at(-1) ?? secondIndex + 1}.png"`)
       .header("Cache-Control", "no-store")
       .send(bytes);
+  });
+
+  app.get<{ Params: { chapterId: string } }>("/v1/chapters/:chapterId/archive/download", async (request, reply) => {
+    const user = await currentUser(request);
+    const bytes = await exportChapterArchive(user.id, request.params.chapterId);
+    return reply
+      .header("Content-Type", "application/zip")
+      .header("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(`${request.params.chapterId}-saved.lantern.zip`)}`)
+      .header("Cache-Control", "no-store")
+      .send(bytes);
+  });
+
+  app.post<{ Params: { chapterId: string }; Querystring: { expectedWorkingRevision?: string } }>("/v1/chapters/:chapterId/archive/import", async (request) => {
+    const user = await currentUser(request);
+    const expectedRevision = Number(request.query.expectedWorkingRevision);
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 1) throw new AppError("validation", "缺少有效的工作稿版本。", 400);
+    const upload = await request.file({ limits: { files: 1, fileSize: 512 * 1024 * 1024, fields: 0 } });
+    if (!upload) throw new AppError("validation", "请选择完整 LCD ZIP 归档。", 400);
+    const bytes = await upload.toBuffer();
+    return ok(request, await importChapterArchive({ ownerUserId: user.id, chapterId: request.params.chapterId, expectedRevision, bytes }));
   });
 
   app.get<{ Params: { taskId: string; index: string }; Querystring: { expires: string; signature: string } }>("/v1/exports/:taskId/:index", async (request, reply) => {

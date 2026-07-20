@@ -5,6 +5,7 @@ import { normalizeResolvedResourceUrls } from "@/app/lib/document-asset-urls";
 type ApiEnvelope<T> = { data: T; requestId: string };
 type ApiFailure = { error?: { code?: string; message?: string } };
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_CHAPTER_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const SUPPORTED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp"]);
 const SUPPORTED_UPLOAD_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
@@ -645,6 +646,15 @@ function saveBrowserBlob(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
+function responseFileName(response: Response, fallbackName: string) {
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try { return decodeURIComponent(encoded); } catch { return fallbackName; }
+  }
+  return disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? fallbackName;
+}
+
 function imageFileName(name: string, contentType: string) {
   const baseName = name
     .trim()
@@ -682,6 +692,30 @@ export async function apiDownloadSurface(chapterId: string, unitId: string, surf
 export async function apiDownloadPreviewSpread(chapterId: string, firstUnitId: string, secondUnitId: string) {
   if (!firstUnitId || !secondUnitId) throw new Error("当前没有可下载的双页预览。");
   return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/preview-spreads/${encodeURIComponent(firstUnitId)}/${encodeURIComponent(secondUnitId)}/download`, `${firstUnitId}-${secondUnitId}.png`);
+}
+
+export async function apiDownloadChapterArchive(chapterId: string) {
+  const response = await fetch(apiUrl(`/v1/chapters/${encodeURIComponent(chapterId)}/archive/download`), { credentials: "include" });
+  if (!response.ok) {
+    const body = await readApiResponse<never>(response, "完整 LCD 资源下载失败");
+    throw new Error(body.error?.message ?? "完整 LCD 资源下载失败，请稍后重试。");
+  }
+  saveBrowserBlob(await response.blob(), responseFileName(response, `${chapterId}-saved.lantern.zip`));
+}
+
+export async function apiImportChapterArchive(chapterId: string, expectedWorkingRevision: number, file: File) {
+  if (!file.name.toLowerCase().endsWith(".zip")) throw new Error("请选择 Lantern 导出的 ZIP 完整 LCD 归档。");
+  if (!file.size || file.size > MAX_CHAPTER_ARCHIVE_BYTES) throw new Error("完整 LCD 归档必须小于 512MB。");
+  const form = new FormData();
+  form.set("file", file);
+  const response = await fetch(`${uploadApiBase()}/v1/chapters/${encodeURIComponent(chapterId)}/archive/import?expectedWorkingRevision=${expectedWorkingRevision}`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  const body = await readApiResponse<{ revision: number; importedResources: number; importedStoryboardBeats: number }>(response, "完整 LCD 导入失败");
+  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "完整 LCD 导入失败，请稍后重试。");
+  return body.data;
 }
 
 export function apiCancelTask(taskId: string) {

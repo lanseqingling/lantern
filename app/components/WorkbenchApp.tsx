@@ -52,6 +52,7 @@ import {
   configuredRuntimeAdapter,
   apiDeletePlacement,
   apiDownloadImage,
+  apiImportChapterArchive,
   apiDiscardCandidate,
   apiGetContextDebugSnapshot,
   apiLoadWorkbench,
@@ -354,6 +355,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [leftOpen, setLeftOpen] = useState(true);
   const [agentOpen, setAgentOpen] = useState(true);
   const [projectMenu, setProjectMenu] = useState(false);
+  const [importingArchive, setImportingArchive] = useState(false);
+  const [archiveImportFile, setArchiveImportFile] = useState<File | null>(null);
   const [restoringSnapshot, setRestoringSnapshot] = useState(false);
   const [verticalSegmentMenuPosition, setVerticalSegmentMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [pageDisplayMode, setPageDisplayMode] = useState<PageDisplayMode>("single");
@@ -392,6 +395,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [editDraft, setEditDraft] = useState<Record<string, string>>({});
   const chatUploadRef = useRef<HTMLInputElement>(null);
   const dockUploadRef = useRef<HTMLInputElement>(null);
+  const archiveImportRef = useRef<HTMLInputElement>(null);
   const agentMessagesRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLElement>(null);
   const verticalStripRef = useRef<HTMLDivElement>(null);
@@ -612,6 +616,35 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     syncConversationUrl(loaded.ids.conversationId);
     return loaded;
+  };
+
+  const importChapterArchive = async (file?: File) => {
+    if (!file || importingArchive) return;
+    setProjectMenu(false);
+    if (runtimeAdapter !== "server" || !runtimeIds) {
+      setToast("演示模式暂不支持导入完整 LCD 资源");
+      return;
+    }
+    if (activeTaskRef.current?.status === "running") {
+      setToast("请先等待或停止当前 Agent 任务，再导入完整 LCD 资源");
+      return;
+    }
+    setImportingArchive(true);
+    try {
+      if (serverPendingCommitCountRef.current) await serverCommitQueueRef.current;
+      const result = await apiImportChapterArchive(chapterId, stateRef.current.fixture.working.revision, file);
+      serverCommitGenerationRef.current += 1;
+      setHistory([]);
+      setFuture([]);
+      setFrameImageCandidatePreview(null);
+      setMultiSelection(null);
+      await refreshServerWorkbench(runtimeIds.conversationId, true);
+      setToast(`已导入完整 LCD 资源 · r${result.revision}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "完整 LCD 资源导入失败");
+    } finally {
+      setImportingArchive(false);
+    }
   };
 
   useEffect(() => {
@@ -3608,6 +3641,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
             <button type="button" onClick={restoreLastSaved} disabled={!state.fixture.snapshot || state.fixture.snapshot.sourceWorkingRevision === state.fixture.working.revision || restoringSnapshot}><span className="menu-action-label"><Icon name="undo" />回到上次保存</span></button>
             <button type="button" onClick={goToPreview} disabled={previewDisabled} title={previewTitle}><span className="menu-action-label"><Icon name="preview" />阅读预览</span></button>
             <i className="project-menu-divider" />
+            <button type="button" disabled={importingArchive || activeTask?.status === "running"} onClick={() => archiveImportRef.current?.click()}><span className="menu-action-label"><Icon name="publish" />{importingArchive ? "正在导入完整 LCD…" : "导入完整 LCD 资源"}</span></button>
+            <i className="project-menu-divider" />
             <button type="button" className="context-debug-entry" onClick={openContextDebug}><span className="menu-action-label"><Icon name="context" />查看当前上下文</span></button>
           </div>
         ) : null}
@@ -3842,6 +3877,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       </FloatingMenu> : null}
 
       {comicDeleteTarget && comicDeleteSelection ? <DeleteConfirmDialog dialogId="comic-delete" title={comicDeleteTitle} description={comicDeleteDescription} confirmLabel={comicDeleteTarget.kind === "image" ? "确认移除" : "确认删除"} onCancel={() => setComicDeleteTarget(null)} onConfirm={confirmComicDelete} /> : null}
+      {archiveImportFile ? <DeleteConfirmDialog dialogId="chapter-archive-import" title="覆盖当前一话内容？" description={`导入「${archiveImportFile.name}」会把完整 LCD、分镜条目和图片资源写入当前一话，并保存为新的稳定版本。现有历史版本不会删除。`} confirmLabel="确认导入" onCancel={() => setArchiveImportFile(null)} onConfirm={() => { const file = archiveImportFile; setArchiveImportFile(null); void importChapterArchive(file); }} /> : null}
 
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
       {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>请输入文本</div> : null}
@@ -3893,6 +3929,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {!agentOpen ? <button className="drawer-reopen right" type="button" onClick={() => setAgentOpen(true)} aria-label="展开 Agent 工作区"><Icon name="ai" /></button> : null}
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+      <input ref={archiveImportRef} type="file" accept="application/zip,.zip" hidden onChange={(event) => { const file = event.target.files?.[0]; setProjectMenu(false); if (file) setArchiveImportFile(file); event.currentTarget.value = ""; }} />
       <CreationDock className={[multiSelection ? "multi-hidden" : "", dockEntering ? "mode-entering" : "", modeSwitching ? "mode-exiting" : ""].filter(Boolean).join(" ")} aria-label="创作工具">
         <div><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button><i/>{!isVerticalWorkbench ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布图片层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? "取消放置旁白" : "在纸面放置旁白"} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active"><button type="button" className="mode-star mode-active" aria-label="AI 编辑选中画格的分镜条目" onClick={() => { setComposer("编辑选中画格的分镜条目，只改标题和画面描述"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
       </CreationDock>

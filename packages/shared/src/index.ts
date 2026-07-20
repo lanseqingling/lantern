@@ -4,3 +4,4 @@ export * from "./render-scene";
 export * from "./page-display";
 export * from "./workspace";
 export * from "./workspace-schema";
+export * from "./chapter-archive";

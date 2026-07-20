@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
 import { createBlankWorkbench, loadDemoWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@/packages/ui/src";
-import { apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
+import { apiDownloadChapterArchive, apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageDisplayMode } from "@/packages/shared/src";
 
@@ -178,6 +178,20 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     setNotice("LCD 已开始下载");
     setDownloadMenuOpen(false);
   };
+  const downloadChapterArchive = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      if (configuredRuntimeAdapter() === "demo") throw new Error("演示模式暂不支持完整资源导出，请切换到服务端模式后重试。");
+      await apiDownloadChapterArchive(chapterId);
+      setNotice("完整 LCD 资源已开始下载");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "完整 LCD 资源下载失败，请稍后重试");
+    } finally {
+      setDownloading(false);
+      setDownloadMenuOpen(false);
+    }
+  };
 
   if (loadError) return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>预览暂时无法载入</h1><p>{loadError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
   if (!loaded) return <main className="runtime-unavailable"><section><span>LANTERN PREVIEW</span><h1>正在载入已保存版本</h1></section></main>;
@@ -199,7 +213,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}
         <div className="preview-save-tool">
           <button type="button" aria-label="下载选项" aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
-          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadsAsSpread ? "下载当前双页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button></div> : null}
+          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadsAsSpread ? "下载当前双页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button><button type="button" disabled={downloading} onClick={() => void downloadChapterArchive()}>下载完整 LCD 资源</button></div> : null}
         </div>
       </nav>
       {notice ? <div className="preview-notice" role="status">{notice}</div> : null}

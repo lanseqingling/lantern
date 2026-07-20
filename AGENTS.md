@@ -4,7 +4,7 @@
 
 Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联故事、角色、场景、分镜、页面编排、单格精修、预览与导出，并让创作者始终掌握关键创作决定。
 
-仓库包含 Web、API、Worker、Prisma 持久化、对象存储和模型适配。产品语义与作品协议由 `docs/` 说明，字段和运行行为以可执行 schema 与代码为准；本文件只维护仓库导航、稳定技术边界和变更时必须检查的影响面。
+本文件只提供开发 Agent 所需的仓库入口、稳定边界和交付要求。产品规则与协议由 `docs/` 维护，字段和运行行为以可执行 schema 与代码为准；不要在这里复制功能清单、接口目录或阶段状态。
 
 ## Commands
 
@@ -17,65 +17,63 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 | 单元测试 | `pnpm test` |
 | 构建 | `pnpm build` |
 
-按变更范围运行 `package.json` 中对应的专项测试；提交前至少完成与影响面相符的类型检查、测试和构建。
+按变更范围运行 `package.json` 中对应的专项命令；交付前至少完成相符的类型检查、测试和构建。
 
-## Architecture
-
-```text
-React / Vinext Web
-  -> Fastify API
-  -> PostgreSQL / Prisma
-  -> Redis / BullMQ -> Worker -> Model Provider
-  -> Local Object Storage
-```
-
-- TypeScript 是 Web、API、Worker 和共享包的统一语言。
-- `packages/shared` 的 TypeScript / Zod schema 是 LCD、工作区命令和跨进程数据契约的代码事实源。
-- PostgreSQL 保存作品与工作流元数据；Redis 只承载异步任务，不是作品事实源。
-- 用户上传和模型生成图片进入对象存储；数据库与 LCD 只保存稳定对象键和资源版本引用。
-- Provider Adapter 隔离不同模型供应商和测试 Provider 的请求格式。
-
-## Repository Map
+## Repository Guide
 
 | 路径 | 职责 |
 |---|---|
-| `app/` | Web 路由、工作台、作品与资产页面、阅读预览和浏览器 API 客户端。 |
-| `apps/api/` | Fastify 启动，以及按领域组织的解析、鉴权和响应边界。 |
-| `apps/worker/` | 模型生成、导出等异步任务。 |
-| `packages/shared/` | LCD、工作区命令、渲染场景投影、DTO 和 Zod 契约。 |
-| `packages/editor-core/` | 不依赖 UI 或演示数据的 Capability、ChangeSet 和快照能力。 |
-| `packages/layout-engine/` | 页面编排与布局计算。 |
-| `packages/agent-runtime/` | 意图判断、上下文构建、Provider 适配和任务生命周期。 |
-| `packages/server/` | Prisma、对象存储、签名资源和持久化业务服务。 |
-| `packages/demo-runtime/` | 显式 demo adapter 使用的样例场景与模拟决策。 |
-| `packages/ui/`、`app/styles/` | 共用图标、设计 token 和界面样式。 |
-| `prisma/` | 数据模型、迁移和基础数据。 |
-| `samples/`、`public/samples/` | 隔离的示例漫画与静态样例素材。 |
-| `scripts/` | 本地启动、迁移、模型探测和 smoke 脚本。 |
-| `docs/` | 产品、编辑器、LCD 和 Agent 的正式文档。 |
+| `app/`、`apps/` | Web 界面、API 和后台进程入口。 |
+| `packages/shared/` | 跨端协议、schema 与共享领域类型。 |
+| `packages/editor-core/` | 与 UI 解耦的编辑 Capability、变更和快照能力。 |
+| `packages/agent-runtime/` | Agent 规划、上下文、工具与任务运行时。 |
+| `packages/server/` | 持久化、对象存储和服务层业务编排。 |
+| `packages/` 其他目录 | 可复用的领域、渲染、布局、演示和 UI 模块。 |
+| `prisma/` | 数据模型与迁移。 |
+| `docs/` | 产品、交互、协议和 Agent 的正式文档。 |
+| `samples/`、`public/samples/` | 显式示例作品与静态素材。 |
+| `scripts/`、`tests/` | 开发脚本与自动化验证。 |
 
-## Invariants
+## Architecture Boundaries
 
-- 只有展示单元、纸面、画格、图层、图片、文字和气泡等漫画内容进入 LCD；画布参考、选择、辅助线、工具条、对话、任务和候选卡不进入 LCD。
-- 预览和导出只读取 LCD 与固定资源版本，不读取画布摆放、对话或临时 UI 状态。前端通过领域 Capability 提交作品变化，不能把组件状态或整个画布 store 当成作品。
-- `WorkingRevision` 是可变工作稿，`SavedSnapshot` 是用户显式保存后的不可变阅读和导出基线。确定性编辑通过 `WorkspaceChangeSet` 形成可撤销 revision；生成、结构、多对象和其他高风险结果先形成 Candidate。
-- `WorkspaceCommand` 是编辑器内部的原子写入语言，不直接作为 Agent 工具。UI 与 Agent 通过同一 Capability 输入 schema 和执行器进入 ChangeSet；新 Capability 默认不向 Agent 开放。
-- 任务、候选、消息与作品内容生命周期分离，任何任务都不能静默覆盖工作稿。Agent 通过受控循环创建生成任务；同一会话只运行一个前台任务，所有生成与结构结果先形成 Candidate。
-- 生产工作台只使用 `server` adapter；`demo` 必须显式开启，服务失败不能静默回退到演示作品。
-- `.lantern-runtime/` 只保存本地对象和临时运行数据，不能作为示例素材或提交内容。
+- TypeScript 是应用与共享包的统一语言；共享契约只保留一个代码事实源。
+- Web 通过 API 访问服务端能力。路由负责请求解析、鉴权和响应边界，领域逻辑与持久化编排进入对应服务或领域包。
+- PostgreSQL 保存作品和工作流事实；队列只调度异步工作，不能成为作品事实源。
+- 图片等二进制内容进入对象存储；数据库与作品协议只保存稳定对象键和版本引用。
+- 确定性编辑通过领域 Capability 产生原子变更。组件、Agent 和 API 不各自复制参数契约、对象 ID 规则或业务默认值。
+- 生产、演示和测试运行时必须明确隔离；生产失败不得静默回退到 mock 或示例数据。
 
-## Change Checklist
+## Product Invariants
 
-- 修改持久化对象、版本引用或 LCD 对象 ID 时，先阅读 `docs/lcd.md`，并同步检查 Prisma 迁移、服务层读写、上下文构建、保存快照、导出、复制和 ID 重映射。
-- 新增或修改 LCD 可视对象、样式、层级、可见性、坐标或裁切时，同步更新共享场景投影、工作台/预览渲染、导出渲染和一致性测试；已支持字段不得被任一出口静默忽略。
-- 新增或重构编辑能力时，在 `packages/editor-core` 维护唯一 Capability schema、元数据和执行器；组件只提交 Capability 输入，多对象编辑先组合能力计划，再合并为一次原子 ChangeSet。原子命令与 ChangeSet schema 放在 `packages/shared`，API、UI 与 Agent 不复制参数契约、ID 或业务默认值，并同步更新 `docs/agent.md` 的能力矩阵；当前用户可用范围变化时同步更新根 README 的能力快照。
-- 修改 Agent 上下文、选择、引用、任务或候选时，先阅读 `docs/agent.md`，并同步检查 context snapshot、`context-debug`、stale 校验和用户确认边界。跨画格或跨范围生成必须形成 Candidate；高风险结构变更分阶段确认，不得静默覆盖多处内容。
-- 新增 API 时，在 `apps/api/src/routes/` 收口解析、schema 和所有权校验，并在浏览器 API 客户端建立对应调用；复杂持久化编排进入 `packages/server`，`apps/api/src/index.ts` 只负责装配与启动。
-- 新增示例漫画时，只写入 `samples/` 或 `public/samples/`，并提供显式 seed/reset 入口，不污染普通用户数据或运行时对象存储。
-- 完成变更后运行与影响面相符的 `pnpm typecheck`、专项测试和 `pnpm build`。
+- 作品协议只保存漫画内容。画布辅助信息、选择、工具条、对话、任务和候选展示不进入作品协议。
+- 工作稿是可变创作状态；用户保存后的快照是不可变阅读与导出基线。预览和导出只读取作品协议与固定资源版本。
+- 确定性低风险编辑可以直接形成可撤销变更；生成、结构、多对象和其他高风险结果先形成 Candidate，不能静默覆盖工作稿。
+- UI 与 Agent 共用领域 Capability。Agent 只能调用明确登记的语义能力，不能直接写作品协议、数据库或底层命令。
+- 任务、消息、候选和作品内容具有独立生命周期。取消、失败、重试或删除会话不得破坏已经确认的作品。
+- 示例数据只存在于显式 demo、seed 或 sample 范围；普通用户数据和生产加载路径不能依赖示例作品。
+
+## Working Rules
+
+- 修改前先阅读对应正式文档和邻近实现，按现有领域边界完成最小一致变更。
+- 保留用户已有改动，不清理无关工作区，也不使用破坏性 Git 操作。
+- 共享 schema、领域能力、设计 token 和通用组件只保留一个事实源；确认无引用后删除过期实现。
+- UI 优先复用现有组件和设计语言，不交付浏览器默认外观或重复的交互组件。
+- 生产命名使用稳定领域语义，不包含阶段、实验或示例作品名称。
+- 兼容代码必须有迁移目标和删除条件；数据库变化新增迁移，不改写已经提交的历史迁移。
+- 结构重构与行为扩展分开处理，避免在同一改动中顺带更换基础技术或重做无关界面。
+
+## Change Impact
+
+- 作品对象、坐标、层级、资源或版本规则变化时，同步检查编辑、持久化、复制、预览、导出和一致性测试。
+- 编辑能力变化时，维护唯一 Capability 契约，并检查 UI、Agent 权限、撤销和 Candidate 边界。
+- Agent 的上下文、选择、引用、任务或候选变化时，检查上下文快照、目标归属、版本固定、过期校验和用户确认边界。
+- API 变化时，检查输入 schema、所有权校验、服务层和浏览器客户端；不要把复杂业务编排留在启动入口或路由中。
+- 用户可见范围或行为变化时，同步更新对应正式文档；能力总览变化时同步 README 和 Agent 能力矩阵。
+- 漫画可视行为变化时，工作台、阅读预览和导出必须保持一致。
 
 ## Documentation
 
 - 文档职责、阅读顺序和事实源以 `docs/README.md` 为准。
-- 一个概念只保留一个主事实源；规则变化时直接修改主文档并删除失效或重复内容，不在本文件复制产品与协议细节。
-- LCD 字段与命令以 `packages/shared` 为准，数据库字段以 Prisma schema 为准，启动和质量命令以 `package.json` 与 `scripts/` 为准。
+- 一个概念只在一份正式文档中完整说明；其他文档只保留必要引用。
+- 正式文档描述当前最终规则，不记录补丁过程、失效方案或实现日志。
+- LCD 与工作区契约以共享 schema 为准，数据库字段以 Prisma schema 为准，命令以 `package.json` 和 `scripts/` 为准。

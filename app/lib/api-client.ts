@@ -513,7 +513,6 @@ type AgentInteractionRequest = {
 type AgentInteractionResult = { decision:
     | { kind: "direct_answer"; message: string }
     | { kind: "needs_input"; message: string; questions: Array<{ options?: Array<{ label: string }> }> }
-    | { kind: "needs_confirmation"; message: string; summary: string; scope: string; taskType: string }
     | { kind: "ready_to_run"; message: string; scope: string; taskType: string };
     task?: { id: string; type: string; status: string; scope: string; progress: number; createdAt: string };
   };
@@ -587,7 +586,6 @@ export async function apiCreateTask(ids: RuntimeIds, body: {
   scope: string;
   selection: { type: string; id?: string; pageId?: string; label?: string; canvasX?: number; canvasY?: number };
   explicitReferences?: Array<{ objectType: string; objectId: string; versionId?: string; label?: string }>;
-  confirmationMessageId?: string;
 }) {
   return api("/v1/tasks", {
     method: "POST",

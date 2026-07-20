@@ -292,9 +292,7 @@ test("PNG, long PNG and structured JSON match the persistent runtime export gold
     format: "page",
     preset: "page_basic",
     readingOrder: storyboardBeats.map((storyboardBeat) => storyboardBeat.id),
-  }, storyboardBeats);
-  document.comicId = "golden-comic";
-  document.chapterId = "golden-chapter";
+  }, storyboardBeats, { comicId: "golden-comic", chapterId: "golden-chapter" });
 
   const pageBuffers = await renderChapterPngPages(document);
   assert.equal(pageBuffers.length, golden.pageCount);

@@ -11,7 +11,6 @@ async function resetToRainyStation() {
 
   await prisma.$transaction([
     prisma.candidate.deleteMany(),
-    prisma.pageVariant.deleteMany(),
     prisma.generationAttempt.deleteMany(),
     prisma.generationTask.deleteMany(),
     prisma.messageReference.deleteMany(),

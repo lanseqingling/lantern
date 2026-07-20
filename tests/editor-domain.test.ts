@@ -37,7 +37,7 @@ test("legacy storyboard details fold into the general description without dialog
 });
 
 test("four-panel unit contains four explicitly ordered frames", () => {
-  const document = compileChapterLayoutPlan(fourPanelPlan, rainyStationStoryboardBeats);
+  const document = compileChapterLayoutPlan(fourPanelPlan, rainyStationStoryboardBeats, { comicId: "test-comic", chapterId: "test-chapter" });
   assert.equal(document.units[0].frames.length, 4);
   assert.deepEqual(document.units[0].readingSequence.map((entry) => entry.frameId), document.units[0].frames.map((frame) => frame.id));
 });
@@ -51,7 +51,7 @@ test("resources are stable bindings and URLs remain in the read model", () => {
 
 test("new beats never inherit sample art", () => {
   const beats = rainyStationStoryboardBeats.map((beat, index) => ({ ...beat, id: `new-beat-${index}`, versionId: `new-beat-${index}-v1` }));
-  const document = compileChapterLayoutPlan({ ...fourPanelPlan, readingOrder: beats.map((beat) => beat.id) }, beats);
+  const document = compileChapterLayoutPlan({ ...fourPanelPlan, readingOrder: beats.map((beat) => beat.id) }, beats, { comicId: "test-comic", chapterId: "test-chapter" });
   assert.equal(document.resources.length, 0);
   assert.equal(document.units[0].frames.flatMap(frameElements).filter((element) => element.kind === "image").length, 0);
 });

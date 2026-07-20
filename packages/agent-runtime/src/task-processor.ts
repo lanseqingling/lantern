@@ -313,7 +313,7 @@ async function processAssetParse(task: Awaited<ReturnType<typeof loadTask>>) {
     maxTokens: 1200,
     system: `你是漫画角色与场景资产整理助手。根据用户已经给出的信息和漫画创作基线直接形成可编辑资产草案，不追问，也不要虚构上传图中不可见的信息。资产必须与故事核心、世界规则和视觉风格一致。
 只输出这一种 JSON：{"kind":"character","name":"资产名称","description":"一段完整、可直接用于后续创作的视觉描述"}。
-kind 只能是 character、scene、style、prop 之一。description 必须完整包含后续生成需要保持一致的身份、外观、服装、状态、空间、光线或风格信息；图片只能由用户手动上传或明确加入，绝不能在这里创建。不要增加外层包装。`,
+kind 只能是 character 或 scene。description 必须完整包含后续生成需要保持一致的身份、外观、服装、状态、空间、光线或风格信息；只整理视觉设定，不要声称图片已经生成或保存。不要增加外层包装。`,
     user: JSON.stringify({ instruction: taskInstruction(task), creativeBaseline: creativeBaseline(context), relevantAssets: context.assets, recentConversation: context.recentConversation }),
   });
   const baselinePrompt = [
@@ -325,9 +325,7 @@ kind 只能是 character、scene、style、prop 之一。description 必须完�
   ].filter(Boolean).join("\n");
   const visualPrompt = draft.kind === "character"
     ? `${baselinePrompt}\n漫画角色设定图片，单人全身与半身结合，干净中性背景，不要文字。角色：${draft.name}。${draft.description}`
-    : draft.kind === "scene"
-      ? `${baselinePrompt}\n漫画场景设定图片，无人物，清楚表现空间关系和主要光线，不要文字。场景：${draft.name}。${draft.description}`
-      : `${baselinePrompt}\n漫画创作图片，不要文字。${draft.name}。${draft.description}`;
+    : `${baselinePrompt}\n漫画场景设定图片，无人物，清楚表现空间关系和主要光线，不要文字。场景：${draft.name}。${draft.description}`;
   const visualStyleVersionIds = context.assets.filter((asset) => asset.kind === "style").map((asset) => asset.versionId).filter((versionId): versionId is string => Boolean(versionId));
   const generated = await new QwenImageProvider().generate({
     prompt: visualPrompt,
@@ -355,7 +353,7 @@ kind 只能是 character、scene、style、prop 之一。description 必须完�
   return persistCandidate({
     task,
     kind: CandidateKind.ASSET,
-    title: `${draft.name} · ${draft.kind === "character" ? "角色" : draft.kind === "scene" ? "场景" : "资产"}候选`,
+    title: `${draft.name} · ${draft.kind === "character" ? "角色" : "场景"}候选`,
     summary: draft.description,
     targetLabel: "资产库",
     payload: { ...draft, sourceAssetVersionIds: [stagingVersion.id] },

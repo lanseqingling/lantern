@@ -13,7 +13,7 @@ export const workbenchAgentCandidateKinds = [
 ] as const;
 
 export function isWorkbenchAgentCandidateVisible(kind: CandidateKind, payload: Record<string, unknown>) {
-  if (kind === CandidateKind.ASSET) return true;
+  if (kind === CandidateKind.ASSET) return payload.kind === "character" || payload.kind === "scene";
   if (kind === CandidateKind.FRAME_IMAGE) return payload.mode === "place" || payload.mode === "replace";
   if (kind === CandidateKind.STORYBOARD) return payload.mode === "create" || payload.mode === "replace";
   return false;

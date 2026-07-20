@@ -15,7 +15,7 @@ import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
 import { prisma } from "../../packages/server/src/db";
 import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
 import { duplicateComic } from "../../packages/server/src/comic-service";
-import { applyPageVariant, commitChangeSet, deletePageVariant, revertCandidateApplication, saveCandidateAsPageVariant } from "../../packages/server/src/workbench-service";
+import { commitChangeSet, revertCandidateApplication } from "../../packages/server/src/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
 import type { StoryboardBeat } from "../../packages/shared/src";
 
@@ -51,9 +51,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     title: "雨夜候车",
     description: "远景中的雨幕与候车亭，角色不安地等待。",
   };
-  const document = compileChapterLayoutPlan({ format: "page", preset: "page_basic", readingOrder: [storyboardBeat.id] }, [storyboardBeat]);
-  document.comicId = ids.comic;
-  document.chapterId = ids.chapter;
+  const document = compileChapterLayoutPlan({ format: "page", preset: "page_basic", readingOrder: [storyboardBeat.id] }, [storyboardBeat], { comicId: ids.comic, chapterId: ids.chapter });
   document.dialogues.push({ id: ids.dialogue, storyboardBeatId: ids.storyboardBeat, storyboardBeatVersionId: ids.storyboardBeatV1, content: "旧对白" });
   let copiedComicId: string | undefined;
 
@@ -318,22 +316,6 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal((await prisma.storyboardBeat.findUniqueOrThrow({ where: { id: ids.storyboardBeat } })).currentVersionNumber, 1);
     assert.equal((await prisma.candidate.findUniqueOrThrow({ where: { id: ids.candidate } })).status, CandidateStatus.REVERTED);
 
-    const layoutCandidateId = `it-layout-candidate-${suffix}`;
-    await prisma.candidate.create({ data: {
-      id: layoutCandidateId, ownerUserId: ids.user, projectId: ids.project, taskId: ids.task,
-      kind: CandidateKind.PAGE_LAYOUT, status: CandidateStatus.AVAILABLE, title: "轻微调整编排", changeSummary: "只移动当前画格",
-      targetLabel: "当前页", target: { type: "presentation_unit", id: document.units[0].id }, baseRevision: 3,
-      payload: { format: "page", readingOrder: [ids.storyboardBeat] },
-      operations: [{ type: "move_frame", unitId: document.units[0].id, frameId: comicFrame.id, position: { x: comicFrame.geometry.x + 1, y: comicFrame.geometry.y } }],
-    } });
-    const variant = await saveCandidateAsPageVariant(ids.user, layoutCandidateId, "测试页面方案");
-    assert.equal(variant.kind, "LAYOUT_ONLY");
-    const variantApplied = await applyPageVariant(ids.user, variant.id, 3);
-    assert.equal(variantApplied.working.revision, 4);
-    assert.equal(variantApplied.working.document.units[0].frames[0].geometry.x, comicFrame.geometry.x + 1);
-    await deletePageVariant(ids.user, variant.id);
-    assert.ok((await prisma.pageVariant.findUniqueOrThrow({ where: { id: variant.id } })).archivedAt);
-
     await prisma.canvasAssetListItem.create({ data: { ownerUserId: ids.user, projectId: ids.project, assetId: ids.asset, displayName: "测试角色", displayKind: AssetKind.CHARACTER } });
     const placement = await prisma.canvasReferencePlacement.create({ data: { ownerUserId: ids.user, projectId: ids.project, assetId: ids.asset, assetVersionId: ids.assetV1, x: 120, y: 80 } });
     const archived = await archiveAssetFamily(ids.user, ids.assetVariant);
@@ -370,7 +352,6 @@ test("database candidate apply and revert preserve version heads atomically", as
       await prisma.comic.deleteMany({ where: { id: copiedComicId } });
     }
     await prisma.candidate.deleteMany({ where: { projectId: ids.project } });
-    await prisma.pageVariant.deleteMany({ where: { projectId: ids.project } });
     await prisma.generationAttempt.deleteMany({ where: { task: { projectId: ids.project } } });
     await prisma.generationTask.deleteMany({ where: { projectId: ids.project } });
     await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: ids.project } } });

@@ -114,18 +114,16 @@
 .agent-inline-question p { margin: 0; }
 .agent-inline-question > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .agent-inline-question button { border: 1px solid rgba(100,200,200,.26); border-radius: 999px; background: var(--cyan-soft); padding: 6px 9px; color: var(--cyan-deep); font-size: var(--agent-card-action-font-size); font-weight: 850; cursor: pointer; }
-.confirmation-card, .candidate-card, .question-card, .failed-card { position: relative; padding: 11px; border: 1px solid rgba(23,32,38,.08); border-radius: 19px; background: rgba(255,255,255,.78); box-shadow: var(--shadow-soft); }
-.confirmation-card { border-top: 2px solid rgba(242,184,75,.68); }
+.candidate-card, .question-card, .failed-card { position: relative; padding: 11px; border: 1px solid rgba(23,32,38,.08); border-radius: 19px; background: rgba(255,255,255,.78); box-shadow: var(--shadow-soft); }
 .candidate-card.available { border-top: 2px solid rgba(242,184,75,.68); }
-.confirmation-card::before, .candidate-card.available::before { content: ""; position: absolute; left: 12px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 15px rgba(242,184,75,.5); }
-.confirmation-card > div, .candidate-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.confirmation-card strong, .candidate-title strong, .failed-card strong { font-size: 11px; }
-.confirmation-card span, .candidate-title span { padding: 3px 6px; border-radius: 999px; background: var(--cyan-soft); color: var(--cyan-deep); font-size: 8px; font-weight: 850; }
+.candidate-card.available::before { content: ""; position: absolute; left: 12px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 15px rgba(242,184,75,.5); }
+.candidate-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.candidate-title strong, .failed-card strong { font-size: 11px; }
+.candidate-title span { padding: 3px 6px; border-radius: 999px; background: var(--cyan-soft); color: var(--cyan-deep); font-size: 8px; font-weight: 850; }
 .candidate-title { min-width: 0; align-items: flex-start; }
 .candidate-title strong { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; line-height: 1.4; }
 .candidate-title span { flex: 0 0 auto; white-space: nowrap; }
-.confirmation-card p, .candidate-card p, .question-card p, .failed-card p { margin: 7px 0 9px; color: #4e5d65; font-size: 10px; line-height: 1.55; }
-.confirm-run { border: 0; border-radius: 999px; background: var(--amber); color: #4b3408; padding: 8px 13px; font-size: var(--agent-card-action-font-size); font-weight: 900; box-shadow: 0 0 0 4px rgba(242,184,75,.13); cursor: pointer; }
+.candidate-card p, .question-card p, .failed-card p { margin: 7px 0 9px; color: #4e5d65; font-size: 10px; line-height: 1.55; }
 .question-card > div { display: grid; gap: 6px; }
 .question-card button { width: 100%; border: 1px solid rgba(100,200,200,.25); border-radius: 11px; background: var(--cyan-soft); padding: 8px; color: var(--cyan-deep); font-size: var(--agent-card-action-font-size); font-weight: 850; cursor: pointer; text-align: left; }
 .candidate-card.applied { border-color: rgba(100,200,200,.36); }
@@ -144,7 +142,7 @@
 .candidate-result-preview-button .candidate-result-preview { margin: 8px 0; transition: transform 160ms ease, filter 160ms ease; }
 .candidate-result-preview-button:hover .candidate-result-preview { filter: brightness(.96); transform: scale(1.012); }
 .card-actions { display: flex; align-items: center; gap: 6px; }
-.card-actions button:not(.confirm-run), .question-card .cancel-card { border: 0; border-radius: 999px; background: rgba(23,32,38,.055); color: var(--muted); padding: 7px 10px; font-size: var(--agent-card-action-font-size); font-weight: 850; cursor: pointer; }
+.card-actions button, .question-card .cancel-card { border: 0; border-radius: 999px; background: rgba(23,32,38,.055); color: var(--muted); padding: 7px 10px; font-size: var(--agent-card-action-font-size); font-weight: 850; cursor: pointer; }
 .candidate-storyboard-title { display: block; margin-top: 9px; color: #35464e; font-size: 10px; line-height: 1.4; }
 .candidate-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .candidate-actions button { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 34px; border: 0; border-radius: 999px; padding: 0 10px; font-size: var(--agent-card-action-font-size); font-weight: 900; line-height: 1; cursor: pointer; }

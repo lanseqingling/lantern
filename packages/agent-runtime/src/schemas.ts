@@ -153,13 +153,6 @@ export const interactionDecisionSchema = z.discriminatedUnion("kind", [
     })).min(1).max(3),
   }),
   z.object({
-    kind: z.literal("needs_confirmation"),
-    message: z.string().min(1),
-    summary: z.string().min(1),
-    scope: z.enum(["reference_only", "selected_storyboard_beat", "selected_comic_frame", "selected_element", "current_page", "after_current", "whole_chapter"]),
-    taskType: z.enum(["storyboard", "frame_image_generate", "asset_parse"]),
-  }),
-  z.object({
     kind: z.literal("ready_to_run"),
     message: z.string().min(1),
     scope: z.enum(["reference_only", "selected_storyboard_beat", "selected_comic_frame", "selected_element", "current_page", "after_current", "whole_chapter"]),
@@ -213,9 +206,7 @@ export const singleFrameStoryboardOutputSchema = z.strictObject({
   changeSummary: z.string().trim().min(1).max(500),
 });
 
-// Reference images are user-owned inputs. They enter through the upload/add
-// flow, never through an Agent asset-generation task.
-const assetKinds = ["character", "scene", "style", "prop"] as const;
+const assetKinds = ["character", "scene"] as const;
 
 export const assetDraftSchema = z.strictObject({
   kind: z.enum(assetKinds),

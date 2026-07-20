@@ -29,19 +29,15 @@ import type {
 import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, scaleImageCrop, type PageDisplayMode } from "@/packages/shared/src";
 import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@/packages/editor-core/src";
 import {
-  createFrameStoryboardCandidate,
-  decideDemoInteraction,
-} from "@/packages/demo-runtime/src";
-import {
-  createDefaultWorkbench,
-  loadWorkbench,
-  persistWorkbench,
+  createBlankWorkbench,
+  loadDemoWorkbench,
+  persistDemoWorkbench,
   type ActiveTaskLike,
   type AgentMessage,
   type PersistedWorkbench,
   type Selection,
 } from "@/app/lib/workbench-state";
-import { saveGeneratedImageFromUrl, saveUploadedImage } from "@/app/lib/local-assets-client";
+import { saveUploadedImage } from "@/app/lib/local-assets-client";
 import { assetKindTag, isAssetVisibleInAssetSpace } from "@/app/lib/asset-kind";
 import { buildFrameImageChoices, type FrameImageChoice } from "@/app/lib/frame-image-choices";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
@@ -309,14 +305,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const searchParams = useSearchParams();
   const assetCreateIntent = searchParams.get("assetCreate");
   const previewRoute = `/comics/${comicId}/chapters/${chapterId}/preview`;
-  const [state, setState] = useState<PersistedWorkbench>(() => createDefaultWorkbench());
+  const [state, setState] = useState<PersistedWorkbench>(() => createBlankWorkbench());
   const [hydrated, setHydrated] = useState(false);
   const [dockEntering, setDockEntering] = useState(false);
   const [modeSwitching, setModeSwitching] = useState(false);
   const [runtimeAdapter, setRuntimeAdapter] = useState<"loading" | "server" | "demo">("loading");
   const [runtimeError, setRuntimeError] = useState("");
   const [runtimeIds, setRuntimeIds] = useState<RuntimeIds | null>(null);
-  const [workbenchMeta, setWorkbenchMeta] = useState({ comicTitle: "放学以后", chapterTitle: "第 1 话" });
+  const [workbenchMeta, setWorkbenchMeta] = useState({ comicTitle: "正在载入", chapterTitle: "当前一话" });
   const [selection, setSelection] = useState<Selection>(noSelection);
   const [scope, setScope] = useState("当前一话");
   const [composer, setComposer] = useState("");
@@ -408,7 +404,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const multiMoveRef = useRef<MultiMoveState | null>(null);
   const suppressStageClickRef = useRef(false);
   const contextGestureRef = useRef<{ key: string; at: number } | null>(null);
-  const scenarioHandled = useRef(false);
   const stateRef = useRef(state);
   const activeTaskRef = useRef<ActiveTask | null>(activeTask);
   const serverCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -623,7 +618,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     let canceled = false;
     const hydrate = async () => {
       if (configuredRuntimeAdapter() === "demo") {
-        const loaded = loadWorkbench();
+        const loaded = loadDemoWorkbench();
         if (canceled) return;
         const nextState = {
           ...loaded,
@@ -677,7 +672,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }, [chapterId]);
 
   useEffect(() => {
-    if (hydrated && runtimeAdapter === "demo") persistWorkbench(state);
+    if (hydrated && runtimeAdapter === "demo") persistDemoWorkbench(state);
   }, [hydrated, runtimeAdapter, state]);
 
   const currentPageId = state.fixture.working.document.units[state.currentPageIndex]?.id;
@@ -1060,9 +1055,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       return;
     }
     if (runtimeAdapter !== "server" || !runtimeIds) {
-      const initial = createDefaultWorkbench();
       const now = new Date().toISOString();
-      setState((current) => ({ ...current, messages: initial.messages.slice(0, 0), candidates: [], conversations: [{ id: uid("conversation"), title, createdAt: now, updatedAt: now }, ...(current.conversations ?? [])] }));
+      setState((current) => ({ ...current, messages: [], candidates: [], conversations: [{ id: uid("conversation"), title, createdAt: now, updatedAt: now }, ...(current.conversations ?? [])] }));
       setAgentScrollRequest((request) => request + 1);
       setSessionDrawerOpen(false);
       setSessionCreateOpen(false);
@@ -1847,44 +1841,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setToast(`已重做：${entry.label}`);
   };
 
-  const finishTask = (task: ActiveTask, instruction?: string) => {
-    const baseRevision = state.fixture.working.revision;
-    let candidates: Candidate[] = [];
-    if (task.name === "asset_parse") {
-      const isScene = (instruction ?? "").includes("场景");
-      candidates = [{ id: uid("candidate-asset"), kind: "asset", title: isScene ? "新场景候选" : "新角色候选", changeSummary: "已生成可编辑的资产描述和图片；确认后才进入资产库与画布图片层。", targetLabel: "资产与画布图片层", baseRevision, status: "available", metadata: { imageSrc: isScene ? "/samples/rainy-station/scene-rain-bus-stop.png" : "/samples/rainy-station/character-lincheng.png", name: isScene ? "新场景" : "新角色" } }];
-    } else {
-      const taskSelection = task.selection ?? selection;
-      const frame = workingPages.find((item) => item.id === taskSelection.pageId)?.elements.find((item): item is ComicFrameElement => item.id === taskSelection.id && item.type === "comic_frame");
-      if (!frame || !taskSelection.pageId) {
-        setActiveTask(null);
-        addMessage({ role: "agent", kind: "plain", text: "没有找到选中的漫画格，未创建候选。" });
-        return;
-      }
-      const storyboardBeatId = frame.linkedStoryboardBeatId && frame.linkedStoryboardBeatId !== "unassigned" ? frame.linkedStoryboardBeatId : undefined;
-      candidates = [createFrameStoryboardCandidate(baseRevision, {
-        unitId: taskSelection.pageId,
-        frameId: frame.id,
-        label: taskSelection.label ?? `画格 ${frame.readingOrder}`,
-        storyboardBeatId,
-      })];
-    }
-
-    candidates = candidates.map((candidate) => ({
-      ...candidate,
-      metadata: { ...candidate.metadata, taskId: task.id },
-    }));
-    setState((current) => ({ ...current, candidates: [...current.candidates, ...candidates] }));
-    candidates.forEach((candidate) => addMessage({ role: "agent", kind: "candidate", text: candidate.changeSummary, scope: candidate.targetLabel, candidateId: candidate.id }));
-    setActiveTask(null);
-  };
-
   const runTask = (name = "storyboard", option?: string, explicitInstruction?: string, explicitScope?: string, explicitSelection?: Selection) => {
-    if (name !== "storyboard" && name !== "asset_parse") {
+    if (name !== "storyboard" && name !== "frame_image_generate" && name !== "asset_parse") {
       setToast("这个 Agent 任务当前未开放");
       return;
     }
-    const label = name === "asset_parse" ? "创建角色或场景资产" : "编辑分镜条目";
+    const label = name === "asset_parse" ? "创建角色或场景资产" : name === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目";
     const taskScope = explicitScope ?? scope;
     const instruction = explicitInstruction ?? option ?? [...state.messages].reverse().find((message) => message.role === "user")?.text ?? label;
     const currentSelection = explicitSelection ?? selection;
@@ -1900,25 +1862,21 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setToast("请先选择当前工作稿中的漫画格");
       return;
     }
-    if (runtimeAdapter === "server" && runtimeIds) {
-      const task: ActiveTask = { id: uid("task-pending"), name, label, scope: taskScope, progress: 3, status: "running", selection: currentSelection };
-      setActiveTask(task);
-      void apiCreateTask(runtimeIds, {
-        taskType: name,
-        instruction,
-        scope: taskScope,
-        selection: { type: currentSelection.type, id: currentSelection.id, pageId: currentSelection.pageId, label: currentSelection.label },
-      }).then(() => refreshServerWorkbench()).catch((error) => {
-        setActiveTask(null);
-        setToast(error instanceof Error ? error.message : "任务创建失败");
-      });
+    if (runtimeAdapter !== "server" || !runtimeIds) {
+      setToast("离线演示不连接 Agent 服务");
       return;
     }
-    const task: ActiveTask = { id: uid("task"), name, label, scope: taskScope, progress: 18, status: "running", selection: currentSelection };
+    const task: ActiveTask = { id: uid("task-pending"), name, label, scope: taskScope, progress: 3, status: "running", selection: currentSelection };
     setActiveTask(task);
-    addMessage({ role: "agent", kind: "task", text: `${label}正在进行。旧内容会一直保留到你应用候选。`, scope: taskScope, taskName: name, taskId: task.id });
-    window.setTimeout(() => setActiveTask((current) => current?.id === task.id ? { ...current, progress: 62 } : current), 360);
-    window.setTimeout(() => finishTask(task, instruction), 920);
+    void apiCreateTask(runtimeIds, {
+      taskType: name,
+      instruction,
+      scope: taskScope,
+      selection: { type: currentSelection.type, id: currentSelection.id, pageId: currentSelection.pageId, label: currentSelection.label },
+    }).then(() => refreshServerWorkbench()).catch((error) => {
+      setActiveTask(null);
+      setToast(error instanceof Error ? error.message : "任务创建失败");
+    });
   };
 
   const sendMessage = () => {
@@ -1992,19 +1950,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       });
       return;
     }
-    const decision = decideDemoInteraction(userText, selection.type);
-    if (decision.kind === "direct_answer") {
-      addMessage({ role: "agent", kind: "plain", text: decision.message });
-    } else if (decision.kind === "needs_input") {
-      addMessage({ role: "agent", kind: "question", text: decision.message, options: decision.options, taskName: "storyboard" });
-    } else if (decision.kind === "needs_confirmation") {
-      setScope(decision.scope);
-      addMessage({ role: "agent", kind: "confirmation", text: `${decision.message} ${decision.summary}`, scope: decision.scope, taskName: decision.task });
-    } else {
-      setScope(decision.scope);
-      addMessage({ role: "agent", kind: "plain", text: decision.message, scope: decision.scope });
-      runTask(decision.task);
-    }
+    addMessage({ role: "agent", kind: "plain", text: "离线演示只提供画布操作；连接本地服务后可使用创作对话。" });
   };
 
   const applyCandidate = (candidate: Candidate, expectedFrameTarget?: { unitId: string; frameId: string }) => {
@@ -2799,45 +2745,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const applyAssetCandidate = async (candidate: Candidate) => {
-    if (runtimeAdapter === "server") {
-      await apiApplyCandidate(candidate.id, state.fixture.working.revision);
-      await refreshServerWorkbench();
+    if (runtimeAdapter !== "server") {
+      setToast("离线演示不连接 Agent 服务");
       return;
     }
-    let imageSrc = candidate.metadata?.imageSrc;
-    if (!imageSrc) {
-      setToast("这个候选还没有可用图片。");
-      return;
-    }
-    let localAssetId = candidate.metadata?.localAssetId;
-    if (!localAssetId && imageSrc) {
-      try {
-        const asset = await saveGeneratedImageFromUrl(imageSrc, `${candidate.title || "generated-reference"}.png`);
-        imageSrc = asset.url;
-        localAssetId = asset.id;
-      } catch {
-        setToast("生成图保存失败，请重试");
-        return;
-      }
-    }
-    const localAssetSource = localAssetId ? (candidate.metadata?.localAssetSource === "upload" ? "upload" : "generated") : undefined;
-    const reference: ReferencePlacement = { id: uid("reference"), kind: "sketch", name: candidate.metadata?.name ?? "新草稿", detail: "已确认 · 构图图片", imageSrc, localAssetId, localAssetSource, x: 24, y: 220, zoom: 1, collapsed: false, pinned: false };
-    commitPlacement([...state.fixture.references, reference], "把草稿放到画布图片区");
-    setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? { ...item, status: "applied" } : item) }));
+    await apiApplyCandidate(candidate.id, state.fixture.working.revision);
+    await refreshServerWorkbench();
   };
-
-  useEffect(() => {
-    if (!hydrated || scenarioHandled.current) return;
-    scenarioHandled.current = true;
-    const scenario = new URLSearchParams(window.location.search).get("scenario");
-    const timer = window.setTimeout(() => {
-      if (scenario === "story") {
-        setComposer("完善当前格的雨夜悬疑画面");
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated]);
 
   const exitMultiSelection = () => {
     setMultiSelection(null);
@@ -3568,31 +3482,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
-  const confirmAgentAction = (message: AgentMessage) => {
-    if (activeTask?.status === "running") {
-      setToast("当前会话已有任务运行中");
-      return;
-    }
-    const actionSelection = message.selection ?? selection;
-    const instruction = message.instruction ?? [...state.messages].reverse().find((item) => item.role === "user")?.text ?? message.text;
-    setResolvedCardIds((current) => new Set(current).add(message.id));
-    if (runtimeAdapter === "server" && runtimeIds) {
-      void apiCreateTask(runtimeIds, {
-        taskType: message.taskName === "asset_parse" ? "asset_parse" : "storyboard",
-        instruction,
-        scope: message.scope ?? scope,
-        selection: actionSelection,
-        explicitReferences: message.explicitReferences,
-        confirmationMessageId: message.id,
-      }).then(() => refreshServerWorkbench()).catch((error) => {
-        setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
-        setToast(error instanceof Error ? error.message : "任务创建失败");
-      });
-      return;
-    }
-    runTask(message.taskName ?? "storyboard", undefined, instruction, message.scope, actionSelection);
-  };
-
   const retryAgentTask = (message: AgentMessage) => {
     if (runtimeAdapter === "server" && message.taskId) {
       setResolvedCardIds((current) => new Set(current).add(message.id));
@@ -3616,7 +3505,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const renderAgentMessageContent = (message: AgentMessage, candidate: Candidate | undefined, resolved: boolean) => {
     if (resolved && message.kind === "failed") return null;
-    if (resolved && message.kind === "confirmation") return <div className="muted-card">这张卡片已经处理，不能重复操作。</div>;
     if (message.kind === "task") {
       const runningHere = activeTask?.status === "running" && (!message.taskId || message.taskId === activeTask.id);
       const stageLabel = activeTask?.stage === "preparing" ? "正在准备上下文" : activeTask?.stage === "queued" ? "等待生成资源" : activeTask?.stage === "validating" ? "正在校验结果" : activeTask?.stage === "saving" ? "正在保存候选" : "模型生成中";
@@ -3624,7 +3512,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     if (message.kind === "failed") return <div className="failed-card"><strong>生成失败</strong><p>{message.text}</p><div className="card-actions failed-card-actions"><button type="button" className="failed-retry" onClick={() => retryAgentTask(message)}>重试</button><button type="button" className="failed-close" onClick={() => resolveAgentCard(message.id)}>关闭</button></div></div>;
     if (message.kind === "canceled") return <div className="muted-card">{message.text}</div>;
-    if (message.kind === "confirmation") return <div className="confirmation-card"><div><strong>执行前确认</strong><span>{message.scope}</span></div><p>{message.text}</p><div className="card-actions"><button type="button" className="confirm-run" onClick={() => confirmAgentAction(message)}>确认并生成</button><button type="button" onClick={() => resolveAgentCard(message.id)}>取消</button></div></div>;
     if (message.kind === "question") return <div className="agent-inline-question"><p>{message.text}</p>{!resolved && message.options?.length ? <div>{message.options.map((option) => <button type="button" key={option} onClick={() => { resolveAgentCard(message.id); setComposer(option); }}>{option}</button>)}</div> : null}</div>;
     if (message.kind === "candidate" && candidate) {
       const isAsset = candidate.kind === "asset";
@@ -3666,7 +3553,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         : undefined;
       const candidateStatusLabel = candidate.status === "available"
         ? isStoryboard ? "待应用" : candidate.targetLabel
-        : candidate.status === "saved" || (candidate.status === "applied" && isAsset)
+        : candidate.status === "applied" && isAsset
           ? "已保存"
           : candidate.status === "applied"
             ? "已应用"
@@ -3676,7 +3563,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
                 ? "已过期"
                 : "已丢弃";
       const toggleTerminal = terminalStartsCollapsed ? toggleTerminalCandidate : toggleCollapsedTerminalCandidate;
-      const showSavedAssetView = isAsset && (candidate.status === "saved" || candidate.status === "applied") && openSavedAsset;
+      const showSavedAssetView = isAsset && candidate.status === "applied" && openSavedAsset;
       return <div className={`candidate-card ${candidate.status} ${terminalCollapsed ? "terminal-collapsed compact" : ""}`}>
         <div className="candidate-title"><strong>{candidateCardTitle}</strong><span>{candidateStatusLabel}</span></div>
         {!terminalCollapsed && (candidate.metadata?.previewUrl || candidate.metadata?.imageSrc) ? <button type="button" className="candidate-result-preview-button" aria-label={`查看${candidate.title}图片`} onClick={() => setImageViewer({ images: [{ id: candidate.id, src: candidate.metadata?.previewUrl ?? candidate.metadata?.imageSrc ?? "", alt: `${candidate.title}预览` }] })}><img className="candidate-result-preview" src={candidate.metadata.previewUrl ?? candidate.metadata.imageSrc} alt={`${candidate.title}预览`} /></button> : null}
@@ -3693,6 +3580,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   if (hydrated && runtimeError) {
     return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>工作台暂时无法载入</h1><p>{runtimeError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
+  }
+
+  if (!hydrated) {
+    return <main className="runtime-unavailable"><section><span>LANTERN WORKBENCH</span><h1>正在载入工作稿</h1></section></main>;
   }
 
   return (

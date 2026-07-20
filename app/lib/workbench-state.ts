@@ -11,7 +11,7 @@ export type Selection = {
 export type AgentMessage = {
   id: string;
   role: "user" | "agent";
-  kind: "plain" | "question" | "confirmation" | "task" | "candidate" | "failed" | "canceled";
+  kind: "plain" | "question" | "task" | "candidate" | "failed" | "canceled";
   text: string;
   attachments?: Array<{ id: string; name: string; imageUrl: string }>;
   scope?: string;
@@ -58,14 +58,10 @@ export const defaultMessages: AgentMessage[] = [
   },
 ];
 
-const STORAGE_KEY = "lantern-workbench-v1";
-const CURRENT_UI_VERSION = 7;
-const referencePositionMigrations = new Map([
-  ["reference-lincheng", { oldX: 18, newX: 270 }],
-  ["reference-classroom", { oldX: 4, newX: 256 }],
-]);
+const STORAGE_KEY = "lantern-demo-workbench-v1";
+const CURRENT_UI_VERSION = 8;
 
-export function createDefaultWorkbench(): PersistedWorkbench {
+export function createDemoWorkbench(): PersistedWorkbench {
   const fixture = createInitialFixture();
   return {
     fixture,
@@ -84,30 +80,63 @@ export function createDefaultWorkbench(): PersistedWorkbench {
   };
 }
 
-function migrateReferencePositions(fixture: WorkbenchFixture): WorkbenchFixture {
+export function createBlankWorkbench(): PersistedWorkbench {
+  const createdAt = new Date(0).toISOString();
   return {
-    ...fixture,
-    references: fixture.references.map((reference) => {
-      const migration = referencePositionMigrations.get(reference.id);
-      if (!migration || reference.x < migration.oldX - 40 || reference.x > migration.oldX + 80) return reference;
-      return { ...reference, x: migration.newX + (reference.x - migration.oldX) };
-    }),
+    fixture: {
+      working: {
+        documentId: "loading-document",
+        chapterId: "loading-chapter",
+        projectId: "loading-project",
+        createdAt,
+        state: "working",
+        revision: 0,
+        document: {
+          protocolVersion: "lcd-0.4",
+          comicId: "loading-comic",
+          chapterId: "loading-chapter",
+          format: "page",
+          reading: { direction: "ltr", viewer: "paged", unitOrder: ["loading-page"], showPageNumber: true },
+          units: [{
+            id: "loading-page",
+            kind: "single_page",
+            canvas: { width: 720, height: 1080, background: { color: "#ffffff" } },
+            surfaces: [{ id: "loading-surface", role: "single", geometry: { x: 0, y: 0, width: 720, height: 1080 }, pageNumber: 1 }],
+            frames: [],
+            overlayLayers: [],
+            readingSequence: [],
+            layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },
+          }],
+          resources: [],
+          dialogues: [],
+        },
+      },
+      storyboardBeats: [],
+      references: [],
+    },
+    candidates: [],
+    messages: [],
+    currentPageIndex: 0,
+    assets: [],
+    conversations: [],
+    uiVersion: CURRENT_UI_VERSION,
   };
 }
 
-function normalizeFixture(fixture: WorkbenchFixture, fromUiVersion: number): WorkbenchFixture {
+function normalizeFixture(fixture: WorkbenchFixture): WorkbenchFixture {
   const next = structuredClone(fixture);
   next.storyboardBeats = normalizeStoryboardBeats(next.storyboardBeats);
-  return fromUiVersion < CURRENT_UI_VERSION ? migrateReferencePositions(next) : next;
+  return next;
 }
 
 function normalizeWorkbench(state: PersistedWorkbench): PersistedWorkbench {
   const fromUiVersion = state.uiVersion ?? 0;
-  const shouldResetDemoConversation = fromUiVersion < 5;
+  const shouldResetDemoAgentState = fromUiVersion < CURRENT_UI_VERSION;
   return {
     ...state,
-    fixture: normalizeFixture(state.fixture, fromUiVersion),
-    messages: shouldResetDemoConversation ? structuredClone(defaultMessages) : state.messages,
+    fixture: normalizeFixture(state.fixture),
+    messages: shouldResetDemoAgentState ? structuredClone(defaultMessages) : state.messages,
+    candidates: shouldResetDemoAgentState ? [] : state.candidates,
     uiVersion: CURRENT_UI_VERSION,
   };
 }
@@ -122,20 +151,20 @@ function hasReadableWorkingDocument(state: PersistedWorkbench) {
   );
 }
 
-export function loadWorkbench(): PersistedWorkbench {
-  if (typeof window === "undefined") return createDefaultWorkbench();
+export function loadDemoWorkbench(): PersistedWorkbench {
+  if (typeof window === "undefined") return createDemoWorkbench();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createDefaultWorkbench();
+    if (!raw) return createDemoWorkbench();
     const normalized = normalizeWorkbench(JSON.parse(raw) as PersistedWorkbench);
     // Demo storage is never accepted unless it contains a complete current LCD.
-    return hasReadableWorkingDocument(normalized) ? normalized : createDefaultWorkbench();
+    return hasReadableWorkingDocument(normalized) ? normalized : createDemoWorkbench();
   } catch {
-    return createDefaultWorkbench();
+    return createDemoWorkbench();
   }
 }
 
-export function persistWorkbench(state: PersistedWorkbench) {
+export function persistDemoWorkbench(state: PersistedWorkbench) {
   if (typeof window !== "undefined") {
     const persisted: PersistedWorkbench = {
       ...state,
@@ -159,6 +188,6 @@ export function persistWorkbench(state: PersistedWorkbench) {
   }
 }
 
-export function resetPersistedWorkbench() {
+export function resetDemoWorkbench() {
   if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
 }

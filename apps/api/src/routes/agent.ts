@@ -14,6 +14,7 @@ import {
 import { retryAgentInteraction, runAgentInteraction, type AgentImageAttachment } from "../../../../packages/agent-runtime/src/interaction-service";
 import { explicitWorkspaceReferencesSchema } from "../../../../packages/agent-runtime/src/schemas";
 import { applyAssetCandidate, assertFrameCandidateApplicationTarget } from "../../../../packages/server/src/candidate-service";
+import { isWorkbenchAgentCandidateVisible } from "../../../../packages/server/src/workbench-agent-visibility";
 import { prisma } from "../../../../packages/server/src/db";
 import { AppError } from "../../../../packages/server/src/errors";
 import {
@@ -47,7 +48,6 @@ const taskRequestSchema = z.object({
   selection: selectionSchema.optional(),
   explicitReferences: explicitReferencesSchema,
   idempotencyKey: z.string().min(1).max(200),
-  confirmationMessageId: z.string().min(1).optional(),
 });
 
 const interactionRequestSchema = z.object({
@@ -176,6 +176,10 @@ export function registerAgentRoutes(app: FastifyInstance) {
     const user = await currentUser(request);
     const candidate = await prisma.candidate.findFirst({ where: { id: request.params.candidateId, ownerUserId: user.id } });
     if (!candidate) throw new AppError("not_found", "候选不存在。", 404);
+    const payload = candidate.payload && typeof candidate.payload === "object" && !Array.isArray(candidate.payload)
+      ? candidate.payload as Record<string, unknown>
+      : {};
+    if (!isWorkbenchAgentCandidateVisible(candidate.kind, payload)) throw new AppError("validation", "这个候选不属于当前 Agent 能力范围。", 422);
     if (candidate.kind === CandidateKind.ASSET) return ok(request, await applyAssetCandidate(user.id, candidate.id, request.body.expectedWorkingRevision));
     assertFrameCandidateApplicationTarget(candidate.kind, candidate.target, candidate.operations, request.body.expectedFrameTarget);
     const working = await prisma.workingRevision.findFirst({ where: { projectId: candidate.projectId }, orderBy: { revision: "desc" } });

@@ -97,7 +97,6 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
               assets: { where: { archivedAt: null }, include: { versions: { orderBy: { version: "asc" } }, images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }] } }, orderBy: { createdAt: "asc" } },
               canvasAssetItems: { include: { asset: { include: { versions: { orderBy: { version: "asc" } }, images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }] } } } }, orderBy: { createdAt: "asc" } },
               placements: { orderBy: { createdAt: "asc" } },
-              pageVariants: { where: { archivedAt: null }, orderBy: { createdAt: "asc" } },
             },
           },
         },
@@ -256,11 +255,6 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
       for (const snapshot of sourceProject.snapshots) {
         await tx.savedSnapshot.create({
           data: { id: randomUUID(), ownerUserId, chapterId: copiedChapterId, projectId: copiedProjectId, sourceWorkingRevision: snapshot.sourceWorkingRevision, document: remapCopiedJson(snapshot.document, idMap), storyboardBeatVersions: remapCopiedJson(snapshot.storyboardBeatVersions, idMap), assetVersions: remapCopiedJson(snapshot.assetVersions, idMap) },
-        });
-      }
-      for (const variant of sourceProject.pageVariants) {
-        await tx.pageVariant.create({
-          data: { id: randomUUID(), ownerUserId, projectId: copiedProjectId, unitId: String(remapCopiedJson(variant.unitId, idMap)), name: variant.name, kind: variant.kind, scope: remapCopiedJson(variant.scope, idMap), commands: remapCopiedJson(variant.commands, idMap), baseRevision: variant.baseRevision, sourceCandidateId: null, thumbnailAssetVersionId: variant.thumbnailAssetVersionId ? idMap.get(variant.thumbnailAssetVersionId) ?? null : null, lastAppliedRevision: variant.lastAppliedRevision },
         });
       }
       await tx.agentConversation.create({ data: { id: randomUUID(), ownerUserId, projectId: copiedProjectId, title: "复制后的创作对话" } });

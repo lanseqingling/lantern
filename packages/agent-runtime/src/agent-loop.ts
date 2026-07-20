@@ -1,6 +1,6 @@
 /**
- * Transport-neutral Agent loop. P0 uses a single planning step, but the loop
- * already supports repeated planning, tool results and durable checkpoints.
+ * Transport-neutral Agent loop. The loop supports repeated planning, tool
+ * observations and durable checkpoints without encoding business workflows.
  * Future workflow and sub-Agent tools plug into the same registry.
  */
 export type AgentToolCall = {

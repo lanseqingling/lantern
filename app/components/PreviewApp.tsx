@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
-import { createDefaultWorkbench, loadWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
+import { createBlankWorkbench, loadDemoWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@/packages/ui/src";
 import { apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
@@ -11,7 +11,7 @@ import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageD
 
 export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId: string }) {
   const router = useRouter();
-  const [state, setState] = useState<PersistedWorkbench>(() => createDefaultWorkbench());
+  const [state, setState] = useState<PersistedWorkbench>(() => createBlankWorkbench());
   const [loaded, setLoaded] = useState(false);
   const [dockEntering, setDockEntering] = useState(false);
   const [modeSwitching, setModeSwitching] = useState(false);
@@ -28,7 +28,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     let canceled = false;
     const hydrate = async () => {
       if (configuredRuntimeAdapter() === "demo") {
-        const loaded = loadWorkbench();
+        const loaded = loadDemoWorkbench();
         if (canceled) return;
         setState(loaded);
         setLoaded(true);

@@ -27,7 +27,7 @@ export function mergeAssetVersionHeads(current: Record<string, string>, resource
   return { ...current, ...Object.fromEntries(resources.map((resource) => [resource.assetId, resource.assetVersionId])) };
 }
 
-export type CandidateKind = "storyboard" | "page_layout" | "frame_image" | "frame_image_patch" | "asset" | "dialogue";
+export type CandidateKind = "storyboard" | "frame_image" | "asset";
 export type CandidateScope =
   | { type: "chapter" }
   | { type: "presentation_unit"; unitId: string }
@@ -41,26 +41,11 @@ export type Candidate = {
   changeSummary: string;
   targetLabel: string;
   baseRevision: number;
-  status: "available" | "saved" | "applied" | "reverted" | "discarded" | "stale";
+  status: "available" | "applied" | "reverted" | "discarded" | "stale";
   scope?: CandidateScope;
   commands?: WorkspaceCommand[];
   document?: ComicDocument;
   metadata?: Record<string, string>;
-};
-
-export type PageVariant = {
-  id: string;
-  projectId: string;
-  unitId: string;
-  name: string;
-  kind: "layout_only" | "complete_unit" | "partial_frames";
-  baseRevision: number;
-  scope: CandidateScope;
-  commands: WorkspaceCommand[];
-  thumbnailAssetVersionId?: string;
-  createdAt: string;
-  sourceCandidateId?: string;
-  status: "saved" | "applied" | "stale";
 };
 
 export type ReferencePlacement = {

@@ -55,6 +55,8 @@ test("workbench recovery exposes every registered generation task and candidate 
   assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.FRAME_IMAGE, { mode: "place" }), true);
   assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.FRAME_IMAGE, { mode: "replace" }), true);
   assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.FRAME_IMAGE, { mode: "create" }), false);
+  assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.ASSET, { kind: "character" }), true);
+  assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.ASSET, { kind: "style" }), false);
   assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.PAGE_LAYOUT, { mode: "replace" }), false);
 });
 
@@ -179,6 +181,7 @@ test("asset drafts use type, name and description as the complete semantic contr
     description: "角色描述",
     attributes: { outfit: "浅色风衣" },
   }));
+  assert.throws(() => assetDraftSchema.parse({ kind: "style", name: "水彩", description: "冷色水彩风格。" }));
 });
 
 test("multiple labeled asset references share one request contract", () => {

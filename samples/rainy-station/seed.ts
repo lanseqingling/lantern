@@ -81,7 +81,6 @@ async function clearPreviousSample() {
     const messageIds = (await prisma.message.findMany({ where: { projectId: { in: projectIds } }, select: { id: true } })).map((item) => item.id);
     await prisma.$transaction([
       prisma.candidate.deleteMany({ where: { projectId: { in: projectIds } } }),
-      prisma.pageVariant.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.generationAttempt.deleteMany({ where: { taskId: { in: taskIds } } }),
       prisma.generationTask.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.messageReference.deleteMany({ where: { messageId: { in: messageIds } } }),

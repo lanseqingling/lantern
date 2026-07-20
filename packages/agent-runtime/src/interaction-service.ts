@@ -46,7 +46,6 @@ type AgentInteractionOptions = {
 
 function messageKind(decision: InteractionDecision) {
   if (decision.kind === "needs_input") return MessageKind.QUESTION;
-  if (decision.kind === "needs_confirmation") return MessageKind.CONFIRMATION;
   return MessageKind.PLAIN;
 }
 

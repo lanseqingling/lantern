@@ -3,7 +3,7 @@ import { prisma } from "./db";
 import { AppError } from "./errors";
 import { createSignedAssetPath } from "./signed-assets";
 import { applyWorkspaceChangeSet, planEditorCapability } from "../../editor-core/src";
-import { mergeAssetVersionHeads, normalizeStoryboardBeats, validateComicDocument, type StoryboardBeat, type WorkspaceChangeSet, type WorkspaceCommand } from "../../shared/src";
+import { mergeAssetVersionHeads, normalizeStoryboardBeats, validateComicDocument, type StoryboardBeat, type WorkspaceChangeSet } from "../../shared/src";
 import { isWorkbenchAgentCandidateVisible, workbenchAgentCandidateKinds, workbenchAgentTaskTypes } from "./workbench-agent-visibility";
 
 function json<T>(value: Prisma.JsonValue) {
@@ -162,12 +162,11 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
     ? project.conversations.find((item) => item.id === requestedConversationId)
     : project.conversations[0];
   if (requestedConversationId && !conversation) throw new AppError("not_found", "对话不存在或已归档。", 404);
-  const [working, snapshot, candidates, tasks, pageVariants] = await Promise.all([
+  const [working, snapshot, candidates, tasks] = await Promise.all([
     getLatestWorking(project.id),
     prisma.savedSnapshot.findFirst({ where: { projectId: project.id, ownerUserId }, orderBy: { createdAt: "desc" } }),
     prisma.candidate.findMany({ where: { projectId: project.id, ownerUserId, conversationId: conversation?.id, kind: { in: [...workbenchAgentCandidateKinds] } }, orderBy: { createdAt: "asc" }, take: 80 }),
     prisma.generationTask.findMany({ where: { projectId: project.id, ownerUserId, conversationId: conversation?.id, type: { in: [...workbenchAgentTaskTypes] } }, orderBy: { createdAt: "desc" }, take: 20, include: { attempts: { orderBy: { attempt: "desc" }, take: 1 } } }),
-    prisma.pageVariant.findMany({ where: { projectId: project.id, ownerUserId, archivedAt: null }, orderBy: { createdAt: "asc" }, take: 100 }),
   ]);
   const messages = conversation
     ? await prisma.message.findMany({ where: { conversationId: conversation.id, ownerUserId }, orderBy: { createdAt: "asc" }, take: 300 })
@@ -184,10 +183,7 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
     const metadata = json<Record<string, unknown>>(message.metadata);
     if (message.kind === MessageKind.CANDIDATE && typeof metadata.candidateId === "string") return visibleCandidateIds.has(metadata.candidateId);
     if ((message.kind === MessageKind.TASK || message.kind === MessageKind.FAILED || message.kind === MessageKind.CANCELED) && typeof metadata.taskId === "string") return visibleTaskIds.has(metadata.taskId);
-    if (message.kind === MessageKind.CONFIRMATION) {
-      return (metadata.taskType === "storyboard" && metadata.scope === "selected_comic_frame")
-        || (metadata.taskType === "asset_parse" && metadata.scope === "reference_only");
-    }
+    if (message.kind === MessageKind.CONFIRMATION) return false;
     return true;
   });
   const messageAttachments = new Map(visibleMessages.map((message) => {
@@ -216,7 +212,7 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
   const resolvedActionMessages = new Set<string>();
   let pendingActionMessageId: string | undefined;
   for (const message of visibleMessages) {
-    if (message.kind === "QUESTION" || message.kind === "CONFIRMATION") {
+    if (message.kind === "QUESTION") {
       if (pendingActionMessageId) resolvedActionMessages.add(pendingActionMessageId);
       pendingActionMessageId = message.id;
     }
@@ -341,20 +337,6 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
         return image?.versionId ? createSignedAssetPath(image.versionId) : undefined;
       })(),
     })),
-    pageVariants: pageVariants.map((variant) => ({
-      id: variant.id,
-      projectId: variant.projectId,
-      unitId: variant.unitId,
-      name: variant.name,
-      kind: variant.kind.toLowerCase(),
-      scope: variant.scope,
-      commands: variant.commands,
-      baseRevision: variant.baseRevision,
-      sourceCandidateId: variant.sourceCandidateId,
-      thumbnailAssetVersionId: variant.thumbnailAssetVersionId,
-      lastAppliedRevision: variant.lastAppliedRevision,
-      createdAt: variant.createdAt.toISOString(),
-    })),
     tasks: tasks.map((task) => ({
       id: task.id,
       type: task.type.toLowerCase(),
@@ -367,62 +349,6 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
       target: task.target,
     })),
   };
-}
-
-function variantDescriptor(commands: WorkspaceCommand[]) {
-  const layoutOnly = commands.every((command) => command.type === "replace_chapter_layout" || command.type === "replace_presentation_layout" || command.type === "move_frame" || command.type === "resize_frame" || command.type === "reorder_frame");
-  const unitId = commands.flatMap((command) => "unitId" in command && typeof command.unitId === "string" ? [command.unitId] : command.type === "replace_chapter_layout" || command.type === "replace_chapter_presentation" ? [command.document.reading.unitOrder[0]] : []).find(Boolean);
-  const frameIds = commands.flatMap((command) => "frameId" in command && typeof command.frameId === "string" ? [command.frameId] : []);
-  return {
-    kind: layoutOnly ? "LAYOUT_ONLY" : frameIds.length ? "PARTIAL_FRAMES" : "COMPLETE_UNIT",
-    unitId: unitId ?? "chapter",
-    scope: frameIds.length ? { type: "frames", unitId: unitId ?? "chapter", frameIds: [...new Set(frameIds)] } : { type: unitId ? "presentation_unit" : "chapter", ...(unitId ? { unitId } : {}) },
-  };
-}
-
-export async function saveCandidateAsPageVariant(ownerUserId: string, candidateId: string, name?: string) {
-  const candidate = await prisma.candidate.findFirst({ where: { id: candidateId, ownerUserId } });
-  if (!candidate) throw new AppError("not_found", "候选不存在。", 404);
-  if (!["PAGE_LAYOUT", "FRAME_IMAGE", "FRAME_IMAGE_PATCH"].includes(candidate.kind)) throw new AppError("validation", "这个候选不能保存为页面方案。", 422);
-  if (candidate.status === "DISCARDED" || candidate.status === "REVERTED") throw new AppError("conflict", "这个候选已经终结。", 409);
-  const commands = json<WorkspaceCommand[]>(candidate.operations);
-  if (!commands.length) throw new AppError("validation", "候选没有可保存的页面变更。", 422);
-  const descriptor = variantDescriptor(commands);
-  const outputRefs = json<Array<{ objectType?: string; versionId?: string }>>(candidate.outputRefs);
-  return prisma.pageVariant.create({ data: {
-    ownerUserId,
-    projectId: candidate.projectId,
-    unitId: descriptor.unitId,
-    name: name?.trim() || candidate.title,
-    kind: descriptor.kind,
-    scope: descriptor.scope,
-    commands: commands as unknown as Prisma.InputJsonValue,
-    baseRevision: candidate.baseRevision,
-    sourceCandidateId: candidate.id,
-    thumbnailAssetVersionId: outputRefs.find((reference) => reference.objectType === "asset")?.versionId,
-  } });
-}
-
-export async function applyPageVariant(ownerUserId: string, variantId: string, expectedRevision: number) {
-  const variant = await prisma.pageVariant.findFirst({ where: { id: variantId, ownerUserId, archivedAt: null } });
-  if (!variant) throw new AppError("not_found", "页面方案不存在。", 404);
-  if (variant.kind !== "LAYOUT_ONLY" && variant.baseRevision !== expectedRevision) throw new AppError("conflict", "页面内容已经变化，请重新生成这个完整页面方案。", 409);
-  const result = await commitChangeSet({ ownerUserId, projectId: variant.projectId, expectedRevision, changeSet: {
-    id: `page-variant:${variant.id}:${expectedRevision}`,
-    projectId: variant.projectId,
-    baseRevision: expectedRevision,
-    source: "candidate",
-    sourceCandidateId: variant.id,
-    commands: json<WorkspaceCommand[]>(variant.commands),
-  } });
-  await prisma.pageVariant.update({ where: { id: variant.id }, data: { lastAppliedRevision: result.working.revision } });
-  return result;
-}
-
-export async function deletePageVariant(ownerUserId: string, variantId: string) {
-  const result = await prisma.pageVariant.updateMany({ where: { id: variantId, ownerUserId, archivedAt: null }, data: { archivedAt: new Date() } });
-  if (!result.count) throw new AppError("not_found", "页面方案不存在。", 404);
-  return { id: variantId, deleted: true };
 }
 
 export async function revertCandidateApplication(ownerUserId: string, candidateId: string) {

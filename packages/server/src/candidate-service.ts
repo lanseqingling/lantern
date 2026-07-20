@@ -11,7 +11,7 @@ export function assertFrameCandidateApplicationTarget(
   operationsValue: Prisma.JsonValue,
   expectedTarget?: FrameCandidateApplicationTarget,
 ) {
-  if (kind !== CandidateKind.FRAME_IMAGE && kind !== CandidateKind.FRAME_IMAGE_PATCH) return;
+  if (kind !== CandidateKind.FRAME_IMAGE) return;
   if (!expectedTarget) throw new AppError("validation", "缺少单格图片候选的预览目标。", 422);
   const target = targetValue as { type?: unknown; pageId?: unknown; id?: unknown };
   if (target.type !== "comic_frame" || target.pageId !== expectedTarget.unitId || target.id !== expectedTarget.frameId) {
@@ -42,7 +42,12 @@ export async function applyAssetCandidate(userId: string, candidateId: string, e
       throw new AppError("conflict", "资产候选已过期。", 409);
     }
     const draft = candidate.payload as { kind: string; name: string; description: string; sourceAssetVersionIds?: string[] };
-    const kind = ({ character: AssetKind.CHARACTER, scene: AssetKind.SCENE, style: AssetKind.STYLE, prop: AssetKind.PROP } as Record<string, AssetKind>)[draft.kind] ?? AssetKind.PROP;
+    const kind = draft.kind === "character"
+      ? AssetKind.CHARACTER
+      : draft.kind === "scene"
+        ? AssetKind.SCENE
+        : undefined;
+    if (!kind) throw new AppError("validation", "资产候选只支持角色或场景。", 422);
     const sourceVersion = draft.sourceAssetVersionIds?.[0]
       ? await tx.assetVersion.findFirst({ where: { id: draft.sourceAssetVersionIds[0], asset: { ownerUserId: userId, projectId: candidate.projectId } } })
       : undefined;

@@ -10,7 +10,7 @@ LCD 保存一话漫画已经确认或正在编辑的作品事实，供工作台�
 故事层：StoryboardBeat（讲什么）
 作品层：PresentationUnit → PageSurface → Frame（怎样组织给读者看）
 画面层：Frame → Layer → Element（画格里怎样呈现）
-工作流层：Candidate / PageVariant → ChangeSet → WorkingRevision / SavedSnapshot
+工作流层：Candidate → ChangeSet → WorkingRevision / SavedSnapshot
 ```
 
 这些层可以互相引用，不能互相替代。LCD 不保存对话消息、任务进度、选择状态、临时预览、画布图片卡摆放或签名资源 URL。
@@ -27,7 +27,6 @@ LCD 保存一话漫画已经确认或正在编辑的作品事实，供工作台�
 | 对白 | `Dialogue` | 谁说什么的语义事实。 |
 | 气泡 | `BalloonElement` | 对白在画面中的视觉实例。 |
 | 文字 | `TextElement` | 旁白、说明和拟声字等独立文字实例。 |
-| 页面方案 | `PageVariant` | 可保留、预览、重新应用或删除的编排或局部页面方案。 |
 
 一个 StoryboardBeat 可以尚未进入页面、被多个画格表现，或与其他条目共同进入蒙太奇画格。一个 Frame 最多有一个 `primary` 叙事引用，并可带多个连续性引用。对白独立于 StoryboardBeat 和气泡，因此修改台词不破坏气泡位置，移动气泡也不改写叙事内容。
 
@@ -153,19 +152,13 @@ LCD 只保存稳定的素材与版本标识、媒体类型和必要尺寸，不�
 - 任一命令失败则不写入；
 - 作为一次 Undo / Redo 的原子单位。
 
-## 9. 候选、页面方案与保存快照
+## 9. 候选与保存快照
 
 确定性手动编辑可以直接提交 ChangeSet。AI 生成、结构调整、多对象操作和其他高风险结果先成为 Candidate，记录基准 revision、影响范围和命令，不能静默覆盖工作稿。
 
-候选预览组合“当前工作稿 + Candidate”，允许切换原稿与新方案、应用、保存方案或取消。预览本身不创建 revision；应用后只创建一次原子 ChangeSet。
+候选预览组合“当前工作稿 + Candidate”，允许在适用时切换工作稿与候选结果、应用或取消预览。预览本身不创建 revision；应用后只创建一次原子 ChangeSet。Candidate 基于旧 revision 且无法安全应用时必须标记过期并拒绝写入。
 
-PageVariant 分为：
-
-- `layout_only`：只保存编排，重新应用时保留格内内容。
-- `complete_unit`：保存完整展示单元状态。
-- `partial_frames`：只保存指定画格变化。
-
-删除页面方案不删除当前作品。方案基于旧 revision 且无法安全合并时必须标记冲突。SavedSnapshot 是用户显式保存后不可变的阅读和导出基线，后续编辑不能原地改写。
+SavedSnapshot 是用户显式保存后不可变的阅读和导出基线，后续编辑不能原地改写。
 
 ## 10. 校验不变量
 

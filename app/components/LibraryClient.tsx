@@ -80,7 +80,7 @@ export function LibraryClient() {
     </section>
     {creating ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setCreating(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="new-comic-title" onMouseDown={(event) => event.stopPropagation()}>
       <div><small>NEW COMIC</small><h2 id="new-comic-title">开始一个新故事</h2></div>
-      <label>漫画名称<input autoFocus value={draft.title} placeholder="例如：雨夜便利店" onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label>
+      <label>漫画名称<input autoFocus value={draft.title} placeholder="漫画名称" onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label>
       <label>漫画简介<textarea value={draft.summary} placeholder="简单介绍这部漫画的故事、角色或氛围" onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} /></label>
       <label>漫画结构<CustomSelect ariaLabel="漫画结构" className="creation-select compact" value={draft.format === "four_panel" ? "page" : draft.format} options={formatOptions} onChange={(value) => setDraft((current) => ({ ...current, format: value as typeof current.format }))} /></label>
       {error ? <p className="creation-error">{error}</p> : null}

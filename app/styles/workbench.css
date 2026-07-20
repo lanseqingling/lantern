@@ -87,16 +87,20 @@
 .project-main > svg { color: #506069; }
 
 .lantern-logo {
+  --lantern-logo-size: 34px;
+  --lantern-logo-border-width: 1px;
+  --lantern-logo-radius: 13px;
+  --lantern-logo-glow: 6px;
   position: relative;
   flex: none;
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgba(36,127,130,.22);
-  border-radius: 13px;
+  width: var(--lantern-logo-size);
+  height: var(--lantern-logo-size);
+  border: var(--lantern-logo-border-width) solid rgba(36,127,130,.22);
+  border-radius: var(--lantern-logo-radius);
   background:
     radial-gradient(circle at 66% 34%, var(--amber) 0 16%, transparent 18%),
     linear-gradient(135deg, var(--cyan-soft), #fff);
-  box-shadow: 0 0 0 6px rgba(100,200,200,.12);
+  box-shadow: 0 0 0 var(--lantern-logo-glow) rgba(100,200,200,.12);
 }
 .lantern-logo::before { content: none; }
 .lantern-logo i { display: none; }

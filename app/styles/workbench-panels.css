@@ -209,7 +209,12 @@
 .landing-ambient.amber { left: 22%; bottom: -35%; background: radial-gradient(circle, rgba(242,184,75,.12), transparent 66%); }
 .landing-intro { align-self: center; width: min(560px, 40vw); margin: -3vh 0 0 clamp(32px, 8vw, 144px); }
 .landing-brand { display: inline-flex; align-items: center; gap: 24px; margin-bottom: 25px; color: #1c3439; font-size: clamp(60px, 5.76vw, 98px); line-height: 1; letter-spacing: -.045em; }
-.landing-brand .lantern-logo { width: clamp(60px, 5.76vw, 98px); height: clamp(60px, 5.76vw, 98px); border-radius: 22%; }
+.landing-brand .lantern-logo {
+  --lantern-logo-size: clamp(52px, 4.85vw, 83px);
+  --lantern-logo-border-width: clamp(1.5px, .143vw, 2.5px);
+  --lantern-logo-radius: clamp(20px, 1.85vw, 32px);
+  --lantern-logo-glow: clamp(9px, .86vw, 15px);
+}
 .landing-brand strong { color: var(--cyan-deep); }
 .landing-brand em { color: var(--amber); font-style: normal; }
 .landing-intro h1 { margin: 0; font-size: clamp(34px, 3.2vw, 54px); line-height: 1.1; letter-spacing: -.085em; white-space: nowrap; }

@@ -54,7 +54,12 @@
   .landing-page { min-height: 720px; }
   .landing-intro { width: calc(100vw - 40px); margin: 38px 20px 0; }
   .landing-brand { gap: 16px; margin-bottom: 17px; font-size: clamp(53px, 14.4vw, 66px); }
-  .landing-brand .lantern-logo { width: clamp(53px, 14.4vw, 66px); height: clamp(53px, 14.4vw, 66px); border-radius: 22%; }
+  .landing-brand .lantern-logo {
+    --lantern-logo-size: clamp(45px, 12vw, 56px);
+    --lantern-logo-border-width: 1.5px;
+    --lantern-logo-radius: clamp(17px, 4.6vw, 21px);
+    --lantern-logo-glow: clamp(8px, 2.15vw, 10px);
+  }
   .landing-intro h1 { font-size: clamp(28px, 8vw, 37px); letter-spacing: -.1em; }
   .landing-storyboard { bottom: 81px; width: min(75vw, 340px); border-width: 6px; border-radius: 13px; }
   .landing-frame-selection { background-size: 12% 2px, 2px 18%, 12% 2px, 2px 18%, 12% 2px, 2px 18%, 12% 2px, 2px 18%; }

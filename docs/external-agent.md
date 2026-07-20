@@ -2,19 +2,21 @@
 
 ## 1. 文档定位
 
-本文定义 Lantern 面向 Codex、Claude Code 等外置 Agent 的 MCP、Skill、语义 Capability、外部结果接入和版本发布规则，是外置 Agent 接入设计的事实源。
+本文定义 Lantern 面向外置 Agent 的语义 Capability、接入协议、协作知识、外部结果和版本发布规则，是外置 Agent 接入设计的事实源。
 
 Agent 的整体运行时、上下文、Task、Candidate 和写入边界见 [Agent](./agent.md)；作品结构与 ChangeSet 不变量见 [LCD](./lcd.md)。本文只说明外置 Agent 如何复用这些能力，不重新定义内置 Agent，也不复制编辑器交互。
 
 ## 2. 目标与范围
 
-外置 Agent 接入需要达到以下目标：
+外置 Agent 是 Lantern 的正式创作入口之一，不是独立于产品之外的自动化扩展。接入需要达到以下目标：
 
-- Codex 等通用 Agent 能发现并调用 Lantern 的语义工具，读取有限创作上下文，启动和管理现有 Task，并查看或处理 Candidate。
+- 支持语义工具调用的通用 Agent 能发现并调用 Lantern 的创作能力，读取有限创作上下文，启动和管理现有 Task，并查看或处理 Candidate。
 - 外置 Agent 与内置 Agent 共用同一套目标、范围、版本固定、任务、候选和作品写入边界，不形成第二套业务协议。
 - 外置 Agent 可以使用自身更强的推理、视觉理解或生图能力，再把结构化结果或图片登记为 Lantern Candidate。
 - Lantern Skill 为外置 Agent 提供稳定的产品概念和协作方法，但不复制工具 schema、当前能力清单或 UI 操作步骤。
 - 新增 Capability 后，内置 Planner、MCP、服务接口和能力目录从同一事实源同步，不依靠多处手工维护。
+
+适合 Agent 使用的 Capability 不因调用入口不同而分成内置版和外置版。外置入口可以比完整产品交互更早使用已经稳定的语义能力，但不能绕过权限登记、上下文限制、Candidate 或作品写入守卫。
 
 首个可用版本优先接通当前已经登记的 Agent 能力和 Candidate 生命周期，不要求复刻工作台中的画布预览、自动翻页、替换工具条或会话呈现。
 

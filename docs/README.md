@@ -7,7 +7,7 @@
 3. [编辑器体验](./editor.md)：工作台交互、视觉系统、状态、动效和可访问性。
 4. [LCD](./lcd.md)：作品结构、坐标、分层、资源引用和写入不变量。
 5. [Agent](./agent.md)：整体架构、能力边界、上下文、消息、任务、候选和扩展方向。
-6. [外置 Agent 接入](./external-agent.md)：MCP、Skill、语义 Capability、外部结果和同步发布规则。
+6. [外置 Agent 接入](./external-agent.md)：产品内外 Agent 如何通过 MCP、Skill 共享语义 Capability、产品知识、外部结果和同步发布规则。
 
 运行中的工作台是交互与视觉实现基线。
 
@@ -22,7 +22,7 @@
 | 工作台交互、视觉和对象反馈 | 编辑器体验 |
 | LCD 语义与不变量 | LCD |
 | Agent 架构、能力边界、上下文、消息、任务与扩展方向 | Agent |
-| 外置 Agent 的 MCP、Skill、Capability 投影和发布规则 | 外置 Agent 接入 |
+| 外置 Agent 的 MCP、Skill、能力复用、外部结果和发布规则 | 外置 Agent 接入 |
 
 文档发生冲突时，先按职责确定唯一事实源，再直接修正其他文档，不新增补充说明。
 

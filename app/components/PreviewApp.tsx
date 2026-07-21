@@ -66,6 +66,8 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   });
   useEffect(() => {
     if (!loaded || !sourceEnvelope) return;
+    // This state drives the entrance transition after the persisted snapshot is ready.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDockEntering(true);
     const timer = window.setTimeout(() => setDockEntering(false), MODE_SWITCH_MOTION_MS + 40);
     return () => window.clearTimeout(timer);

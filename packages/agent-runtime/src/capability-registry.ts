@@ -80,5 +80,10 @@ export function isAgentTaskType(taskType: string): taskType is AgentTaskType {
 }
 
 export function plannerCapabilityCatalog() {
-  return agentCapabilities.map(({ taskType: _taskType, userMessage: _userMessage, missingTargetMessage: _missingTargetMessage, ...capability }) => capability);
+  return agentCapabilities.map(({ taskType, userMessage, missingTargetMessage, ...capability }) => {
+    void taskType;
+    void userMessage;
+    void missingTargetMessage;
+    return capability;
+  });
 }

@@ -151,7 +151,8 @@ export function guardInteractionPlan(input: InteractionInput, plan: InteractionP
 export async function planInteraction(input: InteractionInput): Promise<PlannedInteraction> {
   const prompt = buildPlannerSystemPrompt();
   const currentPageTargets = input.currentPageTargets ?? planningCurrentPageTargets(input.contextSummary);
-  const { currentPageTargets: _currentPageTargets, ...plannerContext } = contextRecord(input.contextSummary);
+  const plannerContext = { ...contextRecord(input.contextSummary) };
+  delete plannerContext.currentPageTargets;
   const plan = await new DeepSeekProvider().generateJson({
     schema: interactionPlanSchema,
     maxTokens: 1400,

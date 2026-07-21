@@ -629,7 +629,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       </button>;
     })}
     {editable ? <div className="object-order-layer">
-      {balloons.map((node, index) => {
+      {balloons.map((node) => {
         const balloon = node.element;
         const frame = node.frame;
         const crossPage = node.overlayPurpose === "cross_page";

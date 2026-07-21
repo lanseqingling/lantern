@@ -171,7 +171,6 @@ export function ImageViewer({
       <div className="image-viewer-image-space">
         {loadFailed ? <div className="image-viewer-error"><Icon name="asset" /><strong>图片暂时无法显示</strong></div> : <>
           {/* Signed and local object URLs must retain their intrinsic pixel dimensions for 1:1 mode. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img key={activeImage.id} className={dragging ? "dragging" : ""} src={activeImage.src} alt={activeImage.alt} draggable={false} style={{ ...renderedSize, transform: `translate(-50%, -50%) translate(${imageOffset.x}px, ${imageOffset.y}px)` }} onClick={(event) => event.stopPropagation()} onPointerDown={beginImageDrag} onPointerMove={moveImage} onPointerUp={endImageDrag} onPointerCancel={endImageDrag} onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setLoadFailed(true)} />
         </>}
       </div>

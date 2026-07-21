@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CandidateKind, TaskType } from "@prisma/client";
 import { runAgentLoop, type AgentLoopCheckpoint } from "../packages/agent-runtime/src/agent-loop";
-import { getAgentCapability, listAgentCapabilities } from "../packages/agent-runtime/src/capability-registry";
+import { getAgentCapability } from "../packages/agent-runtime/src/capability-registry";
 import { normalizeSelectionForCurrentView } from "../packages/agent-runtime/src/context-builder";
 import { guardInteractionPlan, type InteractionInput } from "../packages/agent-runtime/src/orchestrator";
 import { assetDraftSchema, explicitDialogueReferenceSchema, explicitWorkspaceReferencesSchema, interactionPlanSchema, parseCandidatePayload, type InteractionPlan } from "../packages/agent-runtime/src/schemas";

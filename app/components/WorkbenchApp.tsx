@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CustomSelect } from "./CustomSelect";
@@ -455,6 +455,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       ? window.innerHeight - padding - rect.bottom
       : rect.top < padding ? padding - rect.top : 0;
     if (!deltaX && !deltaY) return;
+    // The rendered menu must be measured before its corrected position is known.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPageMenuPosition((current) => current ? { x: current.x + deltaX, y: current.y + deltaY } : current);
   }, [pageMenuId]);
 
@@ -488,6 +490,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   useEffect(() => {
     if (!hydrated) return;
+    // Hydration completion is the trigger for this one-shot entrance transition.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDockEntering(true);
     const timer = window.setTimeout(() => setDockEntering(false), MODE_SWITCH_MOTION_MS + 40);
     return () => window.clearTimeout(timer);
@@ -573,13 +577,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setContextDebugOpen(true);
     void refreshContextDebug();
   };
-  const syncConversationUrl = (conversationId: string) => {
+  const syncConversationUrl = useCallback((conversationId: string) => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("conversationId") === conversationId) return;
     params.set("conversationId", conversationId);
     const query = params.toString();
     router.replace(`/comics/${comicId}/chapters/${chapterId}${query ? `?${query}` : ""}`, { scroll: false });
-  };
+  }, [chapterId, comicId, router]);
   const refreshServerWorkbench = async (conversationId = runtimeIds?.conversationId, force = false) => {
     if (!force && serverPendingCommitCountRef.current) await serverCommitQueueRef.current;
     const previousActiveTask = activeTaskRef.current;
@@ -702,7 +706,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     };
     void hydrate();
     return () => { canceled = true; };
-  }, [chapterId]);
+  }, [chapterId, syncConversationUrl]);
 
   useEffect(() => {
     if (hydrated && runtimeAdapter === "demo") persistDemoWorkbench(state);
@@ -738,6 +742,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   useEffect(() => {
     if (activeTask?.status === "running") return;
+    // A task transition invalidates the confirmation dialog immediately.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTaskCancelConfirmOpen(false);
   }, [activeTask?.status]);
 
@@ -790,6 +796,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   useEffect(() => {
     if (!frameImageCandidatePreview) return;
     if (previewCandidate?.status === "available" && previewCandidate.baseRevision === state.fixture.working.revision) return;
+    // Candidate invalidation restores the complete pre-preview interaction snapshot.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelection(frameImageCandidatePreview.previousSelection);
     setCanvasMode(frameImageCandidatePreview.previousCanvasMode);
     setObjectInteractionMode(frameImageCandidatePreview.previousInteractionMode);
@@ -800,6 +808,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   useEffect(() => {
     if (isVerticalWorkbench) return;
+    // The vertical-only viewport state is invalid when the document format changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setVerticalViewportMode("off");
     setVerticalSegmentMenuPosition(null);
   }, [isVerticalWorkbench]);
@@ -843,6 +853,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       .find((item) => item.id === selection.pageId)
       ?.elements.find((element) => element.id === selection.id);
   }, [selection.id, selection.pageId, workingPages]);
+  const selectedBalloonTailTarget = selectedElement?.type === "speech_balloon"
+    ? selectedElement.content.tailTarget
+    : undefined;
   const rawSelectedStoryboardBeatId = selection.type === "storyboard_beat" ? selection.id : selectedElement?.linkedStoryboardBeatId;
   const selectedStoryboardBeatId = rawSelectedStoryboardBeatId === "unassigned" ? undefined : rawSelectedStoryboardBeatId;
   const selectedStoryboardBeat = state.fixture.storyboardBeats.find((storyboardBeat) => storyboardBeat.id === selectedStoryboardBeatId);
@@ -855,11 +868,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const page = workingPages.find((item) => item.id === selection.pageId);
     return (page?.elements.filter((element): element is TextCanvasElement => element.type === "text" && element.content.role === "narration").findIndex((text) => text.id === selection.id) ?? -1) + 1;
   }, [selection.id, selection.pageId, selection.type, workingPages]);
-  const selectedFrameImage = useMemo(() => {
-    const selectedPage = selection.pageId ? workingPages.find((item) => item.id === selection.pageId) : undefined;
-    if (!selectedPage || selectedElement?.type !== "comic_frame") return undefined;
-    return selectedPage.elements.find((element): element is ImageElement => element.type === "image" && element.comicFrameId === selectedElement.id && element.location.space === "frame");
-  }, [selection.pageId, selectedElement, workingPages]);
   const assetSrcByKey = useMemo(
     () => new Map(state.fixture.working.document.resources.map((resource) => [`${resource.assetId}:${resource.assetVersionId}`, state.fixture.working.resolvedResources?.[resource.assetVersionId]?.url]).filter((entry): entry is [string, string] => Boolean(entry[1]))),
     [state.fixture.working.document.resources, state.fixture.working.resolvedResources],
@@ -1027,7 +1035,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       window.removeEventListener("resize", updateToolbar);
       observer.disconnect();
     };
-  }, [agentOpen, canvasMode, canvasOffset.x, canvasOffset.y, frameImageCandidatePreview, inspectorOpen, leftOpen, objectInteractionMode, selectedElement?.type === "speech_balloon" ? selectedElement.content.tailTarget : undefined, selectedElement?.geometry, toolbarTarget.id, toolbarTarget.pageId, toolbarTarget.type]);
+  }, [agentOpen, canvasMode, canvasOffset.x, canvasOffset.y, frameImageCandidatePreview, inspectorOpen, leftOpen, objectInteractionMode, selectedBalloonTailTarget, selectedElement?.geometry, toolbarTarget.id, toolbarTarget.pageId, toolbarTarget.type]);
 
   useLayoutEffect(() => {
     if (canvasMode !== "focus" || !inspectorOpen || (selection.type !== "speech_balloon" && selection.type !== "text") || !selection.id || !stageRef.current) {
@@ -2091,6 +2099,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   useEffect(() => {
     if (!autoPreviewCandidateId) return;
+    // This id is a one-shot task-completion event and is consumed by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAutoPreviewCandidateId(null);
     if (frameImageCandidatePreview) return;
     const candidate = state.candidates.find((item) => item.id === autoPreviewCandidateId);
@@ -2941,7 +2951,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       if (!stage) return;
       event.preventDefault();
       event.stopPropagation();
-      const now = performance.now();
+      const now = event.timeStamp;
       const intent = verticalWheelIntentRef.current;
       if (now < intent.lockedUntil) return;
       const delta = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? stage.clientHeight : 1);
@@ -3311,6 +3321,19 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   });
 
   const activeAssetMenu = canvasAssetLibrary.find((asset) => asset.id === assetMenuId);
+  const activeAssetPlacement = activeAssetMenu
+    ? canvasReferences.find((reference) => reference.assetId === activeAssetMenu.id)
+    : undefined;
+  const handleActiveAssetPlacement = () => {
+    if (!activeAssetMenu) return;
+    if (activeAssetPlacement) {
+      setSelection({ type: "reference_card", id: activeAssetPlacement.id, label: activeAssetMenu.name });
+      setLeftOpen(false);
+    } else {
+      void placeLibraryAssetOnCanvas(activeAssetMenu);
+    }
+    setAssetMenuId(null);
+  };
   const activeAssetSave = canvasAssetLibrary.find((asset) => asset.id === assetSaveFormId);
   const activeStoryboardRow = storyboardFrameRows.find((row) => row.frame.id === storyboardMenuFrameId);
   const previewDisabled = currentPages.length === 0 || !state.fixture.snapshot || modeSwitching;
@@ -3722,12 +3745,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       </CreationDrawer>
       {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setLeftOpen(true)} aria-label="展开创作流"><Icon name="expand" /></button> : null}
       {activeAssetMenu && assetMenuPosition ? (() => {
-        const placement = canvasReferences.find((reference) => reference.assetId === activeAssetMenu.id);
         const visibleInAssetSpace = isAssetVisibleInAssetSpace(activeAssetMenu);
         return <FloatingMenu className="asset-reference-menu-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }}>
           <MenuSection className="asset-menu-section">
             <button type="button" onClick={() => { addAssetReference(activeAssetMenu); setAgentOpen(true); setAssetMenuId(null); }}><span><Icon name="ai" />引用到对话</span></button>
-            <button type="button" onClick={() => { if (placement) { setSelection({ type: "reference_card", id: placement.id, label: activeAssetMenu.name }); setLeftOpen(false); } else void placeLibraryAssetOnCanvas(activeAssetMenu); setAssetMenuId(null); }}><span><Icon name="pointer" />{placement ? "定位到画布" : "添加到画布"}</span></button>
+            <button type="button" onClick={handleActiveAssetPlacement}><span><Icon name="pointer" />{activeAssetPlacement ? "定位到画布" : "添加到画布"}</span></button>
           </MenuSection>
           <MenuDivider className="asset-menu-divider" />
           <MenuSection className="asset-menu-section">

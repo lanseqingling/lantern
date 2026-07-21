@@ -1,0 +1,19 @@
+{
+  "name": "@lantern/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.1.0",
+    "@fastify/multipart": "9.2.1",
+    "@lantern/agent-runtime": "workspace:*",
+    "@lantern/server": "workspace:*",
+    "@lantern/shared": "workspace:*",
+    "@prisma/client": "6.19.3",
+    "fastify": "5.10.0",
+    "zod": "4.4.3"
+  }
+}

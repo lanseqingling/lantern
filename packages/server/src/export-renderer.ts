@@ -1,6 +1,6 @@
 import sharp from "sharp";
-import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "../../shared/src";
-import { balloonCutCornerPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "../../shared/src";
+import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "@lantern/shared";
+import { balloonCutCornerPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "@lantern/shared";
 import { prisma } from "./db";
 import { getObject, putObject } from "./object-storage";
 

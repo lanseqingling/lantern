@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import type { WorkspaceReference } from "./schemas";
-import { prisma } from "../../server/src/db";
-import { getObject } from "../../server/src/object-storage";
+import { prisma } from "@lantern/server/db";
+import { getObject } from "@lantern/server/object-storage";
 import { QwenVisionProvider } from "./providers/qwen-vision";
 
 async function modelDataUrl(bytes: Buffer, contentType: string) {

@@ -1,7 +1,7 @@
 import { MessageKind, MessageRole, TaskStatus, TaskType, type Prisma } from "@prisma/client";
-import { prisma } from "../../server/src/db";
-import { AppError } from "../../server/src/errors";
-import { getConfig } from "../../server/src/config";
+import { prisma } from "@lantern/server/db";
+import { AppError } from "@lantern/server/errors";
+import { getConfig } from "@lantern/server/config";
 import { buildAgentContext } from "./context-builder";
 import type { WorkspaceReference } from "./schemas";
 import { isAgentTaskType, type AgentTaskType } from "./capability-registry";
@@ -20,6 +20,12 @@ export async function getActiveConversationTask(ownerUserId: string, conversatio
     where: { ownerUserId, conversationId, type: { in: [TaskType.STORYBOARD, TaskType.FRAME_IMAGE_GENERATE, TaskType.ASSET_PARSE] }, status: { in: activeTaskStatuses } },
     orderBy: { createdAt: "desc" },
   });
+}
+
+export async function getGenerationTask(ownerUserId: string, taskId: string) {
+  const task = await prisma.generationTask.findFirst({ where: { id: taskId, ownerUserId }, include: { attempts: { orderBy: { attempt: "asc" } }, candidates: true } });
+  if (!task) throw new AppError("not_found", "任务不存在。", 404);
+  return task;
 }
 
 export type CreateTaskInput = {

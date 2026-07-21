@@ -1,4 +1,4 @@
-import type { ComicDocument, StoryboardBeat } from "../../packages/shared/src";
+import type { ComicDocument, StoryboardBeat } from "@lantern/shared";
 
 export function createCapacityFixture() {
   const storyboardBeats: StoryboardBeat[] = Array.from({ length: 120 }, (_, index) => ({

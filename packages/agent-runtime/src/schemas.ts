@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { comicDocumentSchema, presentationUnitSchema } from "../../shared/src";
+import { comicDocumentSchema, presentationUnitSchema } from "@lantern/shared";
 
 const versionedWorkspaceObjectTypes = new Set(["asset", "character", "scene", "style", "storyboard_beat"]);
 

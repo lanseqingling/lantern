@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
-import { ensureRuntimeLayout } from "../packages/server/src/local-runtime";
-import { getRuntimePaths } from "../packages/server/src/runtime-paths";
+import { ensureRuntimeLayout } from "@lantern/server/local-runtime";
+import { getRuntimePaths } from "@lantern/server/runtime-paths";
 import { runPrismaCommand } from "./runtime-init";
 
 export async function runPrismaForLocalRuntime(args: string[]) {

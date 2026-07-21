@@ -1,5 +1,5 @@
-import { getConfig } from "../../../server/src/config";
-import { safeProviderError } from "../../../server/src/errors";
+import { getConfig } from "@lantern/server/config";
+import { safeProviderError } from "@lantern/server/errors";
 
 export type QwenImageRequest = {
   prompt: string;

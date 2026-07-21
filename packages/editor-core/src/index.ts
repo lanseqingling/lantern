@@ -6,8 +6,8 @@ import type {
   WorkingEnvelope,
   WorkspaceChangeSet,
   WorkspaceCommand,
-} from "../../shared/src";
-import { changeSetCommands, normalizeStoryboardBeats, orderedUnitSurfaces, validateComicDocument, workspaceChangeSetSchema } from "../../shared/src";
+} from "@lantern/shared";
+import { changeSetCommands, normalizeStoryboardBeats, orderedUnitSurfaces, validateComicDocument, workspaceChangeSetSchema } from "@lantern/shared";
 import { planEditorCapability, type EditorCapabilityContext, type EditorCapabilityId } from "./capabilities";
 
 export * from "./capabilities";

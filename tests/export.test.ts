@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import sharp from "sharp";
-import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
+import { compileChapterLayoutPlan } from "@lantern/layout-engine";
 import {
   createStructuredExportPayload,
   presentationUnitSurface,
@@ -11,8 +11,8 @@ import {
   renderPagePng,
   renderPreviewPageGroupPng,
   renderSurfaceSvg,
-} from "../packages/server/src/export-renderer";
-import { projectBalloonStrokeWidths, projectComicRenderScene, projectImageCrop, scaleImageCrop, type ComicDocument, type StoryboardBeat } from "../packages/shared/src";
+} from "@lantern/server/export-renderer";
+import { projectBalloonStrokeWidths, projectComicRenderScene, projectImageCrop, scaleImageCrop, type ComicDocument, type StoryboardBeat } from "@lantern/shared";
 
 const storyboardBeats: StoryboardBeat[] = Array.from({ length: 8 }, (_, index) => ({
   id: `golden-storyboardBeat-${index + 1}`,

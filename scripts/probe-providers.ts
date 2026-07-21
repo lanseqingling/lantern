@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { DeepSeekProvider } from "../packages/agent-runtime/src/providers/deepseek";
-import { QwenImageProvider } from "../packages/agent-runtime/src/providers/qwen-image";
+import { DeepSeekProvider } from "@lantern/agent-runtime/providers/deepseek";
+import { QwenImageProvider } from "@lantern/agent-runtime/providers/qwen-image";
 
 async function main() {
   const textStartedAt = Date.now();

@@ -2,11 +2,11 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { getConfig } from "../../../packages/server/src/config";
-import { prisma } from "../../../packages/server/src/db";
-import { AppError } from "../../../packages/server/src/errors";
-import { createSignedExportPath } from "../../../packages/server/src/signed-assets";
-import { LOCAL_USER_ID } from "../../../packages/server/src/local-runtime";
+import { getConfig } from "@lantern/server/config";
+import { prisma } from "@lantern/server/db";
+import { AppError } from "@lantern/server/errors";
+import { createSignedExportPath } from "@lantern/server/signed-assets";
+import { LOCAL_USER_ID } from "@lantern/server/local-runtime";
 
 const config = getConfig();
 

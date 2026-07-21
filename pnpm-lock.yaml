@@ -11,36 +11,33 @@ importers:
 
   .:
     dependencies:
-      '@fastify/cors':
-        specifier: 11.1.0
-        version: 11.1.0
-      '@fastify/multipart':
-        specifier: 9.2.1
-        version: 9.2.1
+      '@lantern/agent-runtime':
+        specifier: workspace:*
+        version: link:packages/agent-runtime
+      '@lantern/demo-runtime':
+        specifier: workspace:*
+        version: link:packages/demo-runtime
+      '@lantern/editor-core':
+        specifier: workspace:*
+        version: link:packages/editor-core
+      '@lantern/layout-engine':
+        specifier: workspace:*
+        version: link:packages/layout-engine
+      '@lantern/server':
+        specifier: workspace:*
+        version: link:packages/server
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:packages/shared
       '@prisma/client':
         specifier: 6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
-      dotenv:
-        specifier: 17.2.3
-        version: 17.2.3
       fastify:
         specifier: 5.10.0
         version: 5.10.0
       fflate:
         specifier: 0.7.4
         version: 0.7.4
-      lucide-react:
-        specifier: ^1.24.0
-        version: 1.24.0(react@19.2.6)
-      next:
-        specifier: 16.2.6
-        version: 16.2.6(@babel/core@7.29.7)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
       sharp:
         specifier: 0.34.5
         version: 0.34.5
@@ -96,6 +93,144 @@ importers:
       vite:
         specifier: 8.0.13
         version: 8.0.13(@types/node@22.19.19)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.22.1)
+
+  apps/api:
+    dependencies:
+      '@fastify/cors':
+        specifier: 11.1.0
+        version: 11.1.0
+      '@fastify/multipart':
+        specifier: 9.2.1
+        version: 9.2.1
+      '@lantern/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@lantern/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@prisma/client':
+        specifier: 6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      fastify:
+        specifier: 5.10.0
+        version: 5.10.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  apps/web:
+    dependencies:
+      '@lantern/demo-runtime':
+        specifier: workspace:*
+        version: link:../../packages/demo-runtime
+      '@lantern/editor-core':
+        specifier: workspace:*
+        version: link:../../packages/editor-core
+      '@lantern/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@lantern/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      next:
+        specifier: 16.2.6
+        version: 16.2.6(@babel/core@7.29.7)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
+      react-dom:
+        specifier: 19.2.6
+        version: 19.2.6(react@19.2.6)
+
+  packages/agent-runtime:
+    dependencies:
+      '@lantern/editor-core':
+        specifier: workspace:*
+        version: link:../editor-core
+      '@lantern/server':
+        specifier: workspace:*
+        version: link:../server
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@prisma/client':
+        specifier: 6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      sharp:
+        specifier: 0.34.5
+        version: 0.34.5
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/demo-runtime:
+    dependencies:
+      '@lantern/layout-engine':
+        specifier: workspace:*
+        version: link:../layout-engine
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/editor-core:
+    dependencies:
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/layout-engine:
+    dependencies:
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/server:
+    dependencies:
+      '@lantern/editor-core':
+        specifier: workspace:*
+        version: link:../editor-core
+      '@lantern/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@prisma/client':
+        specifier: 6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      dotenv:
+        specifier: 17.2.3
+        version: 17.2.3
+      fflate:
+        specifier: 0.7.4
+        version: 0.7.4
+      sharp:
+        specifier: 0.34.5
+        version: 0.34.5
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/shared:
+    dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/ui:
+    dependencies:
+      lucide-react:
+        specifier: ^1.24.0
+        version: 1.24.0(react@19.2.6)
+      react:
+        specifier: ^19.2.6
+        version: 19.2.6
 
 packages:
 

@@ -12,10 +12,10 @@ import {
   TaskType,
   type Prisma,
 } from "@prisma/client";
-import { validateComicDocument, type ComicDocument, type Dialogue, type Frame, type PresentationUnit, type StoryboardBeat } from "../../packages/shared/src";
-import { prisma } from "../../packages/server/src/db";
-import { LOCAL_USER_DISPLAY_NAME, LOCAL_USER_EMAIL, LOCAL_USER_ID } from "../../packages/server/src/local-runtime";
-import { clearImageNamespace, putImage, type StoredObject } from "../../packages/server/src/object-storage";
+import { validateComicDocument, type ComicDocument, type Dialogue, type Frame, type PresentationUnit, type StoryboardBeat } from "@lantern/shared";
+import { prisma } from "@lantern/server/db";
+import { LOCAL_USER_DISPLAY_NAME, LOCAL_USER_EMAIL, LOCAL_USER_ID } from "@lantern/server/local-runtime";
+import { clearImageNamespace, putImage, type StoredObject } from "@lantern/server/object-storage";
 
 const ids = {
   user: "user-local-creator",
@@ -219,10 +219,10 @@ export async function seedRainyStation() {
 
   const stored = new Map<string, StoredObject>();
   for (const fileName of imageFiles) {
-    const bytes = await readFile(path.join(process.cwd(), "public", "samples", "rainy-station", fileName));
+    const bytes = await readFile(path.join(process.cwd(), "apps", "web", "public", "samples", "rainy-station", fileName));
     stored.set(fileName, await putImage(bytes, "mock/rainy-station"));
   }
-  const ticketBytes = await readFile(path.join(process.cwd(), "public", "samples", "rainy-station", "frame-02.png"));
+  const ticketBytes = await readFile(path.join(process.cwd(), "apps", "web", "public", "samples", "rainy-station", "frame-02.png"));
   stored.set("prop-ticket.png", await putImage(ticketBytes, "mock/rainy-station/props"));
   const now = new Date();
   const document = buildRainyStationDocument(stored);

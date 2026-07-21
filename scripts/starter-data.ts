@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { z } from "zod";
-import { prisma } from "../packages/server/src/db";
-import { getRuntimePaths, type LanternRuntimePaths } from "../packages/server/src/runtime-paths";
+import { prisma } from "@lantern/server/db";
+import { getRuntimePaths, type LanternRuntimePaths } from "@lantern/server/runtime-paths";
 import { seedCampusLetter } from "../samples/campus-letter/seed";
 import { seedRainyStation } from "../samples/rainy-station/seed";
 

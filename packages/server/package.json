@@ -1,0 +1,38 @@
+{
+  "name": "@lantern/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./asset-library-service": "./src/asset-library-service.ts",
+    "./asset-service": "./src/asset-service.ts",
+    "./candidate-service": "./src/candidate-service.ts",
+    "./canvas-asset-service": "./src/canvas-asset-service.ts",
+    "./chapter-archive-service": "./src/chapter-archive-service.ts",
+    "./comic-service": "./src/comic-service.ts",
+    "./config": "./src/config.ts",
+    "./db": "./src/db.ts",
+    "./download-service": "./src/download-service.ts",
+    "./errors": "./src/errors.ts",
+    "./export-renderer": "./src/export-renderer.ts",
+    "./local-runtime": "./src/local-runtime.ts",
+    "./object-storage": "./src/object-storage.ts",
+    "./runtime-backup": "./src/runtime-backup.ts",
+    "./runtime-paths": "./src/runtime-paths.ts",
+    "./signed-assets": "./src/signed-assets.ts",
+    "./workbench-agent-visibility": "./src/workbench-agent-visibility.ts",
+    "./workbench-service": "./src/workbench-service.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lantern/editor-core": "workspace:*",
+    "@lantern/shared": "workspace:*",
+    "@prisma/client": "6.19.3",
+    "dotenv": "17.2.3",
+    "fflate": "0.7.4",
+    "sharp": "0.34.5",
+    "zod": "4.4.3"
+  }
+}

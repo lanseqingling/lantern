@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateComicDocument } from "../packages/shared/src";
+import { validateComicDocument } from "@lantern/shared";
 import { createCapacityFixture } from "./fixtures/runtime-capacity";
 
 test("persistent runtime capacity fixture keeps 120 storyboardBeats, 24 pages, 200 assets and 300 messages valid", () => {

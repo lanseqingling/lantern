@@ -10,15 +10,15 @@ import {
   TaskType,
   type Prisma,
 } from "@prisma/client";
-import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
-import { initializeDatabaseConnection, prisma } from "../../packages/server/src/db";
-import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
-import { duplicateComic } from "../../packages/server/src/comic-service";
-import { putImage } from "../../packages/server/src/object-storage";
-import { commitChangeSet, revertCandidateApplication } from "../../packages/server/src/workbench-service";
-import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
-import { LocalTaskRunner } from "../../packages/agent-runtime/src/local-task-runner";
-import type { StoryboardBeat } from "../../packages/shared/src";
+import { compileChapterLayoutPlan } from "@lantern/layout-engine";
+import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
+import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "@lantern/server/asset-library-service";
+import { duplicateComic } from "@lantern/server/comic-service";
+import { putImage } from "@lantern/server/object-storage";
+import { commitChangeSet, revertCandidateApplication } from "@lantern/server/workbench-service";
+import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
+import { LocalTaskRunner } from "@lantern/agent-runtime/local-task-runner";
+import type { StoryboardBeat } from "@lantern/shared";
 import { seed } from "../../prisma/seed";
 
 test("database candidate apply and revert preserve version heads atomically", async () => {

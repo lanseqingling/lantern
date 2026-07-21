@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { MessageKind, MessageRole, type Prisma } from "@prisma/client";
-import { prisma } from "../../server/src/db";
-import { AppError } from "../../server/src/errors";
+import { prisma } from "@lantern/server/db";
+import { AppError } from "@lantern/server/errors";
 import { runAgentLoop, type AgentPlanner, type AgentTool } from "./agent-loop";
 import { buildAgentContext } from "./context-builder";
 import { planInteraction, type InteractionPlanningTrace } from "./orchestrator";

@@ -2,8 +2,8 @@ import { MessageKind, type Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 import { createSignedAssetPath } from "./signed-assets";
-import { applyWorkspaceChangeSet, planEditorCapability } from "../../editor-core/src";
-import { mergeAssetVersionHeads, normalizeStoryboardBeats, validateComicDocument, type StoryboardBeat, type WorkspaceChangeSet } from "../../shared/src";
+import { applyWorkspaceChangeSet, planEditorCapability } from "@lantern/editor-core";
+import { mergeAssetVersionHeads, normalizeStoryboardBeats, validateComicDocument, type StoryboardBeat, type WorkspaceChangeSet } from "@lantern/shared";
 import { isWorkbenchAgentCandidateVisible, workbenchAgentCandidateKinds, workbenchAgentTaskTypes } from "./workbench-agent-visibility";
 
 function json<T>(value: Prisma.JsonValue) {
@@ -71,6 +71,30 @@ export async function restoreLatestSnapshot(args: { ownerUserId: string; project
     },
     revertCandidatesAppliedAfterRevision: snapshot.sourceWorkingRevision,
   });
+}
+
+export async function saveChapterSnapshot(ownerUserId: string, chapterId: string, expectedRevision: number) {
+  const project = await prisma.project.findFirst({ where: { chapterId, ownerUserId } });
+  if (!project) throw new AppError("not_found", "一话不存在。", 404);
+  const working = await getLatestWorking(project.id);
+  if (working.revision !== expectedRevision) throw new AppError("conflict", "工作稿已变化，请重新保存。", 409, { currentRevision: working.revision });
+  return prisma.savedSnapshot.create({
+    data: {
+      ownerUserId,
+      chapterId,
+      projectId: project.id,
+      sourceWorkingRevision: working.revision,
+      document: working.document as Prisma.InputJsonValue,
+      storyboardBeatVersions: working.storyboardBeatVersionHeads as Prisma.InputJsonValue,
+      assetVersions: working.assetVersionHeads as Prisma.InputJsonValue,
+    },
+  });
+}
+
+export async function restoreLatestChapterSnapshot(ownerUserId: string, chapterId: string, expectedRevision: number) {
+  const project = await prisma.project.findFirst({ where: { chapterId, ownerUserId } });
+  if (!project) throw new AppError("not_found", "一话不存在。", 404);
+  return restoreLatestSnapshot({ ownerUserId, projectId: project.id, chapterId, expectedRevision });
 }
 
 async function syncStoryboardBeatRecords(

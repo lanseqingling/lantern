@@ -1,0 +1,31 @@
+{
+  "name": "@lantern/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./agent-loop": "./src/agent-loop.ts",
+    "./capability-registry": "./src/capability-registry.ts",
+    "./context-builder": "./src/context-builder.ts",
+    "./conversation-service": "./src/conversation-service.ts",
+    "./interaction-service": "./src/interaction-service.ts",
+    "./local-task-runner": "./src/local-task-runner.ts",
+    "./orchestrator": "./src/orchestrator.ts",
+    "./providers/deepseek": "./src/providers/deepseek.ts",
+    "./providers/qwen-image": "./src/providers/qwen-image.ts",
+    "./providers/qwen-vision": "./src/providers/qwen-vision.ts",
+    "./schemas": "./src/schemas.ts",
+    "./task-service": "./src/task-service.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lantern/editor-core": "workspace:*",
+    "@lantern/server": "workspace:*",
+    "@lantern/shared": "workspace:*",
+    "@prisma/client": "6.19.3",
+    "sharp": "0.34.5",
+    "zod": "4.4.3"
+  }
+}

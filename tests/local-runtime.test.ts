@@ -10,10 +10,10 @@ import {
   consumeRuntimeStopRequest,
   ensureRuntimeLayout,
   requestRuntimeStop,
-} from "../packages/server/src/local-runtime";
-import { createRuntimeBackup, restoreRuntimeBackup } from "../packages/server/src/runtime-backup";
-import { defaultLanternDataDir, getRuntimePaths } from "../packages/server/src/runtime-paths";
-import { getConfig, resetConfigForTests } from "../packages/server/src/config";
+} from "@lantern/server/local-runtime";
+import { createRuntimeBackup, restoreRuntimeBackup } from "@lantern/server/runtime-backup";
+import { defaultLanternDataDir, getRuntimePaths } from "@lantern/server/runtime-paths";
+import { getConfig, resetConfigForTests } from "@lantern/server/config";
 import { initializeStarterData } from "../scripts/starter-data";
 
 test("platform data directories never default to the repository", () => {

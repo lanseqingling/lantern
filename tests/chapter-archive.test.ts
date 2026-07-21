@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { strToU8, unzipSync, zipSync } from "fflate";
-import { buildChapterArchive, parseChapterArchive } from "../packages/server/src/chapter-archive-service";
-import type { ComicDocument, StoryboardBeat } from "../packages/shared/src";
+import { buildChapterArchive, parseChapterArchive } from "@lantern/server/chapter-archive-service";
+import type { ComicDocument, StoryboardBeat } from "@lantern/shared";
 
 const storyboardBeat: StoryboardBeat = {
   id: "beat-1",

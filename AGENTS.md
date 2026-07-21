@@ -27,7 +27,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 
 | 路径 | 职责 |
 |---|---|
-| `app/`、`apps/` | Web 界面与 loopback API 入口。 |
+| `apps/web/`、`apps/api/` | Web 界面与 loopback API 入口。 |
 | `packages/shared/` | 跨端协议、schema 与共享领域类型。 |
 | `packages/editor-core/` | 与 UI 解耦的编辑 Capability、变更和快照能力。 |
 | `packages/agent-runtime/` | Agent 规划、上下文、工具与任务运行时。 |
@@ -35,12 +35,13 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 | `packages/` 其他目录 | 可复用的领域、渲染、布局、演示和 UI 模块。 |
 | `prisma/` | 数据模型与迁移。 |
 | `docs/` | 产品、交互、协议和 Agent 的正式文档。 |
-| `samples/`、`public/samples/` | 显式示例作品与静态素材。 |
+| `samples/`、`apps/web/public/samples/` | 显式示例作品与静态素材。 |
 | `scripts/`、`tests/` | 启动、构建、打包、诊断脚本与自动化验证。根目录 `lantern`/`lantern.cmd` 只提供薄命令入口。 |
 
 ## Architecture Boundaries
 
 - TypeScript 是应用与共享包的统一语言；共享契约只保留一个代码事实源。
+- Workspace 之间只能通过已声明的 `@lantern/*` 依赖和公开 `exports` 协作；不得跨包引用其他模块的 `src`、内部文件或依赖根目录偶然提升的第三方包。
 - Web 通过 API 访问服务端能力。路由负责请求解析、鉴权和响应边界，领域逻辑与持久化编排进入对应服务或领域包。
 - SQLite 保存作品和工作流事实；Local Task Runner 只负责唤醒与进程内并发，不能成为任务或作品事实源。
 - 图片等二进制内容进入用户数据目录中的本地对象存储；数据库与作品协议只保存稳定对象键和版本引用。
@@ -68,6 +69,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 - 生产命名使用稳定领域语义，不包含阶段、实验或示例作品名称。
 - 兼容代码必须有迁移目标和删除条件；数据库变化新增迁移，不改写已经提交的历史迁移。
 - 结构重构与行为扩展分开处理，避免在同一改动中顺带更换基础技术或重做无关界面。
+- 文件大小本身不是拆分依据；继续开发会让入口、路由或页面组件承担新的独立职责时，先把本次涉及的职责提取为可独立理解和测试的 service、hook 或 component，不顺带重构无关部分。
 
 ## Change Impact
 

@@ -1,39 +1,10 @@
-import Fastify from "fastify";
-import cors from "@fastify/cors";
-import multipart from "@fastify/multipart";
-import { getConfig } from "../../../packages/server/src/config";
-import { initializeDatabaseConnection, prisma } from "../../../packages/server/src/db";
-import { localTaskRunner } from "../../../packages/agent-runtime/src/local-task-runner";
-import { installErrorHandler } from "./http";
-import { registerAgentRoutes } from "./routes/agent";
-import { registerAssetRoutes } from "./routes/assets";
-import { registerComicRoutes } from "./routes/comics";
-import { registerExportRoutes } from "./routes/export";
-import { registerSystemRoutes } from "./routes/system";
-import { registerWorkbenchRoutes } from "./routes/workbench";
+import { getConfig } from "@lantern/server/config";
+import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
+import { localTaskRunner } from "@lantern/agent-runtime/local-task-runner";
+import { createApiApp } from "./app";
 
 const config = getConfig();
-const app = Fastify({
-  bodyLimit: 60 * 1024 * 1024,
-  logger: { redact: ["req.headers.authorization", "req.body.input", "req.body.contextSnapshot"] },
-});
-
-const loopbackWebOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/;
-
-await app.register(cors, {
-  origin: config.APP_ENV === "test" ? loopbackWebOriginPattern : config.WEB_ORIGIN,
-  credentials: true,
-  methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-});
-await app.register(multipart, { limits: { files: 1, fileSize: 50 * 1024 * 1024, fields: 12 } });
-
-installErrorHandler(app);
-registerSystemRoutes(app);
-registerComicRoutes(app);
-registerAssetRoutes(app);
-registerWorkbenchRoutes(app);
-registerAgentRoutes(app);
-registerExportRoutes(app);
+const app = await createApiApp();
 
 await initializeDatabaseConnection();
 await localTaskRunner.start();

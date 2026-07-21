@@ -1,0 +1,16 @@
+{
+  "name": "@lantern/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fixtures/storyboard-beats": "./fixtures/storyboardBeats.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  }
+}

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { planInteraction, type InteractionInput, type PlannedInteraction } from "../packages/agent-runtime/src/orchestrator";
+import { planInteraction, type InteractionInput, type PlannedInteraction } from "@lantern/agent-runtime/orchestrator";
 
 type ProbeCase = {
   name: string;

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -102,7 +102,14 @@ function runPnpm(args, options = {}) {
 
 function dependencyState() {
   const hash = createHash("sha256");
-  for (const filename of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
+  const workspaceManifests = ["apps", "packages"].flatMap((workspaceDirectory) => {
+    const absoluteDirectory = path.join(repositoryRoot, workspaceDirectory);
+    if (!existsSync(absoluteDirectory)) return [];
+    return readdirSync(absoluteDirectory, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(path.join(absoluteDirectory, entry.name, "package.json")))
+      .map((entry) => `${workspaceDirectory}/${entry.name}/package.json`);
+  });
+  for (const filename of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ...workspaceManifests].sort()) {
     hash.update(filename);
     hash.update(readFileSync(path.join(repositoryRoot, filename)));
   }

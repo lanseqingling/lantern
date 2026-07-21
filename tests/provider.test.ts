@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
-import { DeepSeekProvider } from "../packages/agent-runtime/src/providers/deepseek";
-import { QwenImageProvider } from "../packages/agent-runtime/src/providers/qwen-image";
-import { QwenVisionProvider } from "../packages/agent-runtime/src/providers/qwen-vision";
-import { planInteraction } from "../packages/agent-runtime/src/orchestrator";
-import { resetConfigForTests } from "../packages/server/src/config";
+import { DeepSeekProvider } from "@lantern/agent-runtime/providers/deepseek";
+import { QwenImageProvider } from "@lantern/agent-runtime/providers/qwen-image";
+import { QwenVisionProvider } from "@lantern/agent-runtime/providers/qwen-vision";
+import { planInteraction } from "@lantern/agent-runtime/orchestrator";
+import { resetConfigForTests } from "@lantern/server/config";
 
 test("DeepSeek adapter sends V4 JSON mode and validates the response", async () => {
   const originalFetch = globalThis.fetch;

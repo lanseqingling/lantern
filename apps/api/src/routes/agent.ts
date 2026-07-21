@@ -1,26 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { FastifyInstance } from "fastify";
-import { CandidateKind, CandidateStatus } from "@prisma/client";
 import { z } from "zod";
-import type { WorkspaceOperation } from "../../../../packages/shared/src";
 import {
   assertTaskCreationAllowed,
   createGenerationTask,
+  getGenerationTask,
   requestTaskCancellation,
   retryTask,
   type CreateTaskInput,
-} from "../../../../packages/agent-runtime/src/task-service";
-import { retryAgentInteraction, runAgentInteraction, type AgentImageAttachment } from "../../../../packages/agent-runtime/src/interaction-service";
-import { explicitWorkspaceReferencesSchema } from "../../../../packages/agent-runtime/src/schemas";
-import { applyAssetCandidate, assertFrameCandidateApplicationTarget } from "../../../../packages/server/src/candidate-service";
-import { isWorkbenchAgentCandidateVisible } from "../../../../packages/server/src/workbench-agent-visibility";
-import { prisma } from "../../../../packages/server/src/db";
-import { AppError } from "../../../../packages/server/src/errors";
-import {
-  commitChangeSet,
-  revertCandidateApplication,
-} from "../../../../packages/server/src/workbench-service";
+} from "@lantern/agent-runtime/task-service";
+import { retryAgentInteraction, runAgentInteraction, type AgentImageAttachment } from "@lantern/agent-runtime/interaction-service";
+import { resolveAgentMessage } from "@lantern/agent-runtime/conversation-service";
+import { explicitWorkspaceReferencesSchema } from "@lantern/agent-runtime/schemas";
+import { applyCandidate, discardCandidate } from "@lantern/server/candidate-service";
+import { revertCandidateApplication } from "@lantern/server/workbench-service";
 import { currentUser, ok, publicTask } from "../http";
 
 const selectionSchema = z.object({
@@ -120,11 +114,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { messageId: string } }>("/v1/agent-messages/:messageId/resolve", async (request) => {
     const user = await currentUser(request);
-    const message = await prisma.message.findFirst({ where: { id: request.params.messageId, ownerUserId: user.id } });
-    if (!message) throw new AppError("not_found", "交互卡片不存在。", 404);
-    const metadata = message.metadata as Record<string, unknown>;
-    await prisma.message.update({ where: { id: message.id }, data: { metadata: { ...metadata, resolved: true } } });
-    return ok(request, { id: message.id, resolved: true });
+    return ok(request, await resolveAgentMessage(user.id, request.params.messageId));
   });
 
   app.post<{ Params: { messageId: string }; Body: { idempotencyKey?: string } }>("/v1/agent-messages/:messageId/retry", async (request) => {
@@ -157,8 +147,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { taskId: string } }>("/v1/tasks/:taskId", async (request) => {
     const user = await currentUser(request);
-    const task = await prisma.generationTask.findFirst({ where: { id: request.params.taskId, ownerUserId: user.id }, include: { attempts: { orderBy: { attempt: "asc" } }, candidates: true } });
-    if (!task) throw new AppError("not_found", "任务不存在。", 404);
+    const task = await getGenerationTask(user.id, request.params.taskId);
     return ok(request, { ...publicTask(task), attempts: task.attempts, candidates: task.candidates });
   });
 
@@ -174,42 +163,12 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { candidateId: string }; Body: { expectedWorkingRevision: number; expectedFrameTarget?: { unitId: string; frameId: string } } }>("/v1/candidates/:candidateId/apply", async (request) => {
     const user = await currentUser(request);
-    const candidate = await prisma.candidate.findFirst({ where: { id: request.params.candidateId, ownerUserId: user.id } });
-    if (!candidate) throw new AppError("not_found", "候选不存在。", 404);
-    const payload = candidate.payload && typeof candidate.payload === "object" && !Array.isArray(candidate.payload)
-      ? candidate.payload as Record<string, unknown>
-      : {};
-    if (!isWorkbenchAgentCandidateVisible(candidate.kind, payload)) throw new AppError("validation", "这个候选不属于当前 Agent 能力范围。", 422);
-    if (candidate.kind === CandidateKind.ASSET) return ok(request, await applyAssetCandidate(user.id, candidate.id, request.body.expectedWorkingRevision));
-    assertFrameCandidateApplicationTarget(candidate.kind, candidate.target, candidate.operations, request.body.expectedFrameTarget);
-    const working = await prisma.workingRevision.findFirst({ where: { projectId: candidate.projectId }, orderBy: { revision: "desc" } });
-    if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
-    if (candidate.status !== CandidateStatus.AVAILABLE || candidate.baseRevision !== working.revision || request.body.expectedWorkingRevision !== working.revision) {
-      if (candidate.status === CandidateStatus.AVAILABLE) await prisma.candidate.update({ where: { id: candidate.id }, data: { status: CandidateStatus.STALE } });
-      throw new AppError("conflict", "候选基于较早的工作稿，请按当前内容重新生成。", 409, { currentRevision: working.revision });
-    }
-    const operations = candidate.operations as unknown as WorkspaceOperation[];
-    return ok(request, await commitChangeSet({
-      ownerUserId: user.id,
-      projectId: candidate.projectId,
-      expectedRevision: request.body.expectedWorkingRevision,
-      candidateId: candidate.id,
-      changeSet: {
-        id: `candidate:${candidate.id}`,
-        projectId: candidate.projectId,
-        baseRevision: candidate.baseRevision,
-        source: "candidate",
-        sourceCandidateId: candidate.id,
-        commands: operations,
-      },
-    }));
+    return ok(request, await applyCandidate(user.id, request.params.candidateId, request.body));
   });
 
   app.post<{ Params: { candidateId: string } }>("/v1/candidates/:candidateId/discard", async (request) => {
     const user = await currentUser(request);
-    const result = await prisma.candidate.updateMany({ where: { id: request.params.candidateId, ownerUserId: user.id, status: CandidateStatus.AVAILABLE }, data: { status: CandidateStatus.DISCARDED } });
-    if (!result.count) throw new AppError("conflict", "候选已不可丢弃。", 409);
-    return ok(request, { status: "discarded" });
+    return ok(request, await discardCandidate(user.id, request.params.candidateId));
   });
 
   app.post<{ Params: { candidateId: string } }>("/v1/candidates/:candidateId/revert", async (request) => {

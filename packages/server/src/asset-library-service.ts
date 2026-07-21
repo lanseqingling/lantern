@@ -171,6 +171,18 @@ export async function appendAssetImage(ownerUserId: string, assetId: string, upl
   return getAssetFamilyDetail(ownerUserId, assetId);
 }
 
+export async function updateAsset(ownerUserId: string, assetId: string, input: { name?: string; description?: string }) {
+  const asset = await prisma.asset.findFirst({ where: { id: assetId, ownerUserId, archivedAt: null } });
+  if (!asset) throw new AppError("not_found", "资产不存在。", 404);
+  return prisma.asset.update({
+    where: { id: asset.id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+    },
+  });
+}
+
 export async function setPrimaryAssetImage(ownerUserId: string, assetId: string, imageId: string) {
   await requireOwnedLibraryAsset(ownerUserId, assetId);
   const image = await prisma.assetImage.findFirst({ where: { id: imageId, assetId }, select: { id: true } });

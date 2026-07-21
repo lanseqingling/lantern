@@ -6,7 +6,7 @@ import {
   imageViewerIndex,
   imageViewerWheelZoomDelta,
   imageViewerZoomStep,
-} from "../app/lib/image-viewer";
+} from "../apps/web/app/lib/image-viewer";
 
 test("图片查看器适应窗口时不会放大小图", () => {
   assert.equal(imageViewerFitScale({ width: 400, height: 300 }, { width: 1200, height: 800 }), 1);

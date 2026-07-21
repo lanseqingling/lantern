@@ -182,7 +182,9 @@ Web (React / Vinext)
       -> Local Object Storage
 ```
 
+- `apps/web` 是浏览器工作台，`apps/api` 是只监听 loopback 的本地 API 服务。
 - `packages/shared` 提供 LCD、工作区命令和共享契约。
 - `packages/editor-core` 与 `packages/layout-engine` 提供确定性编辑和页面布局能力。
 - `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 负责 Agent 上下文、任务和模型适配。
+- Workspace 模块通过各自 `package.json` 的公开 `exports` 协作，不跨目录引用其他包的 `src` 实现。
 - Web UI、产品内 Agent 和外置 Agent 共享领域 Capability，不各自复制作品写入规则。

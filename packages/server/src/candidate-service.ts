@@ -1,7 +1,9 @@
 import { AssetKind, CandidateKind, CandidateStatus, type Prisma } from "@prisma/client";
-import { normalizeStoryboardBeats } from "../../shared/src";
+import { normalizeStoryboardBeats, type WorkspaceOperation } from "@lantern/shared";
 import { prisma } from "./db";
 import { AppError } from "./errors";
+import { isWorkbenchAgentCandidateVisible } from "./workbench-agent-visibility";
+import { commitChangeSet } from "./workbench-service";
 
 type FrameCandidateApplicationTarget = { unitId: string; frameId: string };
 
@@ -106,4 +108,42 @@ export async function applyAssetCandidate(userId: string, candidateId: string, e
     });
     return { asset, revision: next.revision };
   }, { isolationLevel: "Serializable" });
+}
+
+export async function applyCandidate(ownerUserId: string, candidateId: string, input: { expectedWorkingRevision: number; expectedFrameTarget?: FrameCandidateApplicationTarget }) {
+  const candidate = await prisma.candidate.findFirst({ where: { id: candidateId, ownerUserId } });
+  if (!candidate) throw new AppError("not_found", "候选不存在。", 404);
+  const payload = candidate.payload && typeof candidate.payload === "object" && !Array.isArray(candidate.payload)
+    ? candidate.payload as Record<string, unknown>
+    : {};
+  if (!isWorkbenchAgentCandidateVisible(candidate.kind, payload)) throw new AppError("validation", "这个候选不属于当前 Agent 能力范围。", 422);
+  if (candidate.kind === CandidateKind.ASSET) return applyAssetCandidate(ownerUserId, candidate.id, input.expectedWorkingRevision);
+  assertFrameCandidateApplicationTarget(candidate.kind, candidate.target, candidate.operations, input.expectedFrameTarget);
+  const working = await prisma.workingRevision.findFirst({ where: { projectId: candidate.projectId }, orderBy: { revision: "desc" } });
+  if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
+  if (candidate.status !== CandidateStatus.AVAILABLE || candidate.baseRevision !== working.revision || input.expectedWorkingRevision !== working.revision) {
+    if (candidate.status === CandidateStatus.AVAILABLE) await prisma.candidate.update({ where: { id: candidate.id }, data: { status: CandidateStatus.STALE } });
+    throw new AppError("conflict", "候选基于较早的工作稿，请按当前内容重新生成。", 409, { currentRevision: working.revision });
+  }
+  const operations = candidate.operations as unknown as WorkspaceOperation[];
+  return commitChangeSet({
+    ownerUserId,
+    projectId: candidate.projectId,
+    expectedRevision: input.expectedWorkingRevision,
+    candidateId: candidate.id,
+    changeSet: {
+      id: `candidate:${candidate.id}`,
+      projectId: candidate.projectId,
+      baseRevision: candidate.baseRevision,
+      source: "candidate",
+      sourceCandidateId: candidate.id,
+      commands: operations,
+    },
+  });
+}
+
+export async function discardCandidate(ownerUserId: string, candidateId: string) {
+  const result = await prisma.candidate.updateMany({ where: { id: candidateId, ownerUserId, status: CandidateStatus.AVAILABLE }, data: { status: CandidateStatus.DISCARDED } });
+  if (!result.count) throw new AppError("conflict", "候选已不可丢弃。", 409);
+  return { status: "discarded" };
 }

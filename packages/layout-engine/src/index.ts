@@ -9,8 +9,8 @@ import type {
   ResourceBinding,
   StoryboardBeat,
   TextLayer,
-} from "../../shared/src/lcd/types";
-import { validateComicDocument } from "../../shared/src/lcd/schema";
+} from "@lantern/shared";
+import { validateComicDocument } from "@lantern/shared";
 
 export type ChapterLayoutPlan = {
   format: ComicFormat;

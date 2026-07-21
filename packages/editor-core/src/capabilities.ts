@@ -25,7 +25,7 @@ import {
   deriveLocalTransform,
   orderedUnitSurfaces,
   resolveLocalTransform,
-} from "../../shared/src";
+} from "@lantern/shared";
 
 export type CapabilityScope = "element" | "frame" | "unit" | "chapter";
 export type CapabilityHumanEntry = "available" | "planned" | "exception";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildFrameImageChoices } from "../app/lib/frame-image-choices";
-import type { ComicPage, ImageElement } from "../packages/shared/src";
+import { buildFrameImageChoices } from "../apps/web/app/lib/frame-image-choices";
+import type { ComicPage, ImageElement } from "@lantern/shared";
 
 const image = (input: Pick<ImageElement, "id" | "assetId" | "assetVersionId" | "location">): ImageElement => ({
   ...input,

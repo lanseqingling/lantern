@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rainyStationStoryboardBeats } from "../packages/shared/fixtures/storyboardBeats";
-import { balloonCutCornerPoints, createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "../packages/shared/src";
-import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "../packages/editor-core/src";
-import { createInitialFixture, fourPanelPlan, previewFixtures } from "../packages/demo-runtime/src";
-import { compileChapterLayoutPlan } from "../packages/layout-engine/src";
-import { isAssetVisibleInAssetSpace } from "../app/lib/asset-kind";
-import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../app/lib/editor-snapping";
+import { rainyStationStoryboardBeats } from "@lantern/shared/fixtures/storyboard-beats";
+import { balloonCutCornerPoints, createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "@lantern/shared";
+import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
+import { createInitialFixture, fourPanelPlan, previewFixtures } from "@lantern/demo-runtime";
+import { compileChapterLayoutPlan } from "@lantern/layout-engine";
+import { isAssetVisibleInAssetSpace } from "../apps/web/app/lib/asset-kind";
+import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../apps/web/app/lib/editor-snapping";
 
 test("generated frame images stay saveable until converted into an asset-space type", () => {
   assert.equal(isAssetVisibleInAssetSpace({ kind: "generated_image", libraryStatus: "library" }), false);

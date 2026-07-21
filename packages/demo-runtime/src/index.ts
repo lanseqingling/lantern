@@ -1,6 +1,6 @@
-import { rainyStationContinuationBeats, rainyStationStoryboardBeats } from "../../shared/fixtures/storyboardBeats";
-import type { WorkbenchFixture, WorkingEnvelope } from "../../shared/src";
-import { compileChapterLayoutPlan, resolvedResourcesForDocument, type ChapterLayoutPlan } from "../../layout-engine/src";
+import { rainyStationContinuationBeats, rainyStationStoryboardBeats } from "@lantern/shared/fixtures/storyboard-beats";
+import type { WorkbenchFixture, WorkingEnvelope } from "@lantern/shared";
+import { compileChapterLayoutPlan, resolvedResourcesForDocument, type ChapterLayoutPlan } from "@lantern/layout-engine";
 
 const fixtureCreatedAt = "2026-07-10T08:00:00.000Z";
 

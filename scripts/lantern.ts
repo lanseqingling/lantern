@@ -5,7 +5,7 @@ import { access, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { getConfig, resetConfigForTests } from "../packages/server/src/config";
+import { getConfig, resetConfigForTests } from "@lantern/server/config";
 import {
   acquireRuntimeLock,
   consumeRuntimeStopRequest,
@@ -13,8 +13,8 @@ import {
   requestRuntimeStop,
   resetRuntimeTemp,
   runtimeOwner,
-} from "../packages/server/src/local-runtime";
-import { getRuntimePaths } from "../packages/server/src/runtime-paths";
+} from "@lantern/server/local-runtime";
+import { getRuntimePaths } from "@lantern/server/runtime-paths";
 import { initializeRuntime, repositoryRoot, runCommand, runPrismaCommand } from "./runtime-init";
 
 type Command = "start" | "dev" | "stop" | "status" | "doctor" | "sample:init" | "backup:create" | "backup:restore";
@@ -31,10 +31,10 @@ function spawnService(
   args: string[],
   env: Record<string, string | undefined>,
   logFile: string,
-  options: { ipc?: boolean } = {},
+  options: { ipc?: boolean; cwd?: string } = {},
 ): ManagedService {
   const child = spawn(process.execPath, args, {
-    cwd: repositoryRoot,
+    cwd: options.cwd ?? repositoryRoot,
     env: { ...process.env, ...env },
     stdio: options.ipc ? ["inherit", "pipe", "pipe", "ipc"] : ["inherit", "pipe", "pipe"],
     windowsHide: true,
@@ -169,8 +169,9 @@ async function runServices(mode: "start" | "dev") {
     if (stopping) return;
     resetConfigForTests();
     const config = getConfig();
+    const webRoot = path.join(repositoryRoot, "apps", "web");
     if (mode === "start") {
-      const productionEntry = path.join(repositoryRoot, "dist", "server", "index.js");
+      const productionEntry = path.join(webRoot, "dist", "server", "index.js");
       if (!await access(productionEntry).then(() => true).catch(() => false)) await runCommand(["build"]);
     }
 
@@ -194,7 +195,7 @@ async function runServices(mode: "start" | "dev") {
       : [vinextCli, "start", "--hostname", "localhost", "--port", String(config.WEB_PORT)];
     services.push(
       spawnService(apiArgs, sharedEnv, path.join(paths.logsDir, "api.log"), { ipc: true }),
-      spawnService(webArgs, sharedEnv, path.join(paths.logsDir, "web.log")),
+      spawnService(webArgs, sharedEnv, path.join(paths.logsDir, "web.log"), { cwd: webRoot }),
     );
     acceptStopRequests = true;
     void checkStopRequest();
@@ -290,7 +291,7 @@ async function doctor() {
   let checkedObjects = 0;
   let missingObjects = 0;
   let damagedObjects = 0;
-  const { initializeDatabaseConnection, prisma } = await import("../packages/server/src/db");
+  const { initializeDatabaseConnection, prisma } = await import("@lantern/server/db");
   try {
     await initializeDatabaseConnection();
     const integrity = await prisma.$queryRawUnsafe<Array<{ integrity_check: string }>>("PRAGMA integrity_check");
@@ -370,7 +371,7 @@ async function withExclusiveRuntime<T>(operation: (paths: ReturnType<typeof getR
 async function createBackup() {
   await withExclusiveRuntime(async (paths) => {
     await initializeRuntime({ seedIfEmpty: false });
-    const { createRuntimeBackup } = await import("../packages/server/src/runtime-backup");
+    const { createRuntimeBackup } = await import("@lantern/server/runtime-backup");
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string };
     const result = await createRuntimeBackup(paths, {
       lanternVersion: packageJson.version,
@@ -385,7 +386,7 @@ async function restoreBackup() {
   if (!backupFile) throw new Error("Usage: lantern backup:restore <backup-file>");
   await withExclusiveRuntime(async (paths) => {
     await initializeRuntime({ seedIfEmpty: false });
-    const { restoreRuntimeBackup } = await import("../packages/server/src/runtime-backup");
+    const { restoreRuntimeBackup } = await import("@lantern/server/runtime-backup");
     const manifest = await restoreRuntimeBackup(paths, backupFile, {
       prepareDatabase: async (databaseFile) => runPrismaCommand(["migrate", "deploy"], {
         ...process.env,
@@ -399,7 +400,7 @@ async function restoreBackup() {
 
 async function initializeSample() {
   const paths = await initializeRuntime({ seedIfEmpty: false });
-  const { initializeDatabaseConnection, prisma } = await import("../packages/server/src/db");
+  const { initializeDatabaseConnection, prisma } = await import("@lantern/server/db");
   const { initializeStarterData } = await import("./starter-data");
   await initializeDatabaseConnection();
   try {

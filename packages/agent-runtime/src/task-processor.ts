@@ -8,11 +8,11 @@ import {
   TaskType,
   type Prisma,
 } from "@prisma/client";
-import { planEditorCapabilities } from "../../editor-core/src";
-import { normalizeStoryboardBeats, validateComicDocument, type WorkspaceOperation } from "../../shared/src";
-import { prisma } from "../../server/src/db";
-import { AppError } from "../../server/src/errors";
-import { getObject, putImage } from "../../server/src/object-storage";
+import { planEditorCapabilities } from "@lantern/editor-core";
+import { normalizeStoryboardBeats, validateComicDocument, type WorkspaceOperation } from "@lantern/shared";
+import { prisma } from "@lantern/server/db";
+import { AppError } from "@lantern/server/errors";
+import { getObject, putImage } from "@lantern/server/object-storage";
 import { DeepSeekProvider } from "./providers/deepseek";
 import { QwenImageProvider } from "./providers/qwen-image";
 import {

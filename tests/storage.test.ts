@@ -3,9 +3,9 @@ import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSignedAssetPath, verifySignedAssetPath } from "../packages/server/src/signed-assets";
-import { assertSupportedUpload, getObject, putImage } from "../packages/server/src/object-storage";
-import { resetConfigForTests } from "../packages/server/src/config";
+import { createSignedAssetPath, verifySignedAssetPath } from "@lantern/server/signed-assets";
+import { assertSupportedUpload, getObject, putImage } from "@lantern/server/object-storage";
+import { resetConfigForTests } from "@lantern/server/config";
 
 test("private object signatures expire and reject tampering", () => {
   process.env.LANTERN_LOCAL_TOKEN = "test-session-secret-at-least-32-characters";

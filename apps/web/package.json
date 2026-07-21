@@ -1,0 +1,21 @@
+{
+  "name": "@lantern/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lantern/demo-runtime": "workspace:*",
+    "@lantern/editor-core": "workspace:*",
+    "@lantern/server": "workspace:*",
+    "@lantern/shared": "workspace:*",
+    "@lantern/ui": "workspace:*",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  }
+}

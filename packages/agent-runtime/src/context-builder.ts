@@ -1,8 +1,8 @@
 import { AssetKind, AssetLibraryStatus } from "@prisma/client";
-import { prisma } from "../../server/src/db";
-import { AppError } from "../../server/src/errors";
+import { prisma } from "@lantern/server/db";
+import { AppError } from "@lantern/server/errors";
 import { agentContextSnapshotSchema, workspaceRefSchema, type WorkspaceReference } from "./schemas";
-import { createComicPageViews, normalizeStoryboardBeats, unitElements, validateComicDocument, type ComicPage, type StoryboardBeat } from "../../shared/src";
+import { createComicPageViews, normalizeStoryboardBeats, unitElements, validateComicDocument, type ComicPage, type StoryboardBeat } from "@lantern/shared";
 
 export type ContextSelection = { type: string; id?: string; pageId?: string; label?: string; canvasX?: number; canvasY?: number };
 
@@ -519,6 +519,7 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
     }),
   ]);
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
+  if (request.conversationId && !conversation) throw new AppError("not_found", "当前对话不存在。", 404);
 
   const document = validateComicDocument(working.document);
   const storyboardBeats = normalizeStoryboardBeats(working.storyboardBeats);

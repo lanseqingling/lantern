@@ -1,5 +1,5 @@
 import { TaskStatus } from "@prisma/client";
-import { prisma } from "../../server/src/db";
+import { prisma } from "@lantern/server/db";
 import { processGenerationTask } from "./task-processor";
 
 export type LocalTaskRunnerState = "stopped" | "recovering" | "running" | "stopping";

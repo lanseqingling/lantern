@@ -1,6 +1,6 @@
 import { ZodError, type z } from "zod";
-import { getConfig } from "../../../server/src/config";
-import { AppError, safeProviderError } from "../../../server/src/errors";
+import { getConfig } from "@lantern/server/config";
+import { AppError, safeProviderError } from "@lantern/server/errors";
 
 type JsonRequest<T extends z.ZodType> = {
   schema: T;

@@ -1,9 +1,163 @@
 import { randomUUID } from "node:crypto";
-import { type ComicFormat, type Prisma } from "@prisma/client";
-import type { ComicDocument } from "../../shared/src";
+import { ComicFormat, TaskStatus, type Prisma } from "@prisma/client";
+import type { ComicDocument } from "@lantern/shared";
+import type { UploadedImage } from "./asset-service";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 import { getObject, putImage } from "./object-storage";
+
+type ComicListCursor = { updatedAt: string; id: string };
+type ComicWithChapters = Prisma.ComicGetPayload<{ include: { chapters: true } }>;
+
+const activeDeletionTaskStatuses = [TaskStatus.CREATED, TaskStatus.QUEUED, TaskStatus.RUNNING];
+
+function comicCoverPath(comic: { id: string; coverObjectKey: string | null; updatedAt: Date }) {
+  return comic.coverObjectKey ? `/v1/comics/${encodeURIComponent(comic.id)}/cover?v=${comic.updatedAt.getTime()}` : undefined;
+}
+
+function chapterCoverPath(chapter: { id: string; coverObjectKey: string | null; updatedAt: Date }) {
+  return chapter.coverObjectKey ? `/v1/chapters/${encodeURIComponent(chapter.id)}/cover?v=${chapter.updatedAt.getTime()}` : undefined;
+}
+
+function encodeComicCursor(comic: { updatedAt: Date; id: string }) {
+  return Buffer.from(JSON.stringify({ updatedAt: comic.updatedAt.toISOString(), id: comic.id } satisfies ComicListCursor)).toString("base64url");
+}
+
+function decodeComicCursor(value?: string) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as ComicListCursor;
+    if (!parsed.id || Number.isNaN(Date.parse(parsed.updatedAt))) throw new Error("invalid cursor");
+    return parsed;
+  } catch {
+    throw new AppError("validation", "漫画列表游标无效。", 400);
+  }
+}
+
+function publicComic(comic: ComicWithChapters) {
+  return {
+    id: comic.id,
+    title: comic.title,
+    summary: comic.summary,
+    worldSummary: comic.worldSummary,
+    styleSummary: comic.styleSummary,
+    format: comic.format.toLowerCase(),
+    canvasPageMode: comic.canvasPageMode.toLowerCase(),
+    coverUrl: comicCoverPath(comic),
+    chapters: comic.chapters.map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title, summary: chapter.summary, coverUrl: chapterCoverPath(chapter), updatedAt: chapter.updatedAt.toISOString() })),
+    updatedAt: comic.updatedAt.toISOString(),
+  };
+}
+
+export async function listComics(ownerUserId: string, input: { cursor?: string; limit?: number } = {}) {
+  const cursor = decodeComicCursor(input.cursor);
+  const limit = Math.min(50, Math.max(1, input.limit ?? 20));
+  const comics = await prisma.comic.findMany({
+    where: {
+      ownerUserId,
+      archivedAt: null,
+      ...(cursor ? { OR: [{ updatedAt: { lt: new Date(cursor.updatedAt) } }, { updatedAt: new Date(cursor.updatedAt), id: { lt: cursor.id } }] } : {}),
+    },
+    include: { chapters: { where: { archivedAt: null }, orderBy: { number: "asc" } } },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+  });
+  const hasMore = comics.length > limit;
+  const page = comics.slice(0, limit);
+  return { items: page.map(publicComic), nextCursor: hasMore ? encodeComicCursor(page.at(-1)!) : null };
+}
+
+export async function getComic(ownerUserId: string, comicId: string) {
+  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null }, include: { chapters: { where: { archivedAt: null }, orderBy: { number: "asc" } } } });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  return publicComic(comic);
+}
+
+export async function createComic(ownerUserId: string, input: { title: string; summary: string; worldSummary?: string; styleSummary?: string; format: "page" | "vertical" | "four_panel"; canvasPageMode: "single" | "spread" }) {
+  const format = ({ page: ComicFormat.PAGE, vertical: ComicFormat.VERTICAL, four_panel: ComicFormat.FOUR_PANEL } as const)[input.format];
+  const comic = await prisma.comic.create({ data: { ownerUserId, title: input.title, summary: input.summary, worldSummary: input.worldSummary ?? "", styleSummary: input.styleSummary ?? "", format, canvasPageMode: input.canvasPageMode === "spread" ? "SPREAD" : "SINGLE" } });
+  return { comic: { id: comic.id, title: comic.title } };
+}
+
+export async function updateComic(ownerUserId: string, comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; canvasPageMode?: "single" | "spread" }) {
+  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  return prisma.comic.update({ where: { id: comic.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}), ...(input.worldSummary !== undefined ? { worldSummary: input.worldSummary } : {}), ...(input.styleSummary !== undefined ? { styleSummary: input.styleSummary } : {}), ...(input.canvasPageMode !== undefined ? { canvasPageMode: input.canvasPageMode === "spread" ? "SPREAD" : "SINGLE" } : {}) } });
+}
+
+export async function getComicCover(ownerUserId: string, comicId: string) {
+  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
+  if (!comic?.coverObjectKey || !comic.coverContentType) throw new AppError("not_found", "漫画封面不存在。", 404);
+  return { bytes: await getObject(comic.coverObjectKey), contentType: comic.coverContentType };
+}
+
+export async function updateComicCover(ownerUserId: string, comicId: string, uploaded: UploadedImage) {
+  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  const updated = await prisma.comic.update({ where: { id: comic.id }, data: { coverObjectKey: uploaded.stored.objectKey, coverContentType: uploaded.contentType, coverWidth: uploaded.stored.width, coverHeight: uploaded.stored.height } });
+  return { coverUrl: comicCoverPath(updated) };
+}
+
+export async function createComicChapter(ownerUserId: string, comicId: string, input: { title: string; summary: string }) {
+  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  const last = await prisma.chapter.findFirst({ where: { comicId: comic.id }, orderBy: { number: "desc" } });
+  return createChapterWorkspace(ownerUserId, comic, (last?.number ?? 0) + 1, input.title, input.summary);
+}
+
+export async function updateComicChapter(ownerUserId: string, comicId: string, chapterId: string, input: { title?: string; summary?: string }) {
+  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, comicId, ownerUserId, archivedAt: null, comic: { archivedAt: null } } });
+  if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
+  return prisma.chapter.update({ where: { id: chapter.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}) } });
+}
+
+export async function getChapterCover(ownerUserId: string, chapterId: string) {
+  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, ownerUserId, archivedAt: null, comic: { archivedAt: null } } });
+  if (!chapter?.coverObjectKey || !chapter.coverContentType) throw new AppError("not_found", "章节封面不存在。", 404);
+  return { bytes: await getObject(chapter.coverObjectKey), contentType: chapter.coverContentType };
+}
+
+export async function updateChapterCover(ownerUserId: string, comicId: string, chapterId: string, uploaded: UploadedImage) {
+  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, comicId, ownerUserId, archivedAt: null, comic: { archivedAt: null } } });
+  if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
+  const updated = await prisma.chapter.update({ where: { id: chapter.id }, data: { coverObjectKey: uploaded.stored.objectKey, coverContentType: uploaded.contentType, coverWidth: uploaded.stored.width, coverHeight: uploaded.stored.height } });
+  return { coverUrl: chapterCoverPath(updated) };
+}
+
+export async function assertComicChapterExists(ownerUserId: string, comicId: string, chapterId: string) {
+  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, comicId, ownerUserId, archivedAt: null, comic: { archivedAt: null } }, select: { id: true } });
+  if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
+  return chapter;
+}
+
+export async function archiveComic(ownerUserId: string, comicId: string) {
+  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null }, include: { chapters: { where: { archivedAt: null }, include: { project: true } } } });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  const projectIds = comic.chapters.flatMap((chapter) => chapter.project?.id ? [chapter.project.id] : []);
+  const activeTask = projectIds.length ? await prisma.generationTask.findFirst({ where: { ownerUserId, projectId: { in: projectIds }, status: { in: activeDeletionTaskStatuses } }, orderBy: { createdAt: "desc" } }) : null;
+  if (activeTask) throw new AppError("task_in_progress", "请先停止这部漫画中的运行任务，再删除漫画。", 409, { taskId: activeTask.id });
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.comic.update({ where: { id: comic.id }, data: { archivedAt: now } }),
+    prisma.chapter.updateMany({ where: { comicId: comic.id, ownerUserId, archivedAt: null }, data: { archivedAt: now } }),
+    prisma.agentConversation.updateMany({ where: { ownerUserId, projectId: { in: projectIds }, archivedAt: null }, data: { archivedAt: now } }),
+  ]);
+  return { id: comic.id, deleted: true };
+}
+
+export async function archiveComicChapter(ownerUserId: string, comicId: string, chapterId: string) {
+  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, comicId, ownerUserId, archivedAt: null, comic: { archivedAt: null } }, include: { project: true } });
+  if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
+  const activeTask = chapter.project ? await prisma.generationTask.findFirst({ where: { ownerUserId, projectId: chapter.project.id, status: { in: activeDeletionTaskStatuses } }, orderBy: { createdAt: "desc" } }) : null;
+  if (activeTask) throw new AppError("task_in_progress", "请先停止这一话中的运行任务，再删除章节。", 409, { taskId: activeTask.id });
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.chapter.update({ where: { id: chapter.id }, data: { archivedAt: now } }),
+    prisma.comic.update({ where: { id: comicId }, data: { updatedAt: now } }),
+    ...(chapter.project ? [prisma.agentConversation.updateMany({ where: { ownerUserId, projectId: chapter.project.id, archivedAt: null }, data: { archivedAt: now } })] : []),
+  ]);
+  return { id: chapter.id, deleted: true };
+}
 
 function blankComicDocument(comicId: string, chapterId: string, format: "page" | "vertical" | "four_panel"): ComicDocument {
   return {

@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ensureRuntimeLayout } from "../packages/server/src/local-runtime";
-import { getRuntimePaths } from "../packages/server/src/runtime-paths";
+import { ensureRuntimeLayout } from "@lantern/server/local-runtime";
+import { getRuntimePaths } from "@lantern/server/runtime-paths";
 import { prismaClientReady, prismaSchemaState, recordPrismaClientState } from "./prisma-client-state.mjs";
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,7 +60,7 @@ export async function initializeRuntime(options: { seedIfEmpty?: boolean; forceG
   }
   await runPrismaCommand(["migrate", "deploy"], runtimeEnv);
 
-  const { initializeDatabaseConnection, prisma } = await import("../packages/server/src/db");
+  const { initializeDatabaseConnection, prisma } = await import("@lantern/server/db");
   await initializeDatabaseConnection();
   try {
     if (options.seedIfEmpty !== false) {

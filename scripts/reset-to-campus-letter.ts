@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
-import { prisma } from "../packages/server/src/db";
-import { getRuntimePaths } from "../packages/server/src/runtime-paths";
+import { prisma } from "@lantern/server/db";
+import { getRuntimePaths } from "@lantern/server/runtime-paths";
 import { seedCampusLetter } from "../samples/campus-letter/seed";
 
 async function resetToCampusLetter() {

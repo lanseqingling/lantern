@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findAvailableFrameImageCandidateForTask, isCandidatePreviewTargetVisible, resolveReadingUnitIndex, resolveWorkbenchPageIndex } from "../app/lib/workbench-location";
+import { findAvailableFrameImageCandidateForTask, isCandidatePreviewTargetVisible, resolveReadingUnitIndex, resolveWorkbenchPageIndex } from "../apps/web/app/lib/workbench-location";
 
 const units = [{ id: "page-a" }, { id: "page-b" }, { id: "page-c" }];
 

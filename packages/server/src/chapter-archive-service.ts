@@ -12,7 +12,7 @@ import {
   type ChapterArchiveResource,
   type ComicDocument,
   type StoryboardBeat,
-} from "../../shared/src";
+} from "@lantern/shared";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 import { deleteObject, getObject, putImage, type StoredObject } from "./object-storage";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Frame } from "../packages/shared/src";
-import type { StoredObject } from "../packages/server/src/object-storage";
+import type { Frame } from "@lantern/shared";
+import type { StoredObject } from "@lantern/server/object-storage";
 import { buildCampusLetterDocument } from "../samples/campus-letter/seed";
 import { buildRainyStationDocument } from "../samples/rainy-station/seed";
 

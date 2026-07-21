@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CandidateKind, TaskType } from "@prisma/client";
-import { runAgentLoop, type AgentLoopCheckpoint } from "../packages/agent-runtime/src/agent-loop";
-import { getAgentCapability } from "../packages/agent-runtime/src/capability-registry";
-import { normalizeSelectionForCurrentView } from "../packages/agent-runtime/src/context-builder";
-import { guardInteractionPlan, type InteractionInput } from "../packages/agent-runtime/src/orchestrator";
-import { assetDraftSchema, explicitDialogueReferenceSchema, explicitWorkspaceReferencesSchema, interactionPlanSchema, parseCandidatePayload, type InteractionPlan } from "../packages/agent-runtime/src/schemas";
-import { assertTaskCreationAllowed, type CreateTaskInput } from "../packages/agent-runtime/src/task-service";
-import { assertFrameCandidateApplicationTarget } from "../packages/server/src/candidate-service";
-import { isWorkbenchAgentCandidateVisible, workbenchAgentCandidateKinds, workbenchAgentTaskTypes } from "../packages/server/src/workbench-agent-visibility";
+import { runAgentLoop, type AgentLoopCheckpoint } from "@lantern/agent-runtime/agent-loop";
+import { getAgentCapability } from "@lantern/agent-runtime/capability-registry";
+import { normalizeSelectionForCurrentView } from "@lantern/agent-runtime/context-builder";
+import { guardInteractionPlan, type InteractionInput } from "@lantern/agent-runtime/orchestrator";
+import { assetDraftSchema, explicitDialogueReferenceSchema, explicitWorkspaceReferencesSchema, interactionPlanSchema, parseCandidatePayload, type InteractionPlan } from "@lantern/agent-runtime/schemas";
+import { assertTaskCreationAllowed, type CreateTaskInput } from "@lantern/agent-runtime/task-service";
+import { assertFrameCandidateApplicationTarget } from "@lantern/server/candidate-service";
+import { isWorkbenchAgentCandidateVisible, workbenchAgentCandidateKinds, workbenchAgentTaskTypes } from "@lantern/server/workbench-agent-visibility";
 
 function guardedDecision(input: InteractionInput, plan: InteractionPlan) {
   const route = guardInteractionPlan(input, plan);

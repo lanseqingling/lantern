@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fitVerticalNavigatorPaper, fitVerticalViewportWidth, nextVerticalViewportMode, verticalNavigatorWindow } from "../app/lib/vertical-workspace";
+import { fitVerticalNavigatorPaper, fitVerticalViewportWidth, nextVerticalViewportMode, verticalNavigatorWindow } from "../apps/web/app/lib/vertical-workspace";
 
 test("device viewport modes cycle through the compact preset set", () => {
   assert.equal(nextVerticalViewportMode("off"), "phone");

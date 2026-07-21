@@ -1,6 +1,6 @@
-import { initializeDatabaseConnection, prisma } from "../packages/server/src/db";
-import { ensureRuntimeLayout } from "../packages/server/src/local-runtime";
-import { getRuntimePaths } from "../packages/server/src/runtime-paths";
+import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
+import { ensureRuntimeLayout } from "@lantern/server/local-runtime";
+import { getRuntimePaths } from "@lantern/server/runtime-paths";
 import { initializeStarterData } from "../scripts/starter-data";
 
 try {

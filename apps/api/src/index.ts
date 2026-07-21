@@ -1,9 +1,9 @@
-import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import { getConfig } from "../../../packages/server/src/config";
-import { prisma } from "../../../packages/server/src/db";
+import { initializeDatabaseConnection, prisma } from "../../../packages/server/src/db";
+import { localTaskRunner } from "../../../packages/agent-runtime/src/local-task-runner";
 import { installErrorHandler } from "./http";
 import { registerAgentRoutes } from "./routes/agent";
 import { registerAssetRoutes } from "./routes/assets";
@@ -18,10 +18,10 @@ const app = Fastify({
   logger: { redact: ["req.headers.authorization", "req.body.input", "req.body.contextSnapshot"] },
 });
 
-const localWebOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):\d+$/;
+const loopbackWebOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/;
 
 await app.register(cors, {
-  origin: config.APP_ENV === "local" ? localWebOriginPattern : config.WEB_ORIGIN,
+  origin: config.APP_ENV === "test" ? loopbackWebOriginPattern : config.WEB_ORIGIN,
   credentials: true,
   methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
 });
@@ -35,8 +35,15 @@ registerWorkbenchRoutes(app);
 registerAgentRoutes(app);
 registerExportRoutes(app);
 
+await initializeDatabaseConnection();
+await localTaskRunner.start();
+
+let shuttingDown = false;
 async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   app.log.info({ signal }, "Lantern API stopping");
+  await localTaskRunner.stop();
   await app.close();
   await prisma.$disconnect();
   process.exit(0);
@@ -45,4 +52,4 @@ async function shutdown(signal: string) {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-await app.listen({ port: config.API_PORT, host: "0.0.0.0" });
+await app.listen({ port: config.API_PORT, host: "127.0.0.1" });

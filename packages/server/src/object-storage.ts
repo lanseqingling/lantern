@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { getConfig } from "./config";
+import { getRuntimePaths } from "./runtime-paths";
 
 const allowedTypes = new Map([
   ["image/png", ".png"],
@@ -58,12 +58,18 @@ function imageDimensions(bytes: Buffer, contentType: StoredObject["contentType"]
 }
 
 function storageRoot() {
-  const configured = getConfig().OBJECT_STORAGE_LOCAL_DIR;
-  return path.isAbsolute(configured) ? configured : path.resolve(process.cwd(), configured);
+  return getRuntimePaths().objectsDir;
 }
 
 function assertObjectKey(objectKey: string) {
   if (!/^[a-zA-Z0-9/_-]+\.(png|jpg|webp|json)$/.test(objectKey) || objectKey.includes("..")) throw new Error("INVALID_OBJECT_KEY");
+}
+
+function categorizedNamespace(namespace: string, category: "image" | "export") {
+  if (!/^[a-zA-Z0-9/_-]+$/.test(namespace) || namespace.includes("..")) throw new Error("INVALID_OBJECT_NAMESPACE");
+  if (namespace.startsWith("assets/") || namespace.startsWith("candidates/") || namespace.startsWith("exports/")) return namespace;
+  if (category === "export") return `exports/${namespace}`;
+  return namespace.includes("candidate") ? `candidates/${namespace}` : `assets/${namespace}`;
 }
 
 export async function putImage(bytes: Buffer, namespace: string): Promise<StoredObject> {
@@ -71,7 +77,7 @@ export async function putImage(bytes: Buffer, namespace: string): Promise<Stored
   const inspected = await inspectImage(bytes);
   const contentType = inspected.contentType;
   const extension = allowedTypes.get(contentType)!;
-  const objectKey = `${namespace}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}${extension}`;
+  const objectKey = `${categorizedNamespace(namespace, "image")}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}${extension}`;
   const target = path.join(storageRoot(), objectKey);
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, bytes, { flag: "wx" });
@@ -87,7 +93,7 @@ export async function putImage(bytes: Buffer, namespace: string): Promise<Stored
 
 export async function putObject(bytes: Buffer, namespace: string, extension: "png" | "json", contentType: "image/png" | "application/json") {
   if (!bytes.length || bytes.length > 100 * 1024 * 1024) throw new Error("OBJECT_SIZE_LIMIT");
-  const objectKey = `${namespace}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
+  const objectKey = `${categorizedNamespace(namespace, "export")}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
   const target = path.join(storageRoot(), objectKey);
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, bytes, { flag: "wx" });
@@ -109,6 +115,11 @@ export async function deleteObject(objectKey: string) {
   await unlink(path.join(storageRoot(), objectKey)).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error;
   });
+}
+
+export async function clearImageNamespace(namespace: string) {
+  const objectNamespace = categorizedNamespace(namespace, "image");
+  await rm(path.join(storageRoot(), objectNamespace), { recursive: true, force: true });
 }
 
 export async function assertSupportedUpload(_declaredContentType: string, bytes: Buffer) {

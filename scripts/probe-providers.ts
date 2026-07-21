@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { z } from "zod";
 import { DeepSeekProvider } from "../packages/agent-runtime/src/providers/deepseek";
 import { QwenImageProvider } from "../packages/agent-runtime/src/providers/qwen-image";

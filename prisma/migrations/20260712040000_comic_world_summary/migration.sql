@@ -1,2 +1,0 @@
-ALTER TABLE "Comic"
-  ADD COLUMN "worldSummary" TEXT NOT NULL DEFAULT '';

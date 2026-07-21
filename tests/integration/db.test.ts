@@ -1,4 +1,3 @@
-import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -12,14 +11,20 @@ import {
   type Prisma,
 } from "@prisma/client";
 import { compileChapterLayoutPlan } from "../../packages/layout-engine/src";
-import { prisma } from "../../packages/server/src/db";
+import { initializeDatabaseConnection, prisma } from "../../packages/server/src/db";
 import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "../../packages/server/src/asset-library-service";
 import { duplicateComic } from "../../packages/server/src/comic-service";
+import { putImage } from "../../packages/server/src/object-storage";
 import { commitChangeSet, revertCandidateApplication } from "../../packages/server/src/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "../../packages/agent-runtime/src/context-builder";
+import { LocalTaskRunner } from "../../packages/agent-runtime/src/local-task-runner";
 import type { StoryboardBeat } from "../../packages/shared/src";
+import { seed } from "../../prisma/seed";
 
 test("database candidate apply and revert preserve version heads atomically", async () => {
+  await initializeDatabaseConnection();
+  const foreignKeys = await prisma.$queryRawUnsafe<Array<{ foreign_keys: bigint }>>("PRAGMA foreign_keys");
+  assert.equal(Number(foreignKeys[0]?.foreign_keys), 1);
   const suffix = randomUUID();
   const ids = {
     user: `it-user-${suffix}`,
@@ -56,6 +61,12 @@ test("database candidate apply and revert preserve version heads atomically", as
   let copiedComicId: string | undefined;
 
   try {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n0YAAAAASUVORK5CYII=", "base64");
+    const [assetObject, variantObject, styleObject] = await Promise.all([
+      putImage(png, `integration/${suffix}/asset`),
+      putImage(png, `integration/${suffix}/variant`),
+      putImage(png, `integration/${suffix}/style`),
+    ]);
     await prisma.user.create({ data: { id: ids.user, email: `${suffix}@integration.lantern.local`, displayName: "persistent runtime Integration" } });
     await prisma.comic.create({ data: { id: ids.comic, ownerUserId: ids.user, title: "集成测试漫画", summary: "少女在雨夜末班车寻找失踪同学留下的线索。", worldSummary: "雨夜城市会通过末班车留下失踪者线索。", styleSummary: "克制的蓝绿色水彩与电影感夜景。", format: ComicFormat.PAGE } });
     await prisma.comicSetting.create({ data: { id: ids.comicSetting, ownerUserId: ids.user, comicId: ids.comic, title: "禁忌规则", content: "午夜后不得直呼失踪者姓名。", sortIndex: 20 } });
@@ -76,7 +87,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       kind: AssetKind.CHARACTER,
       name: "测试角色",
       description: "必须在布局和对白修改后继续保留",
-      versions: { create: { id: ids.assetV1, version: 1, source: "integration_test", objectKey: `integration/${ids.assetV1}` } },
+      versions: { create: { id: ids.assetV1, version: 1, source: "integration_test", objectKey: assetObject.objectKey } },
     } });
     await prisma.assetImage.create({ data: { id: ids.assetImage, assetId: ids.asset, assetVersionId: ids.assetV1, label: "主图", sortIndex: 0 } });
     await prisma.asset.create({ data: {
@@ -89,7 +100,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       variantOfAssetId: ids.asset,
       variantLabel: "回忆时期",
       variantSortIndex: 10,
-      versions: { create: { id: ids.assetVariantV1, version: 1, source: "integration_test", objectKey: `integration/${ids.assetVariantV1}` } },
+      versions: { create: { id: ids.assetVariantV1, version: 1, source: "integration_test", objectKey: variantObject.objectKey } },
     } });
     await prisma.assetImage.create({ data: { id: ids.assetVariantImage, assetId: ids.assetVariant, assetVersionId: ids.assetVariantV1, label: "主图", sortIndex: 0 } });
     await prisma.asset.create({ data: {
@@ -99,7 +110,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       kind: AssetKind.STYLE,
       name: "视觉风格",
       description: "克制的蓝绿色水彩与电影感夜景。",
-      versions: { create: { id: ids.visualStyleV1, version: 1, source: "integration_test", objectKey: `integration/${ids.visualStyleV1}` } },
+      versions: { create: { id: ids.visualStyleV1, version: 1, source: "integration_test", objectKey: styleObject.objectKey } },
     } });
     await prisma.assetImage.create({ data: { id: ids.visualStyleImage, assetId: ids.visualStyleAsset, assetVersionId: ids.visualStyleV1, label: "雨夜色彩参考", sortIndex: 0 } });
 
@@ -132,7 +143,8 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(copiedVariant.variantOfAssetId, copiedRoot.id);
     assert.equal(copiedRoot.images.length, 1);
     assert.equal(copiedVariant.images.length, 1);
-    await prisma.assetVersion.create({ data: { id: ids.assetV2, assetId: ids.asset, version: 2, source: "integration_test", objectKey: `integration/${ids.assetV2}` } });
+    const assetObjectV2 = await putImage(png, `integration/${suffix}/asset-v2`);
+    await prisma.assetVersion.create({ data: { id: ids.assetV2, assetId: ids.asset, version: 2, source: "integration_test", objectKey: assetObjectV2.objectKey } });
     await prisma.assetImage.create({ data: { id: ids.assetImage2, assetId: ids.asset, assetVersionId: ids.assetV2, label: "表情参考", sortIndex: 10 } });
     const reorderedAsset = await setPrimaryAssetImage(ids.user, ids.asset, ids.assetImage2);
     assert.equal(reorderedAsset.root.images[0]?.id, ids.assetImage2);
@@ -368,6 +380,78 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.comicSetting.deleteMany({ where: { comicId: ids.comic } });
     await prisma.comic.deleteMany({ where: { id: ids.comic } });
     await prisma.user.deleteMany({ where: { id: ids.user } });
+    await prisma.$disconnect();
+  }
+});
+
+test("local task runner recovers interrupted and cancel-requested tasks from SQLite", async () => {
+  await initializeDatabaseConnection();
+  const suffix = randomUUID();
+  const ids = {
+    user: `runner-user-${suffix}`,
+    comic: `runner-comic-${suffix}`,
+    chapter: `runner-chapter-${suffix}`,
+    project: `runner-project-${suffix}`,
+    runningTask: `runner-task-running-${suffix}`,
+    canceledTask: `runner-task-canceled-${suffix}`,
+  };
+  const runner = new LocalTaskRunner({ concurrency: 0, pollIntervalMs: 60_000 });
+  try {
+    await prisma.user.create({ data: { id: ids.user, email: `${suffix}@runner.lantern.local`, displayName: "Task Runner Test" } });
+    await prisma.comic.create({ data: { id: ids.comic, ownerUserId: ids.user, title: "Task Runner Test" } });
+    await prisma.chapter.create({ data: { id: ids.chapter, ownerUserId: ids.user, comicId: ids.comic, number: 1, title: "Chapter" } });
+    await prisma.project.create({ data: { id: ids.project, ownerUserId: ids.user, chapterId: ids.chapter } });
+    const taskData = {
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      type: TaskType.STORYBOARD,
+      baseRevision: 1,
+      scope: "selected_comic_frame",
+      target: { type: "comic_frame", id: "frame-1" },
+      input: { instruction: "test" },
+      contextSnapshot: {},
+      provider: "test",
+      model: "test",
+    } as const;
+    await prisma.generationTask.create({ data: { ...taskData, id: ids.runningTask, status: TaskStatus.RUNNING, idempotencyKey: `runner:running:${suffix}`, attempts: { create: { attempt: 1, status: TaskStatus.RUNNING } } } });
+    await prisma.generationTask.create({ data: { ...taskData, id: ids.canceledTask, status: TaskStatus.CANCEL_REQUESTED, idempotencyKey: `runner:canceled:${suffix}` } });
+
+    await runner.start();
+
+    const recovered = await prisma.generationTask.findUniqueOrThrow({ where: { id: ids.runningTask } });
+    const canceled = await prisma.generationTask.findUniqueOrThrow({ where: { id: ids.canceledTask } });
+    const attempt = await prisma.generationAttempt.findUniqueOrThrow({ where: { taskId_attempt: { taskId: ids.runningTask, attempt: 1 } } });
+    assert.equal(recovered.status, TaskStatus.QUEUED);
+    assert.equal(recovered.progress, 5);
+    assert.equal(canceled.status, TaskStatus.CANCELED);
+    assert.equal(attempt.status, TaskStatus.FAILED);
+    assert.equal(attempt.errorCode, "runtime_interrupted");
+  } finally {
+    await runner.stop();
+    await prisma.generationAttempt.deleteMany({ where: { taskId: { in: [ids.runningTask, ids.canceledTask] } } });
+    await prisma.generationTask.deleteMany({ where: { id: { in: [ids.runningTask, ids.canceledTask] } } });
+    await prisma.project.deleteMany({ where: { id: ids.project } });
+    await prisma.chapter.deleteMany({ where: { id: ids.chapter } });
+    await prisma.comic.deleteMany({ where: { id: ids.comic } });
+    await prisma.user.deleteMany({ where: { id: ids.user } });
+    await prisma.$disconnect();
+  }
+});
+
+test("starter data initializes both reviewed comics", async () => {
+  await initializeDatabaseConnection();
+  try {
+    await seed();
+    const comics = await prisma.comic.findMany({
+      where: { id: { in: ["comic-rainy-station", "comic-campus-letter"] } },
+      orderBy: { id: "asc" },
+      select: { id: true, title: true },
+    });
+    assert.deepEqual(comics, [
+      { id: "comic-campus-letter", title: "风停之前" },
+      { id: "comic-rainy-station", title: "雨夜车站" },
+    ]);
+  } finally {
     await prisma.$disconnect();
   }
 });

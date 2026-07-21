@@ -1,13 +1,10 @@
-import "dotenv/config";
 import { rm } from "node:fs/promises";
-import path from "node:path";
 import { prisma } from "../packages/server/src/db";
-import { getConfig } from "../packages/server/src/config";
+import { getRuntimePaths } from "../packages/server/src/runtime-paths";
 import { seedRainyStation } from "../samples/rainy-station/seed";
 
 async function resetToRainyStation() {
-  const config = getConfig();
-  if (config.APP_ENV === "production") throw new Error("Refusing to clear local data in production");
+  if (process.env.APP_ENV === "production") throw new Error("Refusing to clear local data in production");
 
   await prisma.$transaction([
     prisma.candidate.deleteMany(),
@@ -33,8 +30,7 @@ async function resetToRainyStation() {
     prisma.user.deleteMany(),
   ]);
 
-  const storageDirectory = path.resolve(process.cwd(), config.OBJECT_STORAGE_LOCAL_DIR);
-  await rm(storageDirectory, { recursive: true, force: true });
+  await rm(getRuntimePaths().objectsDir, { recursive: true, force: true });
   await seedRainyStation();
   console.log("Local data reset: only the 雨夜车站 sample remains.");
 }

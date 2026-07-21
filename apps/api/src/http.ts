@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import { getConfig } from "../../../packages/server/src/config";
 import { prisma } from "../../../packages/server/src/db";
 import { AppError } from "../../../packages/server/src/errors";
 import { createSignedExportPath } from "../../../packages/server/src/signed-assets";
+import { LOCAL_USER_ID } from "../../../packages/server/src/local-runtime";
 
 const config = getConfig();
 
@@ -14,12 +15,14 @@ export function requestId(request: FastifyRequest) {
 }
 
 export async function currentUser(request: FastifyRequest) {
-  const trustedEmail = request.headers["oai-authenticated-user-email"];
-  const localEmail = config.APP_ENV === "local" ? request.headers["x-lantern-user-email"] ?? config.LANTERN_DEV_USER_EMAIL : undefined;
-  const email = String(trustedEmail ?? localEmail ?? "");
-  if (!email) throw new AppError("unauthorized", "请先登录。", 401);
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) throw new AppError("unauthorized", "当前账号尚未初始化 Lantern 工作空间。", 401);
+  const authorization = request.headers.authorization ?? "";
+  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const expected = config.LANTERN_LOCAL_TOKEN;
+  const authenticated = supplied.length === expected.length
+    && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+  if (!authenticated) throw new AppError("unauthorized", "无法验证本地 Lantern 安装身份。", 401);
+  const user = await prisma.user.findUnique({ where: { id: LOCAL_USER_ID } });
+  if (!user) throw new AppError("unauthorized", "本地 Lantern 工作空间尚未初始化。", 401);
   return user;
 }
 

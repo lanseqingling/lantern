@@ -1,1 +1,0 @@
-ALTER TABLE "CanvasReferencePlacement" ADD COLUMN "zIndex" INTEGER NOT NULL DEFAULT 10;

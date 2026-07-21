@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,7 +21,8 @@ import {
   type StoryboardBeat,
 } from "../../packages/shared/src";
 import { prisma } from "../../packages/server/src/db";
-import { putImage, type StoredObject } from "../../packages/server/src/object-storage";
+import { LOCAL_USER_DISPLAY_NAME, LOCAL_USER_EMAIL, LOCAL_USER_ID } from "../../packages/server/src/local-runtime";
+import { clearImageNamespace, putImage, type StoredObject } from "../../packages/server/src/object-storage";
 
 const ids = {
   user: "user-local-creator",
@@ -254,11 +254,10 @@ async function clearPreviousSample() {
 }
 
 export async function seedCampusLetter() {
-  if (process.env.APP_ENV === "production") throw new Error("Refusing to create sample data in production");
-  const email = process.env.LANTERN_DEV_USER_EMAIL ?? "creator@lantern.local";
-  await prisma.user.upsert({ where: { email }, update: {}, create: { id: ids.user, email, displayName: "Lantern Creator" } });
-  const owner = await prisma.user.findUniqueOrThrow({ where: { email } });
+  await prisma.user.upsert({ where: { email: LOCAL_USER_EMAIL }, update: { displayName: LOCAL_USER_DISPLAY_NAME }, create: { id: LOCAL_USER_ID, email: LOCAL_USER_EMAIL, displayName: LOCAL_USER_DISPLAY_NAME } });
+  const owner = await prisma.user.findUniqueOrThrow({ where: { id: LOCAL_USER_ID } });
   await clearPreviousSample();
+  await clearImageNamespace("samples/campus-letter");
 
   const stored = new Map<CampusImageFile, StoredObject>();
   for (const fileName of imageFiles) {

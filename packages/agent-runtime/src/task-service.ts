@@ -2,10 +2,10 @@ import { MessageKind, MessageRole, TaskStatus, TaskType, type Prisma } from "@pr
 import { prisma } from "../../server/src/db";
 import { AppError } from "../../server/src/errors";
 import { getConfig } from "../../server/src/config";
-import { getGenerationQueue } from "../../server/src/queue";
 import { buildAgentContext } from "./context-builder";
 import type { WorkspaceReference } from "./schemas";
 import { isAgentTaskType, type AgentTaskType } from "./capability-registry";
+import { localTaskRunner } from "./local-task-runner";
 
 const taskTypeMap = {
   storyboard: TaskType.STORYBOARD,
@@ -44,18 +44,13 @@ export function assertTaskCreationAllowed(taskType: string): asserts taskType is
   throw new AppError("unsupported_task", "该任务类型未在 Agent 工具注册表中开放。", 422);
 }
 
-const bullMqTaskQueue: TaskQueueAdapter = {
+const localTaskQueue: TaskQueueAdapter = {
   async enqueue(taskId) {
-    await getGenerationQueue().add("generation", { taskId }, {
-      jobId: taskId,
-      attempts: 1,
-      removeOnComplete: 100,
-      removeOnFail: 200,
-    });
+    localTaskRunner.enqueue(taskId);
   },
 };
 
-export async function createGenerationTask(input: CreateTaskInput, taskQueue: TaskQueueAdapter = bullMqTaskQueue) {
+export async function createGenerationTask(input: CreateTaskInput, taskQueue: TaskQueueAdapter = localTaskQueue) {
   assertTaskCreationAllowed(input.taskType);
 
   const existing = await prisma.generationTask.findFirst({
@@ -107,7 +102,6 @@ export async function createGenerationTask(input: CreateTaskInput, taskQueue: Ta
     },
   });
   try {
-    await taskQueue.enqueue(task.id);
     const queued = await prisma.generationTask.update({ where: { id: task.id }, data: { status: TaskStatus.QUEUED, progress: 5 } });
     if (input.conversationId) {
       await prisma.message.create({
@@ -129,13 +123,14 @@ export async function createGenerationTask(input: CreateTaskInput, taskQueue: Ta
         },
       });
     }
+    await taskQueue.enqueue(task.id);
     return queued;
   } catch (error) {
     await prisma.generationTask.update({
       where: { id: task.id },
-      data: { status: TaskStatus.FAILED, errorCode: "queue_unavailable", errorMessage: "任务队列不可用", completedAt: new Date() },
+      data: { status: TaskStatus.FAILED, errorCode: "runtime_unavailable", errorMessage: "本地任务执行器不可用", completedAt: new Date() },
     });
-    throw new AppError("queue_unavailable", "任务队列暂时不可用，工作稿未改变。", 503, error);
+    throw new AppError("runtime_unavailable", "本地任务执行器暂时不可用，工作稿未改变。", 503, error);
   }
 }
 
@@ -150,10 +145,12 @@ export async function requestTaskCancellation(ownerUserId: string, taskId: strin
       data: { status: TaskStatus.CANCELED, cancelRequestedAt: new Date(), completedAt: new Date() },
     });
     if (task.conversationId) {
-      const taskMessage = await tx.message.findFirst({
-        where: { conversationId: task.conversationId, kind: MessageKind.TASK, metadata: { path: ["taskId"], equals: task.id } },
+      const taskMessages = await tx.message.findMany({
+        where: { conversationId: task.conversationId, kind: MessageKind.TASK },
         orderBy: { createdAt: "desc" },
+        take: 50,
       });
+      const taskMessage = taskMessages.find((message) => (message.metadata as { taskId?: string }).taskId === task.id);
       if (taskMessage) {
         await tx.message.update({
           where: { id: taskMessage.id },
@@ -165,7 +162,7 @@ export async function requestTaskCancellation(ownerUserId: string, taskId: strin
   });
 }
 
-export async function retryTask(ownerUserId: string, taskId: string, idempotencyKey: string, taskQueue: TaskQueueAdapter = bullMqTaskQueue) {
+export async function retryTask(ownerUserId: string, taskId: string, idempotencyKey: string, taskQueue: TaskQueueAdapter = localTaskQueue) {
   const task = await prisma.generationTask.findFirst({ where: { id: taskId, ownerUserId } });
   if (!task) throw new AppError("not_found", "任务不存在。", 404);
   if (task.status !== TaskStatus.FAILED && task.status !== TaskStatus.CANCELED) throw new AppError("conflict", "只有失败或已取消任务可以重试。", 409);

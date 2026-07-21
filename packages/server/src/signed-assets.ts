@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { getConfig } from "./config";
 
 function signature(versionId: string, expires: number) {
-  return createHmac("sha256", getConfig().SESSION_SECRET).update(`${versionId}:${expires}`).digest("base64url");
+  return createHmac("sha256", getConfig().LANTERN_LOCAL_TOKEN).update(`${versionId}:${expires}`).digest("base64url");
 }
 
 function expiryWindow(ttlSeconds: number) {

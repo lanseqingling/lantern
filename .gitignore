@@ -42,9 +42,13 @@ yarn-error.log*
 next-env.d.ts
 *.tsbuildinfo
 /dist/
+/release/
 /.wrangler/
 /outputs/
 /work/
 
-# local runtime data
+# optional repository-local development override
+/lantern-data/
+
+# Previous checkout data is never read by the current runtime.
 /.lantern-runtime/

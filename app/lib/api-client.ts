@@ -30,17 +30,12 @@ export type WorkbenchLoad = {
 };
 
 function apiBase() {
-  const explicit = process.env.NEXT_PUBLIC_LANTERN_API_URL?.replace(/\/$/, "");
-  if (explicit) return explicit;
   return "/api/backend";
 }
 
 function uploadApiBase() {
-  const explicit = (process.env.NEXT_PUBLIC_LANTERN_UPLOAD_API_URL ?? process.env.NEXT_PUBLIC_LANTERN_API_URL)?.replace(/\/$/, "");
-  if (explicit) return explicit;
-  // Keep multipart uploads on the same proxy as every other API request. The
-  // proxy forwards the authenticated identity, whereas a browser-side direct
-  // request to the local API cannot reliably do so.
+  // Multipart uploads use the authenticated same-origin proxy as every other
+  // browser request. The installation token never enters client-side code.
   return apiBase();
 }
 

@@ -8,7 +8,7 @@ import { assertSupportedUpload, getObject, putImage } from "../packages/server/s
 import { resetConfigForTests } from "../packages/server/src/config";
 
 test("private object signatures expire and reject tampering", () => {
-  process.env.SESSION_SECRET = "test-session-secret-at-least-16";
+  process.env.LANTERN_LOCAL_TOKEN = "test-session-secret-at-least-32-characters";
   resetConfigForTests();
   const path = createSignedAssetPath("asset-version-1", 60);
   assert.equal(createSignedAssetPath("asset-version-1", 60), path);
@@ -20,7 +20,7 @@ test("private object signatures expire and reject tampering", () => {
 });
 
 test("local object storage sniffs PNG bytes and reads immutable object keys", async () => {
-  process.env.OBJECT_STORAGE_LOCAL_DIR = join(tmpdir(), `lantern-storage-test-${randomUUID()}`);
+  process.env.LANTERN_DATA_DIR = join(tmpdir(), `lantern-storage-test-${randomUUID()}`);
   resetConfigForTests();
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n0YAAAAASUVORK5CYII=", "base64");
   const stored = await putImage(png, "test");

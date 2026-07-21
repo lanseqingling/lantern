@@ -101,10 +101,12 @@ async function persistCandidate({ task, ...draft }: CandidateDraft & { task: Awa
       data: { status: TaskStatus.SUCCEEDED, progress: 100, completedAt: new Date(), errorCode: null, errorMessage: null },
     });
     if (task.conversationId) {
-      const taskMessage = await tx.message.findFirst({
-        where: { conversationId: task.conversationId, kind: MessageKind.TASK, metadata: { path: ["taskId"], equals: task.id } },
+      const taskMessages = await tx.message.findMany({
+        where: { conversationId: task.conversationId, kind: MessageKind.TASK },
         orderBy: { createdAt: "desc" },
+        take: 50,
       });
+      const taskMessage = taskMessages.find((message) => (message.metadata as { taskId?: string }).taskId === task.id);
       if (taskMessage) {
         const metadata = taskMessage.metadata as Record<string, unknown>;
         await tx.message.update({
@@ -397,7 +399,8 @@ export async function processGenerationTask(taskId: string) {
         data: { status: TaskStatus.FAILED, errorCode: appError.code, errorMessage: appError.message, completedAt: new Date() },
       });
       if (task.conversationId) {
-        const taskMessage = await prisma.message.findFirst({ where: { conversationId: task.conversationId, kind: MessageKind.TASK, metadata: { path: ["taskId"], equals: task.id } }, orderBy: { createdAt: "desc" } });
+        const taskMessages = await prisma.message.findMany({ where: { conversationId: task.conversationId, kind: MessageKind.TASK }, orderBy: { createdAt: "desc" }, take: 50 });
+        const taskMessage = taskMessages.find((message) => (message.metadata as { taskId?: string }).taskId === task.id);
         if (taskMessage) {
           const metadata = taskMessage.metadata as Record<string, unknown>;
           await prisma.message.update({ where: { id: taskMessage.id }, data: { kind: MessageKind.FAILED, content: appError.message, metadata: { ...metadata, retryable: true } } });

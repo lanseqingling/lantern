@@ -1,11 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { getRuntimePaths } from "../../../packages/server/src/runtime-paths";
 
 export const runtime = "nodejs";
 
 const localAssetRoot = process.env.LANTERN_LOCAL_ASSET_DIR
-  ?? path.resolve(process.cwd(), ".lantern-runtime", "demo-assets");
+  ?? path.join(getRuntimePaths().dataDir, "demo", "objects");
 const mimeToExt = new Map([
   ["image/png", ".png"],
   ["image/jpeg", ".jpg"],

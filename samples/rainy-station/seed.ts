@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,7 +14,8 @@ import {
 } from "@prisma/client";
 import { validateComicDocument, type ComicDocument, type Dialogue, type Frame, type PresentationUnit, type StoryboardBeat } from "../../packages/shared/src";
 import { prisma } from "../../packages/server/src/db";
-import { putImage, type StoredObject } from "../../packages/server/src/object-storage";
+import { LOCAL_USER_DISPLAY_NAME, LOCAL_USER_EMAIL, LOCAL_USER_ID } from "../../packages/server/src/local-runtime";
+import { clearImageNamespace, putImage, type StoredObject } from "../../packages/server/src/object-storage";
 
 const ids = {
   user: "user-local-creator",
@@ -208,14 +208,14 @@ export function buildRainyStationDocument(stored: ReadonlyMap<string, StoredObje
 }
 
 export async function seedRainyStation() {
-  if (process.env.APP_ENV === "production") throw new Error("Refusing to create sample data in production");
   await prisma.user.upsert({
-    where: { email: process.env.LANTERN_DEV_USER_EMAIL ?? "creator@lantern.local" },
-    update: {},
-    create: { id: ids.user, email: process.env.LANTERN_DEV_USER_EMAIL ?? "creator@lantern.local", displayName: "Lantern Creator" },
+    where: { email: LOCAL_USER_EMAIL },
+    update: { displayName: LOCAL_USER_DISPLAY_NAME },
+    create: { id: LOCAL_USER_ID, email: LOCAL_USER_EMAIL, displayName: LOCAL_USER_DISPLAY_NAME },
   });
-  const owner = await prisma.user.findUniqueOrThrow({ where: { email: process.env.LANTERN_DEV_USER_EMAIL ?? "creator@lantern.local" } });
+  const owner = await prisma.user.findUniqueOrThrow({ where: { id: LOCAL_USER_ID } });
   await clearPreviousSample();
+  await clearImageNamespace("mock/rainy-station");
 
   const stored = new Map<string, StoredObject>();
   for (const fileName of imageFiles) {

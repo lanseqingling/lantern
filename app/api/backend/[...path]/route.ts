@@ -1,10 +1,5 @@
 export const runtime = "nodejs";
-
-const forwardedIdentityHeaders = [
-  "oai-authenticated-user-email",
-  "oai-authenticated-user-full-name",
-  "oai-authenticated-user-full-name-encoding",
-] as const;
+import { getConfig } from "../../../../packages/server/src/config";
 
 async function proxy(request: Request, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
@@ -14,14 +9,7 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
-  for (const name of forwardedIdentityHeaders) {
-    const value = request.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-  if (process.env.APP_ENV === "local") {
-    const localEmail = request.headers.get("x-lantern-user-email") ?? process.env.LANTERN_DEV_USER_EMAIL;
-    if (localEmail) headers.set("x-lantern-user-email", localEmail);
-  }
+  headers.set("authorization", `Bearer ${getConfig().LANTERN_LOCAL_TOKEN}`);
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   // Buffer multipart payloads before proxying. Vinext's route adapter can hand
   // over a stream that is no longer readable by the Node fetch implementation,

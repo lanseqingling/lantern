@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -93,38 +93,38 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  comics        Comic[]
-  comicSettings ComicSetting[]
-  chapters      Chapter[]
-  projects      Project[]
-  assets        Asset[]
-  conversations AgentConversation[]
-  messages      Message[]
-  tasks         GenerationTask[]
-  candidates    Candidate[]
-  snapshots     SavedSnapshot[]
+  comics           Comic[]
+  comicSettings    ComicSetting[]
+  chapters         Chapter[]
+  projects         Project[]
+  assets           Asset[]
+  conversations    AgentConversation[]
+  messages         Message[]
+  tasks            GenerationTask[]
+  candidates       Candidate[]
+  snapshots        SavedSnapshot[]
   canvasAssetItems CanvasAssetListItem[]
 }
 
 model Comic {
-  id               String      @id @default(cuid())
+  id               String         @id @default(cuid())
   ownerUserId      String
   title            String
-  summary          String      @default("")
-  worldSummary     String      @default("")
-  format           ComicFormat @default(PAGE)
+  summary          String         @default("")
+  worldSummary     String         @default("")
+  format           ComicFormat    @default(PAGE)
   canvasPageMode   CanvasPageMode @default(SINGLE)
-  readingDirection String      @default("ltr")
-  styleSummary     String      @default("")
+  readingDirection String         @default("ltr")
+  styleSummary     String         @default("")
   coverObjectKey   String?
   coverContentType String?
   coverWidth       Int?
   coverHeight      Int?
   archivedAt       DateTime?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  owner    User      @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  owner    User           @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   chapters Chapter[]
   settings ComicSetting[]
 
@@ -153,19 +153,19 @@ model ComicSetting {
 }
 
 model Chapter {
-  id          String    @id @default(cuid())
-  ownerUserId String
-  comicId     String
-  number      Int
-  title       String
-  summary     String    @default("")
+  id               String    @id @default(cuid())
+  ownerUserId      String
+  comicId          String
+  number           Int
+  title            String
+  summary          String    @default("")
   coverObjectKey   String?
   coverContentType String?
   coverWidth       Int?
   coverHeight      Int?
-  archivedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  archivedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   owner     User            @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   comic     Comic           @relation(fields: [comicId], references: [id], onDelete: Restrict)
@@ -180,7 +180,7 @@ model Project {
   id          String   @id @default(cuid())
   ownerUserId String
   chapterId   String   @unique
-  settings    Json     @default("{}")
+  settings    Json     @default(dbgenerated("'{}'"))
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -200,16 +200,16 @@ model Project {
 }
 
 model WorkingRevision {
-  id                String   @id @default(cuid())
-  projectId         String
-  revision          Int
-  document          Json
+  id                         String   @id @default(cuid())
+  projectId                  String
+  revision                   Int
+  document                   Json
   storyboardBeats            Json
-  storyboardBeatVersionHeads Json     @default("{}")
-  assetVersionHeads Json     @default("{}")
-  changeSet         Json?
-  sourceCandidateId String?
-  createdAt         DateTime @default(now())
+  storyboardBeatVersionHeads Json     @default(dbgenerated("'{}'"))
+  assetVersionHeads          Json     @default(dbgenerated("'{}'"))
+  changeSet                  Json?
+  sourceCandidateId          String?
+  createdAt                  DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
 
@@ -218,15 +218,15 @@ model WorkingRevision {
 }
 
 model SavedSnapshot {
-  id                    String   @id @default(cuid())
-  ownerUserId           String
-  chapterId             String
-  projectId             String
-  sourceWorkingRevision Int
-  document              Json
+  id                     String   @id @default(cuid())
+  ownerUserId            String
+  chapterId              String
+  projectId              String
+  sourceWorkingRevision  Int
+  document               Json
   storyboardBeatVersions Json
-  assetVersions         Json
-  createdAt             DateTime @default(now())
+  assetVersions          Json
+  createdAt              DateTime @default(now())
 
   owner   User    @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   chapter Chapter @relation(fields: [chapterId], references: [id], onDelete: Restrict)
@@ -245,20 +245,20 @@ model StoryboardBeat {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  project  Project        @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  project  Project                 @relation(fields: [projectId], references: [id], onDelete: Restrict)
   versions StoryboardBeatVersion[]
 
   @@index([ownerUserId, projectId, archivedAt])
 }
 
 model StoryboardBeatVersion {
-  id              String   @id @default(cuid())
-  storyboardBeatId         String
-  version         Int
-  title           String
-  description     String
-  sourceTaskId    String?
-  createdAt       DateTime @default(now())
+  id               String   @id @default(cuid())
+  storyboardBeatId String
+  version          Int
+  title            String
+  description      String
+  sourceTaskId     String?
+  createdAt        DateTime @default(now())
 
   storyboardBeat StoryboardBeat @relation(fields: [storyboardBeatId], references: [id], onDelete: Restrict)
 
@@ -267,28 +267,28 @@ model StoryboardBeatVersion {
 }
 
 model Asset {
-  id                   String    @id @default(cuid())
+  id                   String             @id @default(cuid())
   ownerUserId          String
   projectId            String
   kind                 AssetKind
   name                 String
-  description          String    @default("")
+  description          String             @default("")
   libraryStatus        AssetLibraryStatus @default(LIBRARY)
-  currentVersionNumber Int       @default(1)
+  currentVersionNumber Int                @default(1)
   variantOfAssetId     String?
   variantLabel         String?
-  variantSortIndex     Int       @default(0)
+  variantSortIndex     Int                @default(0)
   archivedAt           DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
-  owner      User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
-  project    Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  versions   AssetVersion[]
-  images     AssetImage[]
-  variantOf  Asset?                      @relation("AssetVariants", fields: [variantOfAssetId], references: [id], onDelete: Restrict)
-  variants   Asset[]                     @relation("AssetVariants")
-  placements CanvasReferencePlacement[]
+  owner           User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project         Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  versions        AssetVersion[]
+  images          AssetImage[]
+  variantOf       Asset?                     @relation("AssetVariants", fields: [variantOfAssetId], references: [id], onDelete: Restrict)
+  variants        Asset[]                    @relation("AssetVariants")
+  placements      CanvasReferencePlacement[]
   canvasListItems CanvasAssetListItem[]
 
   @@index([ownerUserId, projectId, kind, archivedAt])
@@ -299,17 +299,17 @@ model Asset {
 /// is always stored as an Asset/AssetVersion for durable object storage, while
 /// libraryStatus decides whether it is exposed in the comic-wide Asset Studio.
 model CanvasAssetListItem {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   ownerUserId String
   projectId   String
   assetId     String
   displayName String
   displayKind AssetKind
-  sortIndex   Int      @default(0)
-  pinned      Boolean  @default(false)
+  sortIndex   Int       @default(0)
+  pinned      Boolean   @default(false)
   hiddenAt    DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   owner   User    @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
@@ -384,7 +384,7 @@ model Message {
   role           MessageRole
   kind           MessageKind @default(PLAIN)
   content        String
-  metadata       Json        @default("{}")
+  metadata       Json        @default(dbgenerated("'{}'"))
   createdAt      DateTime    @default(now())
 
   owner        User               @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
@@ -496,10 +496,10 @@ model Candidate {
   targetLabel     String
   target          Json
   baseRevision    Int
-  sourceRefs      Json            @default("[]")
-  outputRefs      Json            @default("[]")
+  sourceRefs      Json            @default(dbgenerated("'[]'"))
+  outputRefs      Json            @default(dbgenerated("'[]'"))
   payload         Json
-  operations      Json            @default("[]")
+  operations      Json            @default(dbgenerated("'[]'"))
   appliedRevision Int?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt

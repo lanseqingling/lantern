@@ -10,12 +10,14 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 
 | 任务 | 命令 |
 |---|---|
-| 安装依赖 | `pnpm install` |
-| 启动完整本地环境 | `scripts/start-local.sh` |
-| 启动开发进程 | `pnpm dev` |
-| 类型检查 | `pnpm typecheck` |
-| 单元测试 | `pnpm test` |
-| 构建 | `pnpm build` |
+| 安装依赖 | `./lantern setup` |
+| 启动本地产品 | `./lantern start` |
+| 启动开发进程 | `./lantern dev` |
+| 运行时诊断 | `./lantern doctor` |
+| 类型检查 | `./lantern typecheck` |
+| 单元测试 | `./lantern test` |
+| 构建 | `./lantern build` |
+| 打包源码发行包 | `./lantern package:source` |
 
 按变更范围运行 `package.json` 中对应的专项命令；交付前至少完成相符的类型检查、测试和构建。
 
@@ -23,7 +25,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 
 | 路径 | 职责 |
 |---|---|
-| `app/`、`apps/` | Web 界面、API 和后台进程入口。 |
+| `app/`、`apps/` | Web 界面与 loopback API 入口。 |
 | `packages/shared/` | 跨端协议、schema 与共享领域类型。 |
 | `packages/editor-core/` | 与 UI 解耦的编辑 Capability、变更和快照能力。 |
 | `packages/agent-runtime/` | Agent 规划、上下文、工具与任务运行时。 |
@@ -32,14 +34,16 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 | `prisma/` | 数据模型与迁移。 |
 | `docs/` | 产品、交互、协议和 Agent 的正式文档。 |
 | `samples/`、`public/samples/` | 显式示例作品与静态素材。 |
-| `scripts/`、`tests/` | 开发脚本与自动化验证。 |
+| `scripts/`、`tests/` | 启动、构建、打包、诊断脚本与自动化验证。根目录 `lantern`/`lantern.cmd` 只提供薄命令入口。 |
 
 ## Architecture Boundaries
 
 - TypeScript 是应用与共享包的统一语言；共享契约只保留一个代码事实源。
 - Web 通过 API 访问服务端能力。路由负责请求解析、鉴权和响应边界，领域逻辑与持久化编排进入对应服务或领域包。
-- PostgreSQL 保存作品和工作流事实；队列只调度异步工作，不能成为作品事实源。
-- 图片等二进制内容进入对象存储；数据库与作品协议只保存稳定对象键和版本引用。
+- SQLite 保存作品和工作流事实；Local Task Runner 只负责唤醒与进程内并发，不能成为任务或作品事实源。
+- 图片等二进制内容进入用户数据目录中的本地对象存储；数据库与作品协议只保存稳定对象键和版本引用。
+- 数据库、对象、配置、日志和临时文件必须通过统一 runtime paths 解析；生产数据不得写入仓库、安装目录或当前工作目录。
+- 本地 API 只监听 loopback，并通过安装级令牌映射到稳定本地用户；请求头不能切换用户身份。
 - 确定性编辑通过领域 Capability 产生原子变更。组件、Agent 和 API 不各自复制参数契约、对象 ID 规则或业务默认值。
 - 生产、演示和测试运行时必须明确隔离；生产失败不得静默回退到 mock 或示例数据。
 

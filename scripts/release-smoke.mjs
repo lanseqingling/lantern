@@ -33,6 +33,52 @@ function runBootstrap(args, env, stdio = "pipe") {
   });
 }
 
+function childHasExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function waitForChildExit(child, timeoutMs) {
+  if (childHasExited(child)) return { code: child.exitCode, signal: child.signalCode };
+  return Promise.race([
+    new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal }))),
+    delay(timeoutMs).then(() => undefined),
+  ]);
+}
+
+async function portAvailable(port) {
+  const server = createServer();
+  return new Promise((resolve) => {
+    server.once("error", () => resolve(false));
+    server.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
+      server.close((error) => resolve(!error));
+    });
+  });
+}
+
+async function waitForPortsReleased(env, timeoutMs = 15_000) {
+  const ports = [Number(env.API_PORT), Number(env.WEB_PORT)];
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if ((await Promise.all(ports.map(portAvailable))).every(Boolean)) return;
+    await delay(250);
+  }
+  throw new Error(`Lantern ports were not released within ${timeoutMs}ms.`);
+}
+
+async function forceStopChild(child) {
+  if (childHasExited(child) || !child.pid) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    await new Promise((resolve) => killer.once("exit", resolve));
+  } else {
+    child.kill("SIGKILL");
+  }
+  await waitForChildExit(child, 5000);
+}
+
 async function waitForWorkbench(url, child, timeoutMs = 10 * 60 * 1000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -56,14 +102,13 @@ async function stopLantern(env, child) {
     stopper.once("error", reject);
     stopper.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Lantern stop failed (${code}).`)));
   });
-  const exited = child.exitCode !== null ? child.exitCode : await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    delay(15_000).then(() => "timeout"),
-  ]);
-  if (exited === "timeout") {
-    child.kill("SIGTERM");
+  const exited = await waitForChildExit(child, 15_000);
+  if (!exited) {
+    await forceStopChild(child);
     throw new Error("Lantern did not stop within 15 seconds.");
   }
+  if (exited.code !== 0) throw new Error(`Lantern start process exited during stop (${exited.code ?? exited.signal}).`);
+  await waitForPortsReleased(env);
 }
 
 async function runOnce(env, webUrl) {
@@ -78,7 +123,9 @@ async function runOnce(env, webUrl) {
     await stopLantern(env, child);
     return { titles, output };
   } catch (error) {
-    child.kill("SIGTERM");
+    const stopper = runBootstrap(["stop"], env, "ignore");
+    await waitForChildExit(stopper, 5000).catch(() => undefined);
+    await forceStopChild(child);
     throw error;
   }
 }

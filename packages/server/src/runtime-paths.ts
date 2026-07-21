@@ -17,6 +17,7 @@ export type LanternRuntimePaths = {
   tempDir: string;
   backupsDir: string;
   lockFile: string;
+  stopRequestFile: string;
 };
 
 export function defaultLanternDataDir(
@@ -55,5 +56,6 @@ export function getRuntimePaths(dataDir = resolveLanternDataDir()): LanternRunti
     tempDir: path.join(resolved, "temp"),
     backupsDir: path.join(resolved, "backups"),
     lockFile: path.join(resolved, "lantern.lock"),
+    stopRequestFile: path.join(resolved, "lantern.stop"),
   };
 }

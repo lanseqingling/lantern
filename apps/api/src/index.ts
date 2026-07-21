@@ -51,5 +51,10 @@ async function shutdown(signal: string) {
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("message", (message) => {
+  if (typeof message === "object" && message !== null && "type" in message && message.type === "lantern:shutdown") {
+    void shutdown("IPC");
+  }
+});
 
 await app.listen({ port: config.API_PORT, host: "127.0.0.1" });

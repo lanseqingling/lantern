@@ -6,7 +6,14 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { getConfig, resetConfigForTests } from "../packages/server/src/config";
-import { acquireRuntimeLock, ensureRuntimeLayout, resetRuntimeTemp, runtimeOwner } from "../packages/server/src/local-runtime";
+import {
+  acquireRuntimeLock,
+  consumeRuntimeStopRequest,
+  ensureRuntimeLayout,
+  requestRuntimeStop,
+  resetRuntimeTemp,
+  runtimeOwner,
+} from "../packages/server/src/local-runtime";
 import { getRuntimePaths } from "../packages/server/src/runtime-paths";
 import { initializeRuntime, repositoryRoot, runCommand, runPrismaCommand } from "./runtime-init";
 
@@ -15,17 +22,21 @@ const command = (process.argv[2] ?? "start") as Command;
 const commandArgs = process.argv.slice(3);
 const supportedCommands: Command[] = ["start", "dev", "stop", "status", "doctor", "sample:init", "backup:create", "backup:restore"];
 
-function pnpmCli() {
-  const inherited = process.env.npm_execpath;
-  if (inherited && /pnpm(?:\.cjs)?$/i.test(inherited)) return inherited;
-  return path.join(repositoryRoot, "node_modules", "pnpm", "bin", "pnpm.cjs");
-}
+type ManagedService = {
+  child: ChildProcess;
+  requestShutdown?: () => void;
+};
 
-function spawnService(args: string[], env: Record<string, string | undefined>, logFile: string) {
-  const child = spawn(process.execPath, [pnpmCli(), ...args], {
+function spawnService(
+  args: string[],
+  env: Record<string, string | undefined>,
+  logFile: string,
+  options: { ipc?: boolean } = {},
+): ManagedService {
+  const child = spawn(process.execPath, args, {
     cwd: repositoryRoot,
     env: { ...process.env, ...env },
-    stdio: ["inherit", "pipe", "pipe"],
+    stdio: options.ipc ? ["inherit", "pipe", "pipe", "ipc"] : ["inherit", "pipe", "pipe"],
     windowsHide: true,
   });
   const log = createWriteStream(logFile, { flags: "a", mode: 0o600 });
@@ -34,7 +45,14 @@ function spawnService(args: string[], env: Record<string, string | undefined>, l
   child.stdout?.pipe(log, { end: false });
   child.stderr?.pipe(log, { end: false });
   child.once("close", () => log.end());
-  return child;
+  return {
+    child,
+    requestShutdown: options.ipc
+      ? () => {
+          if (child.connected) child.send({ type: "lantern:shutdown" });
+        }
+      : undefined,
+  };
 }
 
 async function waitForUrl(url: string, attempts = 120) {
@@ -68,36 +86,87 @@ function openBrowser(url: string) {
   child.unref();
 }
 
-async function stopChildren(children: ChildProcess[]) {
-  for (const child of children) if (child.exitCode === null && child.pid) child.kill("SIGTERM");
-  await Promise.all(children.map((child) => child.exitCode !== null
-    ? Promise.resolve()
-    : new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-      setTimeout(() => {
-        if (child.exitCode === null) child.kill("SIGKILL");
-        resolve();
-      }, 5000).unref();
-    })));
+function childHasExited(child: ChildProcess) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function waitForChildExit(child: ChildProcess, timeoutMs: number) {
+  if (childHasExited(child)) return true;
+  return new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, timeoutMs);
+    const onExit = () => {
+      clearTimeout(timeout);
+      resolve(true);
+    };
+    child.once("exit", onExit);
+  });
+}
+
+async function terminateWindowsProcessTree(pid: number) {
+  const killer = spawn("taskkill", ["/pid", String(pid), "/t", "/f"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  await new Promise<void>((resolve, reject) => {
+    killer.once("error", reject);
+    killer.once("exit", () => resolve());
+  });
+}
+
+async function stopChildren(services: ManagedService[]) {
+  for (const service of services) {
+    const { child } = service;
+    if (childHasExited(child) || !child.pid) continue;
+    if (service.requestShutdown) service.requestShutdown();
+    else if (process.platform === "win32") await terminateWindowsProcessTree(child.pid);
+    else child.kill("SIGTERM");
+  }
+
+  await Promise.all(services.map(async ({ child }) => {
+    if (await waitForChildExit(child, 5000)) return;
+    if (!child.pid) return;
+    if (process.platform === "win32") await terminateWindowsProcessTree(child.pid);
+    else child.kill("SIGKILL");
+    if (!await waitForChildExit(child, 5000)) throw new Error(`LANTERN_SERVICE_STOP_TIMEOUT:${child.pid}`);
+  }));
 }
 
 async function runServices(mode: "start" | "dev") {
   const paths = await ensureRuntimeLayout(getRuntimePaths());
   const lock = await acquireRuntimeLock(paths);
   await resetRuntimeTemp(paths);
-  const children: ChildProcess[] = [];
+  const services: ManagedService[] = [];
   let stopping = false;
+  let acceptStopRequests = false;
+  let checkingStopRequest = false;
   const shutdown = async () => {
     if (stopping) return;
     stopping = true;
-    await stopChildren(children);
+    clearInterval(stopMonitor);
+    await stopChildren(services);
     await lock.release();
   };
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
 
+  const checkStopRequest = async () => {
+    if (!acceptStopRequests || checkingStopRequest || stopping) return;
+    checkingStopRequest = true;
+    try {
+      if (await consumeRuntimeStopRequest(lock.owner, paths)) await shutdown();
+    } finally {
+      checkingStopRequest = false;
+    }
+  };
+  const stopMonitor = setInterval(() => void checkStopRequest(), 250);
+  stopMonitor.unref();
+
   try {
     await initializeRuntime();
+    if (stopping) return;
     resetConfigForTests();
     const config = getConfig();
     if (mode === "start") {
@@ -107,6 +176,7 @@ async function runServices(mode: "start" | "dev") {
 
     await assertPortAvailable("127.0.0.1", config.API_PORT, "Lantern API");
     await assertPortAvailable("localhost", config.WEB_PORT, "Lantern Web");
+    if (stopping) return;
 
     const sharedEnv = {
       LANTERN_DATA_DIR: paths.dataDir,
@@ -116,16 +186,19 @@ async function runServices(mode: "start" | "dev") {
       LANTERN_API_INTERNAL_URL: `http://127.0.0.1:${config.API_PORT}`,
     };
     const apiArgs = mode === "dev"
-      ? ["exec", "tsx", "watch", "apps/api/src/index.ts"]
-      : ["exec", "tsx", "apps/api/src/index.ts"];
+      ? ["--watch", "--import", "tsx", "apps/api/src/index.ts"]
+      : ["--import", "tsx", "apps/api/src/index.ts"];
+    const vinextCli = path.join(repositoryRoot, "node_modules", "vinext", "dist", "cli.js");
     const webArgs = mode === "dev"
-      ? ["exec", "vinext", "dev", "--host", "localhost", "--port", String(config.WEB_PORT), "--strictPort"]
-      : ["exec", "vinext", "start", "--hostname", "localhost", "--port", String(config.WEB_PORT)];
-    children.push(
-      spawnService(apiArgs, sharedEnv, path.join(paths.logsDir, "api.log")),
+      ? [vinextCli, "dev", "--host", "localhost", "--port", String(config.WEB_PORT), "--strictPort"]
+      : [vinextCli, "start", "--hostname", "localhost", "--port", String(config.WEB_PORT)];
+    services.push(
+      spawnService(apiArgs, sharedEnv, path.join(paths.logsDir, "api.log"), { ipc: true }),
       spawnService(webArgs, sharedEnv, path.join(paths.logsDir, "web.log")),
     );
-    const exitPromise = Promise.race(children.map((child) => new Promise<number>((resolve, reject) => {
+    acceptStopRequests = true;
+    void checkStopRequest();
+    const exitPromise = Promise.race(services.map(({ child }) => new Promise<number>((resolve, reject) => {
       child.once("error", reject);
       child.once("exit", (code) => resolve(code ?? 1));
     })));
@@ -157,13 +230,26 @@ async function showStatus() {
 }
 
 async function stopRuntime() {
-  const owner = await runtimeOwner();
+  const paths = getRuntimePaths();
+  const owner = await requestRuntimeStop(paths);
   if (!owner?.pid) {
     console.log("Lantern is already stopped.");
     return;
   }
-  process.kill(owner.pid, "SIGTERM");
   console.log(`Stopping Lantern (pid ${owner.pid}).`);
+  if (!owner.instanceId) {
+    if (process.platform === "win32") await terminateWindowsProcessTree(owner.pid);
+    else process.kill(owner.pid, "SIGTERM");
+  }
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const current = await runtimeOwner(paths);
+    if (!current || current.instanceId !== owner.instanceId) {
+      console.log("Lantern stopped.");
+      return;
+    }
+    await delay(250);
+  }
+  throw new Error(`LANTERN_STOP_TIMEOUT:${owner.pid}`);
 }
 
 async function doctor() {

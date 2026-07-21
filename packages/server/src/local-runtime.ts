@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getRuntimePaths, type LanternRuntimePaths } from "./runtime-paths";
@@ -100,26 +100,55 @@ function processExists(pid: number) {
 
 export type RuntimeLock = {
   paths: LanternRuntimePaths;
+  owner: RuntimeOwner;
   release(): Promise<void>;
 };
+
+export type RuntimeOwner = {
+  pid: number;
+  instanceId?: string;
+  startedAt?: string;
+};
+
+type RuntimeStopRequest = {
+  instanceId: string;
+  requestedAt: string;
+};
+
+async function readRuntimeOwner(paths: LanternRuntimePaths) {
+  return readFile(paths.lockFile, "utf8")
+    .then((value) => JSON.parse(value) as RuntimeOwner)
+    .catch(() => undefined);
+}
 
 export async function acquireRuntimeLock(paths = getRuntimePaths()): Promise<RuntimeLock> {
   await mkdir(paths.dataDir, { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const handle = await open(paths.lockFile, "wx", 0o600);
-      await handle.writeFile(`${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`);
+      const owner: RuntimeOwner = {
+        pid: process.pid,
+        instanceId: randomUUID(),
+        startedAt: new Date().toISOString(),
+      };
+      await handle.writeFile(`${JSON.stringify(owner)}\n`);
       await handle.close();
       return {
         paths,
+        owner,
         async release() {
-          const current = await readFile(paths.lockFile, "utf8").then((value) => JSON.parse(value) as { pid?: number }).catch(() => undefined);
-          if (current?.pid === process.pid) await unlink(paths.lockFile).catch(() => undefined);
+          const current = await readRuntimeOwner(paths);
+          if (current?.pid === owner.pid && current.instanceId === owner.instanceId) {
+            await Promise.all([
+              unlink(paths.lockFile).catch(() => undefined),
+              unlink(paths.stopRequestFile).catch(() => undefined),
+            ]);
+          }
         },
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const owner = await readFile(paths.lockFile, "utf8").then((value) => JSON.parse(value) as { pid?: number }).catch(() => undefined);
+      const owner = await readRuntimeOwner(paths);
       if (owner?.pid && processExists(owner.pid)) throw new Error(`LANTERN_ALREADY_RUNNING:${owner.pid}`);
       await unlink(paths.lockFile).catch(() => undefined);
     }
@@ -128,8 +157,32 @@ export async function acquireRuntimeLock(paths = getRuntimePaths()): Promise<Run
 }
 
 export async function runtimeOwner(paths = getRuntimePaths()) {
-  const owner = await readFile(paths.lockFile, "utf8").then((value) => JSON.parse(value) as { pid?: number; startedAt?: string }).catch(() => undefined);
+  const owner = await readRuntimeOwner(paths);
   return owner?.pid && processExists(owner.pid) ? owner : undefined;
+}
+
+export async function requestRuntimeStop(paths = getRuntimePaths()) {
+  const owner = await runtimeOwner(paths);
+  if (!owner?.instanceId) return owner;
+  const request: RuntimeStopRequest = {
+    instanceId: owner.instanceId,
+    requestedAt: new Date().toISOString(),
+  };
+  await writeRestricted(paths.stopRequestFile, `${JSON.stringify(request)}\n`);
+  return owner;
+}
+
+export async function consumeRuntimeStopRequest(owner: RuntimeOwner, paths = getRuntimePaths()) {
+  let request: RuntimeStopRequest | undefined;
+  try {
+    request = JSON.parse(await readFile(paths.stopRequestFile, "utf8")) as RuntimeStopRequest;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    await unlink(paths.stopRequestFile).catch(() => undefined);
+    return false;
+  }
+  await unlink(paths.stopRequestFile).catch(() => undefined);
+  return Boolean(owner.instanceId && request.instanceId === owner.instanceId);
 }
 
 export function runtimeRelativePath(paths: LanternRuntimePaths, filePath: string) {

@@ -5,7 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { unzipSync, zipSync } from "fflate";
-import { acquireRuntimeLock, ensureRuntimeLayout } from "../packages/server/src/local-runtime";
+import {
+  acquireRuntimeLock,
+  consumeRuntimeStopRequest,
+  ensureRuntimeLayout,
+  requestRuntimeStop,
+} from "../packages/server/src/local-runtime";
 import { createRuntimeBackup, restoreRuntimeBackup } from "../packages/server/src/runtime-backup";
 import { defaultLanternDataDir, getRuntimePaths } from "../packages/server/src/runtime-paths";
 import { getConfig, resetConfigForTests } from "../packages/server/src/config";
@@ -107,6 +112,24 @@ test("the runtime lock rejects a second local service and can be released", asyn
   const lock = await acquireRuntimeLock(paths);
   try {
     await assert.rejects(() => acquireRuntimeLock(paths), /LANTERN_ALREADY_RUNNING/);
+  } finally {
+    await lock.release();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime stop requests only target the active runtime instance", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-runtime-stop-"));
+  const paths = getRuntimePaths(dataDir);
+  const lock = await acquireRuntimeLock(paths);
+  try {
+    assert.ok(lock.owner.instanceId);
+    assert.deepEqual(await requestRuntimeStop(paths), lock.owner);
+    assert.equal(await consumeRuntimeStopRequest({ ...lock.owner, instanceId: "another-instance" }, paths), false);
+
+    await requestRuntimeStop(paths);
+    assert.equal(await consumeRuntimeStopRequest(lock.owner, paths), true);
+    assert.equal(await consumeRuntimeStopRequest(lock.owner, paths), false);
   } finally {
     await lock.release();
     await rm(dataDir, { recursive: true, force: true });

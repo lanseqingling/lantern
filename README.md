@@ -116,7 +116,9 @@ Windows 将 `./lantern` 换成 `lantern.cmd`。
 ./lantern package:release
 ```
 
-该命令需要在 Git checkout 中运行，并会在存在未跟踪文件时停止，避免把本地临时内容带入发行包。产物写入 `release/lantern-<version>-source.zip` 和 `release/SHA256SUMS`。推送与 `package.json` 一致的 `v<version>` 标签后，GitHub Actions 会在 macOS 和 Windows 上完成全新安装、启动、停止与重复启动验收，通过后创建 GitHub Release。
+该命令需要在 Git checkout 中运行，并会在存在未跟踪文件时停止，避免把本地临时内容带入发行包。产物写入 `release/lantern-<version>-source.zip` 和 `release/SHA256SUMS`。
+
+在 GitHub Actions 中手动运行 `Build source distribution`，会在 macOS 和 Windows 上完成全新安装、启动、停止与重复启动验收，并仅保留七天测试 Artifact。推送与 `package.json` 一致的 `v<version>` 标签会执行相同验收，通过后创建 GitHub Release；版本包含 `-alpha`、`-beta` 或 `-rc` 等预发行标识时，Release 自动标记为 Pre-release。
 
 ## 数据与配置
 

@@ -1,6 +1,7 @@
-name: Publish source release
+name: Build source distribution
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -13,7 +14,7 @@ jobs:
     name: Validate and package
     runs-on: ubuntu-latest
     steps:
-      - name: Check out tagged source
+      - name: Check out source
         uses: actions/checkout@v4
 
       - name: Set up Node.js
@@ -27,6 +28,7 @@ jobs:
           corepack prepare pnpm@10.20.0 --activate
 
       - name: Verify tag and package version
+        if: github.event_name == 'push'
         run: |
           PACKAGE_VERSION="$(node --print "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
@@ -52,6 +54,7 @@ jobs:
           name: lantern-source-release
           path: release/*
           if-no-files-found: error
+          retention-days: 7
 
   smoke:
     name: Fresh install (${{ matrix.os }})
@@ -88,6 +91,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: [package, smoke]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -102,10 +106,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          RELEASE_CHANNEL=()
+          if [[ "${VERSION}" == *-* ]]; then
+            RELEASE_CHANNEL+=(--prerelease)
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             release/lantern-*-source.zip \
             release/SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Lantern ${GITHUB_REF_NAME}" \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            "${RELEASE_CHANNEL[@]}"

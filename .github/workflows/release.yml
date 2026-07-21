@@ -22,10 +22,8 @@ jobs:
         with:
           node-version: 22.13.1
 
-      - name: Activate repository package manager
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.20.0 --activate
+      - name: Prepare Lantern dependencies
+        run: ./lantern setup
 
       - name: Verify tag and package version
         if: github.event_name == 'push'
@@ -33,20 +31,17 @@ jobs:
           PACKAGE_VERSION="$(node --print "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
 
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Validate source
         run: |
-          pnpm audit:release
-          pnpm lint
-          pnpm typecheck
-          pnpm test
-          pnpm test:integration
-          pnpm build
+          ./lantern audit:release
+          ./lantern lint
+          ./lantern typecheck
+          ./lantern test
+          ./lantern test:integration
+          ./lantern build
 
       - name: Build source release
-        run: pnpm package:release
+        run: ./lantern package:release
 
       - name: Upload release assets for verification
         uses: actions/upload-artifact@v4

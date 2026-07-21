@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ensureRuntimeLayout } from "../packages/server/src/local-runtime";
 import { getRuntimePaths } from "../packages/server/src/runtime-paths";
+import { prismaClientReady, prismaSchemaState, recordPrismaClientState } from "./prisma-client-state.mjs";
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -16,6 +15,10 @@ function pnpmCli() {
 
 export function runCommand(args: string[], options: { env?: Record<string, string | undefined>; quiet?: boolean } = {}) {
   return runExecutable(process.execPath, [pnpmCli(), ...args], options);
+}
+
+export function runNodeCommand(args: string[], options: { env?: Record<string, string | undefined>; quiet?: boolean } = {}) {
+  return runExecutable(process.execPath, args, options);
 }
 
 function runExecutable(executable: string, args: string[], options: { env?: Record<string, string | undefined>; quiet?: boolean } = {}) {
@@ -38,15 +41,6 @@ export function runPrismaCommand(args: string[], env: Record<string, string | un
   return runExecutable(process.execPath, [path.join(repositoryRoot, "node_modules", "prisma", "build", "index.js"), ...args], { env });
 }
 
-function prismaSchemaState() {
-  const hash = createHash("sha256");
-  for (const filename of ["package.json", path.join("prisma", "schema.prisma")]) {
-    hash.update(filename);
-    hash.update(readFileSync(path.join(repositoryRoot, filename)));
-  }
-  return hash.digest("hex");
-}
-
 export async function initializeRuntime(options: { seedIfEmpty?: boolean; forceGenerate?: boolean } = {}) {
   const paths = await ensureRuntimeLayout(getRuntimePaths());
   const runtimeEnv = {
@@ -59,12 +53,10 @@ export async function initializeRuntime(options: { seedIfEmpty?: boolean; forceG
   process.env.DATABASE_URL = paths.databaseUrl;
   process.env.RUST_LOG ||= "info";
 
-  const generatedStateFile = path.join(repositoryRoot, "node_modules", ".lantern-prisma-schema-state");
-  const expectedSchemaState = prismaSchemaState();
-  const generatedSchemaState = existsSync(generatedStateFile) ? readFileSync(generatedStateFile, "utf8").trim() : undefined;
-  if (options.forceGenerate || generatedSchemaState !== expectedSchemaState) {
+  const expectedSchemaState = prismaSchemaState(repositoryRoot);
+  if (options.forceGenerate || !prismaClientReady(repositoryRoot, expectedSchemaState)) {
     await runPrismaCommand(["generate"], runtimeEnv);
-    writeFileSync(generatedStateFile, `${expectedSchemaState}\n`, { encoding: "utf8", mode: 0o600 });
+    recordPrismaClientState(repositoryRoot, expectedSchemaState);
   }
   await runPrismaCommand(["migrate", "deploy"], runtimeEnv);
 

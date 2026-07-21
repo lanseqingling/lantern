@@ -28,14 +28,29 @@ npm --version
 
 ### 2. 获取 Lantern
 
-可以从 GitHub 仓库选择 **Code → Download ZIP** 并解压，也可以使用 Git：
+推荐从 [GitHub Releases](https://github.com/lanseqingling/lantern/releases/latest) 下载 `lantern-<version>-source.zip` 和同一版本的 `SHA256SUMS`。也可以使用 Git：
 
 ```bash
 git clone https://github.com/lanseqingling/lantern.git
 cd lantern
 ```
 
-下载 ZIP 时，解压后在解压目录打开终端，再继续下一步。
+下载 Release 后先校验文件。macOS：
+
+```bash
+shasum -a 256 -c SHA256SUMS
+```
+
+Windows PowerShell：
+
+```powershell
+$archive = Get-ChildItem .\lantern-*-source.zip | Select-Object -First 1
+$expected = (Get-Content .\SHA256SUMS).Split()[0].ToLower()
+$actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+$actual -eq $expected
+```
+
+校验通过后解压源码包，在解压目录打开终端，再继续下一步。
 
 ### 3. 启动
 
@@ -69,6 +84,8 @@ lantern start
 lantern status
 lantern stop
 lantern doctor
+lantern backup:create
+lantern backup:restore <backup-file>
 ```
 
 不添加全局命令时，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`。
@@ -93,13 +110,13 @@ lantern doctor
 
 Windows 将 `./lantern` 换成 `lantern.cmd`。
 
-创建可分发的源码 ZIP：
+创建可分发的源码 ZIP 和 SHA-256 校验文件：
 
 ```bash
-./lantern package:source
+./lantern package:release
 ```
 
-该命令需要在 Git checkout 中运行，并会在存在未跟踪文件时停止，避免把本地临时内容带入发行包。产物写入 `release/lantern-<version>-source.zip`；接收者可以在普通解压目录中安装 Node.js 并运行 `npm start`。
+该命令需要在 Git checkout 中运行，并会在存在未跟踪文件时停止，避免把本地临时内容带入发行包。产物写入 `release/lantern-<version>-source.zip` 和 `release/SHA256SUMS`。推送与 `package.json` 一致的 `v<version>` 标签后，GitHub Actions 会在 macOS 和 Windows 上完成全新安装、启动、停止与重复启动验收，通过后创建 GitHub Release。
 
 ## 数据与配置
 
@@ -124,6 +141,33 @@ macOS 示例：
 ```bash
 LANTERN_DATA_DIR="$HOME/LanternData" WEB_PORT=3100 npm start
 ```
+
+## 备份与恢复
+
+备份包含 SQLite 中的作品、工作稿、消息、任务、候选和快照，以及本地对象存储中的图片与导出文件。模型 Key、安装令牌、日志和临时文件不会写入备份。
+
+备份和恢复要求 Lantern 已停止：
+
+```bash
+lantern stop
+lantern backup:create
+lantern backup:restore "/path/to/lantern-backup-<time>.zip"
+```
+
+默认备份写入数据目录的 `backups/`。恢复前会验证 manifest、每个文件的 SHA-256 和 SQLite 完整性；验证失败不会替换现有作品。恢复会覆盖当前数据库和对象文件，但保留当前安装的 Provider 配置。
+
+## 诊断与支持范围
+
+`lantern doctor` 检查 Node.js 版本、数据目录写入权限、Provider 配置权限、SQLite 完整性、已引用对象文件和运行服务健康状态。输出只包含 Provider 是否已配置，不显示模型 Key 或安装令牌。
+
+遇到启动问题时依次检查：
+
+1. 运行 `lantern doctor`；
+2. 确认 `config/runtime.json` 中的 Web 与 API 端口未被占用；
+3. 查看数据目录中的 `logs/api.log` 与 `logs/web.log`；
+4. 修正问题后重新运行 `lantern start`。
+
+正式 Release 以 GitHub Actions 实际通过的平台为准，当前发行链路覆盖 macOS 14 和 Windows Server 2022。Linux 未列入本阶段支持范围。
 
 ## 架构
 

@@ -14,10 +14,12 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 | 启动本地产品 | `./lantern start` |
 | 启动开发进程 | `./lantern dev` |
 | 运行时诊断 | `./lantern doctor` |
+| 创建一致备份 | `./lantern backup:create` |
+| 恢复一致备份 | `./lantern backup:restore <backup-file>` |
 | 类型检查 | `./lantern typecheck` |
 | 单元测试 | `./lantern test` |
 | 构建 | `./lantern build` |
-| 打包源码发行包 | `./lantern package:source` |
+| 打包源码发行包 | `./lantern package:release` |
 
 按变更范围运行 `package.json` 中对应的专项命令；交付前至少完成相符的类型检查、测试和构建。
 
@@ -43,6 +45,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 - SQLite 保存作品和工作流事实；Local Task Runner 只负责唤醒与进程内并发，不能成为任务或作品事实源。
 - 图片等二进制内容进入用户数据目录中的本地对象存储；数据库与作品协议只保存稳定对象键和版本引用。
 - 数据库、对象、配置、日志和临时文件必须通过统一 runtime paths 解析；生产数据不得写入仓库、安装目录或当前工作目录。
+- 备份只包含作品事实与对象文件，不包含 Provider Key、安装令牌和日志；恢复必须先完成 manifest、SHA-256 与 SQLite 完整性校验，并在服务停止时原子替换数据库和对象目录。
 - 本地 API 只监听 loopback，并通过安装级令牌映射到稳定本地用户；请求头不能切换用户身份。
 - 确定性编辑通过领域 Capability 产生原子变更。组件、Agent 和 API 不各自复制参数契约、对象 ID 规则或业务默认值。
 - 生产、演示和测试运行时必须明确隔离；生产失败不得静默回退到 mock 或示例数据。

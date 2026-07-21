@@ -1,0 +1,111 @@
+name: Publish source release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Validate and package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+
+      - name: Activate repository package manager
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.20.0 --activate
+
+      - name: Verify tag and package version
+        run: |
+          PACKAGE_VERSION="$(node --print "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate source
+        run: |
+          pnpm audit:release
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm test:integration
+          pnpm build
+
+      - name: Build source release
+        run: pnpm package:release
+
+      - name: Upload release assets for verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: lantern-source-release
+          path: release/*
+          if-no-files-found: error
+
+  smoke:
+    name: Fresh install (${{ matrix.os }})
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+
+      - name: Download source release
+        uses: actions/download-artifact@v4
+        with:
+          name: lantern-source-release
+          path: release
+
+      - name: Verify, extract, start, restart, and stop
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem release/lantern-*-source.zip | Select-Object -First 1
+          $expected = (Get-Content release/SHA256SUMS).Split()[0].ToLower()
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "SHA-256 mismatch for $archive" }
+          Expand-Archive -Path $archive -DestinationPath extracted
+          $source = Get-ChildItem extracted -Directory | Select-Object -First 1
+          Set-Location $source
+          node scripts/release-smoke.mjs
+
+  publish:
+    name: Publish GitHub Release
+    needs: [package, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: lantern-source-release
+          path: release
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            release/lantern-*-source.zip \
+            release/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Lantern ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag

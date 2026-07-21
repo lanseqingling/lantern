@@ -1,17 +1,19 @@
+import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { getConfig, resetConfigForTests } from "../packages/server/src/config";
 import { acquireRuntimeLock, ensureRuntimeLayout, resetRuntimeTemp, runtimeOwner } from "../packages/server/src/local-runtime";
 import { getRuntimePaths } from "../packages/server/src/runtime-paths";
-import { initializeRuntime, repositoryRoot, runCommand } from "./runtime-init";
+import { initializeRuntime, repositoryRoot, runCommand, runPrismaCommand } from "./runtime-init";
 
-type Command = "start" | "dev" | "stop" | "status" | "doctor" | "sample:init";
+type Command = "start" | "dev" | "stop" | "status" | "doctor" | "sample:init" | "backup:create" | "backup:restore";
 const command = (process.argv[2] ?? "start") as Command;
-const supportedCommands: Command[] = ["start", "dev", "stop", "status", "doctor", "sample:init"];
+const commandArgs = process.argv.slice(3);
+const supportedCommands: Command[] = ["start", "dev", "stop", "status", "doctor", "sample:init", "backup:create", "backup:restore"];
 
 function pnpmCli() {
   const inherited = process.env.npm_execpath;
@@ -166,23 +168,147 @@ async function stopRuntime() {
 
 async function doctor() {
   const paths = await ensureRuntimeLayout(getRuntimePaths());
-  const major = Number(process.versions.node.split(".")[0]);
-  if (major < 22) throw new Error(`Node.js 22 or newer is required; found ${process.versions.node}.`);
-  await Promise.all([paths.dataDir, paths.configDir, paths.objectsDir, paths.tempDir].map((directory) => access(directory)));
-  const runtimeJson = JSON.parse(await readFile(paths.runtimeConfigFile, "utf8")) as unknown;
-  resetConfigForTests();
-  const config = getConfig();
+  const issues: string[] = [];
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  const nodeSupported = major > 22 || (major === 22 && minor >= 13);
+  if (!nodeSupported) issues.push(`Node.js 22.13 or newer is required; found ${process.versions.node}.`);
+
+  let dataWritable = false;
+  const writeProbe = path.join(paths.tempDir, `.doctor-${process.pid}`);
+  try {
+    await Promise.all([paths.dataDir, paths.configDir, paths.objectsDir, paths.tempDir].map((directory) => access(directory)));
+    await writeFile(writeProbe, "ok", { mode: 0o600 });
+    await rm(writeProbe, { force: true });
+    dataWritable = true;
+  } catch (error) {
+    issues.push(`Lantern data directory is not writable: ${error instanceof Error ? error.message : error}`);
+  }
+
+  let providerPermissions: string | undefined;
+  if (process.platform !== "win32") {
+    providerPermissions = ((await stat(paths.providerConfigFile)).mode & 0o777).toString(8).padStart(3, "0");
+    if (providerPermissions !== "600") issues.push(`Provider configuration permissions should be 600; found ${providerPermissions}.`);
+  }
+
+  let runtimeJson: unknown;
+  let config: ReturnType<typeof getConfig> | undefined;
+  try {
+    runtimeJson = JSON.parse(await readFile(paths.runtimeConfigFile, "utf8")) as unknown;
+    resetConfigForTests();
+    config = getConfig();
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : String(error));
+  }
+
+  let databaseIntegrity = "unavailable";
+  let checkedObjects = 0;
+  let missingObjects = 0;
+  let damagedObjects = 0;
+  const { initializeDatabaseConnection, prisma } = await import("../packages/server/src/db");
+  try {
+    await initializeDatabaseConnection();
+    const integrity = await prisma.$queryRawUnsafe<Array<{ integrity_check: string }>>("PRAGMA integrity_check");
+    databaseIntegrity = integrity.length === 1 && integrity[0]?.integrity_check === "ok" ? "ok" : "failed";
+    if (databaseIntegrity !== "ok") issues.push("SQLite integrity check failed.");
+    const versions = await prisma.assetVersion.findMany({
+      where: { objectKey: { not: null } },
+      select: { objectKey: true, byteSize: true, checksum: true },
+    });
+    for (const version of versions) {
+      if (!version.objectKey) continue;
+      checkedObjects += 1;
+      const objectFile = path.resolve(paths.objectsDir, version.objectKey);
+      if (!objectFile.startsWith(`${path.resolve(paths.objectsDir)}${path.sep}`)) {
+        damagedObjects += 1;
+        continue;
+      }
+      try {
+        const bytes = await readFile(objectFile);
+        const objectChecksum = createHash("sha256").update(bytes).digest("hex");
+        if ((version.byteSize !== null && version.byteSize !== bytes.byteLength) || (version.checksum && version.checksum !== objectChecksum)) damagedObjects += 1;
+      } catch {
+        missingObjects += 1;
+      }
+    }
+    if (missingObjects) issues.push(`${missingObjects} referenced object file(s) are missing.`);
+    if (damagedObjects) issues.push(`${damagedObjects} referenced object file(s) failed validation.`);
+  } catch (error) {
+    issues.push(`Unable to inspect Lantern database: ${error instanceof Error ? error.message : error}`);
+  } finally {
+    await prisma.$disconnect().catch(() => undefined);
+  }
+
+  const owner = await runtimeOwner(paths);
+  let serviceHealth: "running" | "stopped" | "unhealthy" = owner ? "running" : "stopped";
+  if (owner && config) {
+    try {
+      await Promise.all([
+        waitForUrl(`http://127.0.0.1:${config.API_PORT}/health`, 2),
+        waitForUrl(`http://localhost:${config.WEB_PORT}`, 2),
+      ]);
+    } catch {
+      serviceHealth = "unhealthy";
+      issues.push("Lantern has a runtime lock but one or more services are unhealthy.");
+    }
+  }
+
   console.log(JSON.stringify({
-    node: process.versions.node,
-    dataDir: paths.dataDir,
+    status: issues.length ? "attention" : "ok",
+    node: { version: process.versions.node, supported: nodeSupported },
+    data: { directory: paths.dataDir, writable: dataWritable, providerConfigPermissions: providerPermissions },
     runtimeConfig: runtimeJson,
-    providers: {
+    database: { integrity: databaseIntegrity },
+    objects: { checked: checkedObjects, missing: missingObjects, damaged: damagedObjects },
+    providers: config ? {
       text: { provider: config.TEXT_MODEL_PROVIDER, configured: Boolean(config.TEXT_MODEL_API_KEY) },
       image: { provider: config.IMAGE_MODEL_PROVIDER, configured: Boolean(config.IMAGE_MODEL_API_KEY) },
       vision: { configured: Boolean(config.VISION_MODEL_API_KEY ?? config.IMAGE_MODEL_API_KEY) },
-    },
-    service: await runtimeOwner() ? "running" : "stopped",
+    } : "unavailable",
+    service: { status: serviceHealth, pid: owner?.pid },
+    issues,
   }, null, 2));
+  if (issues.length) process.exitCode = 1;
+}
+
+async function withExclusiveRuntime<T>(operation: (paths: ReturnType<typeof getRuntimePaths>) => Promise<T>) {
+  const paths = await ensureRuntimeLayout(getRuntimePaths());
+  const lock = await acquireRuntimeLock(paths);
+  try {
+    await resetRuntimeTemp(paths);
+    return await operation(paths);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function createBackup() {
+  await withExclusiveRuntime(async (paths) => {
+    await initializeRuntime({ seedIfEmpty: false });
+    const { createRuntimeBackup } = await import("../packages/server/src/runtime-backup");
+    const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string };
+    const result = await createRuntimeBackup(paths, {
+      lanternVersion: packageJson.version,
+      outputFile: commandArgs[0],
+    });
+    console.log(`Lantern backup created: ${result.outputFile}`);
+  });
+}
+
+async function restoreBackup() {
+  const backupFile = commandArgs[0];
+  if (!backupFile) throw new Error("Usage: lantern backup:restore <backup-file>");
+  await withExclusiveRuntime(async (paths) => {
+    await initializeRuntime({ seedIfEmpty: false });
+    const { restoreRuntimeBackup } = await import("../packages/server/src/runtime-backup");
+    const manifest = await restoreRuntimeBackup(paths, backupFile, {
+      prepareDatabase: async (databaseFile) => runPrismaCommand(["migrate", "deploy"], {
+        ...process.env,
+        LANTERN_DATA_DIR: paths.dataDir,
+        DATABASE_URL: `file:${path.resolve(databaseFile).replaceAll("\\", "/")}`,
+      }),
+    });
+    console.log(`Lantern backup restored (${manifest.createdAt}, version ${manifest.lanternVersion}).`);
+  });
 }
 
 async function initializeSample() {
@@ -204,7 +330,9 @@ async function main() {
   if (command === "stop") return stopRuntime();
   if (command === "status") return showStatus();
   if (command === "doctor") return doctor();
-  return initializeSample();
+  if (command === "sample:init") return initializeSample();
+  if (command === "backup:create") return createBackup();
+  return restoreBackup();
 }
 
 main().catch((error) => {

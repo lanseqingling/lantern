@@ -12,7 +12,6 @@ const outputFile = path.join(outputDirectory, `${archiveRoot}-source.zip`);
 const excludedDirectories = new Set([
   ".git",
   ".idea",
-  ".lantern-runtime",
   ".next",
   ".pnpm-store",
   ".vinext",
@@ -35,7 +34,6 @@ function gitFiles(args) {
 }
 
 function excluded(relativePath) {
-  if (relativePath.replaceAll("\\", "/") === "docs/local-open-source.md") return true;
   const parts = relativePath.split(/[\\/]/);
   if (parts.some((part) => excludedDirectories.has(part))) return true;
   const name = parts.at(-1) || "";

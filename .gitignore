@@ -49,6 +49,3 @@ next-env.d.ts
 
 # optional repository-local development override
 /lantern-data/
-
-# Previous checkout data is never read by the current runtime.
-/.lantern-runtime/

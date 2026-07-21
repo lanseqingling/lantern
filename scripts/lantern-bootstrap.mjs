@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { prismaClientReady, prismaSchemaState, recordPrismaClientState } from "./prisma-client-state.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJsonPath = path.join(repositoryRoot, "package.json");
@@ -19,8 +21,14 @@ const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
 const pnpmExecutable = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const bundledPnpmCli = path.join(repositoryRoot, "node_modules", "pnpm", "bin", "pnpm.cjs");
 const installMarker = path.join(repositoryRoot, "node_modules", ".lantern-install-state");
-const prismaMarker = path.join(repositoryRoot, "node_modules", ".lantern-prisma-schema-state");
 const prismaCli = path.join(repositoryRoot, "node_modules", "prisma", "build", "index.js");
+
+function toolCacheRoot() {
+  if (process.env.LANTERN_TOOL_CACHE_DIR) return path.resolve(process.env.LANTERN_TOOL_CACHE_DIR);
+  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Caches", "Lantern", "tools");
+  if (process.platform === "win32") return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Lantern", "Cache", "tools");
+  return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "lantern", "tools");
+}
 
 function assertNodeVersion() {
   const [major, minor] = process.versions.node.split(".").map(Number);
@@ -53,17 +61,38 @@ function availablePnpmExecutable() {
   return undefined;
 }
 
+function cachedPnpmExecutable() {
+  const packageRoot = path.join(toolCacheRoot(), `pnpm-${pnpmVersion}`);
+  const cli = path.join(packageRoot, "node_modules", "pnpm", "bin", "pnpm.cjs");
+  if (existsSync(cli)) {
+    const current = commandResult(process.execPath, [cli, "--version"], { encoding: "utf8" });
+    if (current.status === 0 && current.stdout.trim() === pnpmVersion) return { executable: process.execPath, prefix: [cli] };
+  }
+  if (!npmAvailable()) return undefined;
+  mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
+  const install = commandResult(npmExecutable, [
+    "install",
+    "--prefix",
+    packageRoot,
+    "--no-save",
+    "--ignore-scripts",
+    "--package-lock=false",
+    `pnpm@${pnpmVersion}`,
+  ], { stdio: "inherit" });
+  if (install.error) throw install.error;
+  if (install.status !== 0 || !existsSync(cli)) return undefined;
+  return { executable: process.execPath, prefix: [cli] };
+}
+
 function npmAvailable() {
   return commandResult(npmExecutable, ["--version"], { stdio: "ignore" }).status === 0;
 }
 
-function runPnpm(args) {
-  const availablePnpm = availablePnpmExecutable();
+function runPnpm(args, options = {}) {
+  const availablePnpm = options.external ? cachedPnpmExecutable() : availablePnpmExecutable();
   const result = availablePnpm
     ? commandResult(availablePnpm.executable, [...availablePnpm.prefix, ...args], { stdio: "inherit" })
-    : npmAvailable()
-      ? commandResult(npmExecutable, ["exec", "--yes", `--package=pnpm@${pnpmVersion}`, "--", "pnpm", ...args], { stdio: "inherit" })
-      : undefined;
+    : undefined;
   if (!result) {
     throw new Error(`Neither pnpm ${pnpmVersion} nor npm is available. Install Node.js 22.13+ with npm and retry.`);
   }
@@ -94,23 +123,13 @@ function installDependencies(force = false) {
   const expectedState = dependencyState();
   if (!force && dependenciesReady(expectedState)) return;
   console.log(`Preparing Lantern dependencies with pnpm ${pnpmVersion}...`);
-  runPnpm(["install", "--frozen-lockfile"]);
+  runPnpm(["install", "--frozen-lockfile"], { external: true });
   writeFileSync(installMarker, `${expectedState}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-function prismaSchemaState() {
-  const hash = createHash("sha256");
-  for (const filename of ["package.json", path.join("prisma", "schema.prisma")]) {
-    hash.update(filename);
-    hash.update(readFileSync(path.join(repositoryRoot, filename)));
-  }
-  return hash.digest("hex");
-}
-
 function ensurePrismaClient() {
-  const expectedState = prismaSchemaState();
-  const currentState = existsSync(prismaMarker) ? readFileSync(prismaMarker, "utf8").trim() : undefined;
-  if (currentState === expectedState && existsSync(path.join(repositoryRoot, "node_modules", ".prisma", "client", "index.js"))) return;
+  const expectedState = prismaSchemaState(repositoryRoot);
+  if (prismaClientReady(repositoryRoot, expectedState)) return;
   console.log("Generating the Lantern database client...");
   const result = commandResult(process.execPath, [prismaCli, "generate"], {
     stdio: "inherit",
@@ -118,7 +137,7 @@ function ensurePrismaClient() {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
-  writeFileSync(prismaMarker, `${expectedState}\n`, { encoding: "utf8", mode: 0o600 });
+  recordPrismaClientState(repositoryRoot, expectedState);
 }
 
 function printHelp() {
@@ -131,6 +150,8 @@ Usage:
   ./lantern status      Show local service status
   ./lantern doctor      Inspect the local runtime
   ./lantern sample:init Initialize the sample in an empty database
+  ./lantern backup:create [file] Create a consistent work backup
+  ./lantern backup:restore <file> Restore a validated work backup
   ./lantern setup       Install the locked dependencies only
   ./lantern test        Run any package.json script without global pnpm
 
@@ -155,7 +176,7 @@ installDependencies();
 ensurePrismaClient();
 const requestedCommand = args[0] ?? "start";
 const commandArgs = args.slice(1);
-const runtimeCommands = new Set(["start", "dev", "stop", "status", "doctor", "sample:init"]);
+const runtimeCommands = new Set(["start", "dev", "stop", "status", "doctor", "sample:init", "backup:create", "backup:restore"]);
 if (runtimeCommands.has(requestedCommand)) {
   runPnpm(["run", "lantern", requestedCommand, ...commandArgs]);
 } else if (requestedCommand !== "lantern" && packageJson.scripts?.[requestedCommand]) {

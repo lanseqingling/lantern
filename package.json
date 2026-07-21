@@ -20,6 +20,8 @@
     "build": "vinext build",
     "start": "node scripts/lantern-bootstrap.mjs start",
     "package:source": "node scripts/package-source.mjs",
+    "package:release": "node scripts/package-source.mjs && node scripts/release-checksums.mjs",
+    "audit:release": "node scripts/audit-release.mjs",
     "runtime:init": "node scripts/run-tsx.mjs scripts/runtime-init.ts",
     "test": "node scripts/run-tsx.mjs scripts/run-tests.ts unit",
     "test:unit": "node scripts/run-tsx.mjs scripts/run-tests.ts unit",
@@ -46,7 +48,8 @@
     "db:reset:campus-letter": "node scripts/run-tsx.mjs scripts/reset-to-campus-letter.ts",
     "db:studio": "node scripts/run-tsx.mjs scripts/prisma.ts studio",
     "provider:probe": "node scripts/run-tsx.mjs scripts/probe-providers.ts",
-    "agent:probe": "node scripts/run-tsx.mjs scripts/probe-agent-planner.ts"
+    "agent:probe": "node scripts/run-tsx.mjs scripts/probe-agent-planner.ts",
+    "release:smoke": "node scripts/release-smoke.mjs"
   },
   "dependencies": {
     "@fastify/cors": "11.1.0",

@@ -1,7 +1,7 @@
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { initializeRuntime, repositoryRoot, runCommand } from "./runtime-init";
+import { initializeRuntime, repositoryRoot, runNodeCommand } from "./runtime-init";
 
 const suite = process.argv[2] ?? "unit";
 
@@ -37,7 +37,7 @@ const env = {
 try {
   Object.assign(process.env, env);
   await initializeRuntime({ seedIfEmpty: false });
-  await runCommand(["exec", "tsx", "--test", ...await testFiles()], { env });
+  await runNodeCommand(["--import", "tsx", "--test", ...await testFiles()], { env });
 } finally {
   await rm(dataDir, { recursive: true, force: true });
 }

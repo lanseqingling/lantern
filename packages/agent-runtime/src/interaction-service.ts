@@ -6,7 +6,7 @@ import { runAgentLoop, type AgentPlanner, type AgentTool } from "./agent-loop";
 import { buildAgentContext } from "./context-builder";
 import { planInteraction, type InteractionPlanningTrace } from "./orchestrator";
 import type { InteractionDecision, WorkspaceReference } from "./schemas";
-import { createGenerationTask, getActiveConversationTask, type CreateTaskInput } from "./task-service";
+import { getActiveConversationTask, invokeTaskCapability, type CreateTaskInput } from "./task-service";
 import { analyzeImageVersions } from "./visual-context";
 
 export type AgentImageAttachment = {
@@ -37,7 +37,7 @@ type PlanningContext = {
 
 export type AgentInteractionResult = {
   decision: InteractionDecision;
-  task?: Awaited<ReturnType<typeof createGenerationTask>>;
+  task?: Awaited<ReturnType<typeof invokeTaskCapability>>;
 };
 
 type AgentInteractionOptions = {
@@ -250,13 +250,14 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
         decision: Extract<InteractionDecision, { kind: "ready_to_run" }>;
         targetSelection: AgentInteractionInput["selection"];
       };
-      const task = await createGenerationTask({
+      const task = await invokeTaskCapability({
         ownerUserId: input.ownerUserId,
         projectId: conversation.projectId,
         conversationId: conversation.id,
-        taskType: decision.taskType,
-        instruction: input.message,
-        scope: decision.scope,
+        capabilityId: decision.capabilityId,
+        actor: "internal",
+        client: { name: "lantern-workbench" },
+        arguments: { instruction: input.message },
         selection: targetSelection,
         explicitReferences: resolvedReferences,
         plannerTrace: plannerTraces,

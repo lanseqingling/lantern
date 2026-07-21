@@ -14,6 +14,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 | 启动本地产品 | `./lantern start` |
 | 启动开发进程 | `./lantern dev` |
 | 运行时诊断 | `./lantern doctor` |
+| 安装外置 Agent 应用接入 | `./lantern agent:install` |
 | 创建一致备份 | `./lantern backup:create` |
 | 恢复一致备份 | `./lantern backup:restore <backup-file>` |
 | 类型检查 | `./lantern typecheck` |
@@ -37,6 +38,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 | `docs/` | 产品、交互、协议和 Agent 的正式文档。 |
 | `samples/`、`apps/web/public/samples/` | 显式示例作品与静态素材。 |
 | `scripts/`、`tests/` | 启动、构建、打包、诊断脚本与自动化验证。根目录 `lantern`/`lantern.cmd` 只提供薄命令入口。 |
+| `skills/` | 随 Lantern 分发的应用级 Agent Skill 源；由应用安装器部署到目标 Agent 的用户级目录，不作为仓库开发 Skill 自动发现。 |
 
 ## Architecture Boundaries
 

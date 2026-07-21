@@ -7,6 +7,29 @@ import { commitChangeSet } from "./workbench-service";
 
 type FrameCandidateApplicationTarget = { unitId: string; frameId: string };
 
+export type CandidateApplicationContext = {
+  actor: "human" | "internal" | "external";
+  client: { name: string; version?: string };
+};
+
+export type CandidateApplyPolicy = {
+  externalAgent: "direct" | "product_confirmation";
+};
+
+export const defaultCandidateApplyPolicy: CandidateApplyPolicy = Object.freeze({
+  externalAgent: "direct",
+});
+
+export function assertCandidateApplicationAllowed(
+  context: CandidateApplicationContext,
+  policy: CandidateApplyPolicy = defaultCandidateApplyPolicy,
+) {
+  if (!context.client.name.trim()) throw new AppError("validation", "应用候选的客户端名称不能为空。", 400);
+  if (context.actor === "external" && policy.externalAgent === "product_confirmation") {
+    throw new AppError("confirmation_required", "当前设置要求在 Lantern 中预览并确认后应用候选。", 403);
+  }
+}
+
 export function assertFrameCandidateApplicationTarget(
   kind: CandidateKind,
   targetValue: Prisma.JsonValue,
@@ -26,7 +49,7 @@ export function assertFrameCandidateApplicationTarget(
   }
 }
 
-export async function applyAssetCandidate(userId: string, candidateId: string, expectedRevision: number) {
+async function applyAssetCandidate(userId: string, candidateId: string, expectedRevision: number) {
   const candidateState = await prisma.candidate.findFirst({ where: { id: candidateId, ownerUserId: userId, kind: CandidateKind.ASSET } });
   if (!candidateState) throw new AppError("not_found", "资产候选不存在。", 404);
   const workingState = await prisma.workingRevision.findFirst({ where: { projectId: candidateState.projectId }, orderBy: { revision: "desc" } });
@@ -110,7 +133,13 @@ export async function applyAssetCandidate(userId: string, candidateId: string, e
   }, { isolationLevel: "Serializable" });
 }
 
-export async function applyCandidate(ownerUserId: string, candidateId: string, input: { expectedWorkingRevision: number; expectedFrameTarget?: FrameCandidateApplicationTarget }) {
+export async function applyCandidate(
+  ownerUserId: string,
+  candidateId: string,
+  input: { expectedWorkingRevision: number; expectedFrameTarget?: FrameCandidateApplicationTarget },
+  application: CandidateApplicationContext,
+) {
+  assertCandidateApplicationAllowed(application);
   const candidate = await prisma.candidate.findFirst({ where: { id: candidateId, ownerUserId } });
   if (!candidate) throw new AppError("not_found", "候选不存在。", 404);
   const payload = candidate.payload && typeof candidate.payload === "object" && !Array.isArray(candidate.payload)

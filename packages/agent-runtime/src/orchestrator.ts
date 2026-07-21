@@ -102,7 +102,7 @@ export function guardInteractionPlan(input: InteractionInput, plan: InteractionP
     return { kind: "tool_call", capabilityId: capability.id, targetHandles };
   }
   if (capability.target.required) {
-    const currentSelection = input.selection.id && capability.target.selectionTypes.includes(input.selection.type)
+    const currentSelection = input.selection.id && capability.target.types.includes(input.selection.type)
       ? input.selection
       : undefined;
     const requestedCurrentPageTargets = (input.currentPageTargets ?? []).filter((target) => plan.targetHandles.includes(target.handle));
@@ -129,6 +129,7 @@ export function guardInteractionPlan(input: InteractionInput, plan: InteractionP
       kind: "decision",
       decision: {
         kind: "ready_to_run",
+        capabilityId: capability.id,
         message: capability.userMessage,
         scope: capability.scope,
         taskType: capability.taskType,
@@ -141,6 +142,7 @@ export function guardInteractionPlan(input: InteractionInput, plan: InteractionP
     kind: "decision",
     decision: {
       kind: "ready_to_run",
+      capabilityId: capability.id,
       message: capability.userMessage,
       scope: capability.scope,
       taskType: capability.taskType,

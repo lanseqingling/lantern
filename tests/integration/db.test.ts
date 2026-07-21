@@ -17,7 +17,9 @@ import { duplicateComic } from "@lantern/server/comic-service";
 import { putImage } from "@lantern/server/object-storage";
 import { commitChangeSet, revertCandidateApplication } from "@lantern/server/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
+import { getExternalAgentContext, inspectExternalAgentImages, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
 import { LocalTaskRunner } from "@lantern/agent-runtime/local-task-runner";
+import { invokeTaskCapability } from "@lantern/agent-runtime/task-service";
 import type { StoryboardBeat } from "@lantern/shared";
 import { seed } from "../../prisma/seed";
 
@@ -176,8 +178,90 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(context.comic.worldSummary, "雨夜城市会通过末班车留下失踪者线索。");
     assert.equal(context.comic.styleSummary, "克制的蓝绿色水彩与电影感夜景。");
     assert.deepEqual(context.comic.settings, [{ id: ids.comicSetting, title: "禁忌规则", content: "午夜后不得直呼失踪者姓名。" }]);
+    const externalProjects = await listExternalAgentProjects(ids.user);
+    assert.equal(externalProjects.projects.find((project) => project.projectId === ids.project)?.workingRevision, 1);
+    const externalContext = await getExternalAgentContext(ids.user, {
+      projectId: ids.project,
+      profile: "visual_observation",
+      pageId: document.units[0].id,
+    });
+    assert.equal(externalContext.baseRevision, 1);
+    assert.equal(externalContext.currentPage?.id, document.units[0].id);
+    const externalAssetTarget = externalContext.targets.find((target) => target.type === "asset" && target.label === "视觉风格");
+    assert.ok(externalAssetTarget);
+    assert.deepEqual(externalAssetTarget.assetVersionIds, [ids.visualStyleV1]);
+    const imageInspection = await inspectExternalAgentImages(ids.user, {
+      projectId: ids.project,
+      targetHandles: [externalAssetTarget.handle],
+      instruction: "描述角色外观",
+    }, async (input) => {
+      assert.equal(input.ownerUserId, ids.user);
+      assert.deepEqual(input.versionIds, [ids.visualStyleV1]);
+      return "角色穿着深色雨衣。";
+    });
+    assert.equal(imageInspection.observation.content, "角色穿着深色雨衣。");
+    await assert.rejects(() => inspectExternalAgentImages(`other-${ids.user}`, {
+      projectId: ids.project,
+      targetHandles: [externalAssetTarget.handle],
+    }), /不属于当前创作空间/);
+    const expiredContext = await getExternalAgentContext(ids.user, {
+      projectId: ids.project,
+      profile: "asset_generation",
+    }, { now: 1, lifetimeMs: 1 });
+    await assert.rejects(() => inspectExternalAgentImages(ids.user, {
+      projectId: ids.project,
+      targetHandles: [expiredContext.targets[0]!.handle],
+    }), /上下文目标已过期/);
     const comicFrame = document.units[0].frames[0];
     assert.ok(comicFrame);
+    const enqueuedTaskIds: string[] = [];
+    const taskInvocation = {
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      capabilityId: "storyboard.edit_single_entry",
+      actor: "external",
+      client: { name: "codex", version: "integration" },
+      arguments: { instruction: "让雨夜候车的紧张感更明显" },
+      selection: { type: "comic_frame", id: comicFrame.id, pageId: document.units[0].id, label: "画格 01" },
+      plannerTrace: { source: "integration-test" },
+      idempotencyKey: `semantic-capability:${suffix}`,
+    } satisfies Parameters<typeof invokeTaskCapability>[0];
+    const testTaskQueue = {
+      async enqueue(taskId) {
+        enqueuedTaskIds.push(taskId);
+      },
+    } satisfies Parameters<typeof invokeTaskCapability>[1];
+    const invokedTask = await invokeTaskCapability(taskInvocation, testTaskQueue);
+    assert.deepEqual(enqueuedTaskIds, [invokedTask.id]);
+    assert.equal(invokedTask.type, TaskType.STORYBOARD);
+    assert.equal(invokedTask.scope, "selected_comic_frame");
+    const invocationAudit = invokedTask.input as {
+      capability?: { id?: string; version?: number; catalogRevision?: number; catalogHash?: string };
+      invocation?: { actor?: string; client?: { name?: string; version?: string }; requestHash?: string };
+    };
+    assert.deepEqual(invocationAudit.capability && {
+      id: invocationAudit.capability.id,
+      version: invocationAudit.capability.version,
+      catalogRevision: invocationAudit.capability.catalogRevision,
+    }, {
+      id: "storyboard.edit_single_entry",
+      version: 1,
+      catalogRevision: 1,
+    });
+    assert.match(invocationAudit.capability?.catalogHash ?? "", /^[a-f0-9]{64}$/);
+    assert.deepEqual(invocationAudit.invocation && {
+      actor: invocationAudit.invocation.actor,
+      client: invocationAudit.invocation.client,
+    }, {
+      actor: "external",
+      client: { name: "codex", version: "integration" },
+    });
+    assert.match(invocationAudit.invocation?.requestHash ?? "", /^[a-f0-9]{64}$/);
+    await assert.rejects(() => invokeTaskCapability({
+      ...taskInvocation,
+      arguments: { instruction: "用同一个幂等键提交不同要求" },
+    }, testTaskQueue), /这个幂等键已经用于其他调用/);
+    assert.deepEqual(enqueuedTaskIds, [invokedTask.id]);
     const frameContext = await buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,

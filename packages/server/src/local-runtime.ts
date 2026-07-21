@@ -80,6 +80,16 @@ export async function ensureRuntimeLayout(paths = getRuntimePaths()) {
   }
   if (providerChanged) await writeRestricted(paths.providerConfigFile, providerText);
   else await chmod(paths.providerConfigFile, 0o600).catch(() => undefined);
+
+  await open(paths.mcpConfigFile, "wx", 0o600)
+    .then(async (handle) => {
+      await handle.writeFile(`LANTERN_MCP_TOKEN=${randomBytes(32).toString("base64url")}\n`);
+      await handle.close();
+    })
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+  await chmod(paths.mcpConfigFile, 0o600).catch(() => undefined);
   return paths;
 }
 

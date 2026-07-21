@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CandidateKind, TaskType } from "@prisma/client";
 import { runAgentLoop, type AgentLoopCheckpoint } from "@lantern/agent-runtime/agent-loop";
-import { getAgentCapability } from "@lantern/agent-runtime/capability-registry";
+import { getAgentCapability, semanticCapabilityCatalogManifest, type AgentTaskType } from "@lantern/agent-runtime/capability-registry";
 import { normalizeSelectionForCurrentView } from "@lantern/agent-runtime/context-builder";
 import { guardInteractionPlan, type InteractionInput } from "@lantern/agent-runtime/orchestrator";
 import { assetDraftSchema, explicitDialogueReferenceSchema, explicitWorkspaceReferencesSchema, interactionPlanSchema, parseCandidatePayload, type InteractionPlan } from "@lantern/agent-runtime/schemas";
-import { assertTaskCreationAllowed, type CreateTaskInput } from "@lantern/agent-runtime/task-service";
-import { assertFrameCandidateApplicationTarget } from "@lantern/server/candidate-service";
+import { assertTaskCreationAllowed } from "@lantern/agent-runtime/task-service";
+import { assertCandidateApplicationAllowed, assertFrameCandidateApplicationTarget } from "@lantern/server/candidate-service";
 import { isWorkbenchAgentCandidateVisible, workbenchAgentCandidateKinds, workbenchAgentTaskTypes } from "@lantern/server/workbench-agent-visibility";
 
 function guardedDecision(input: InteractionInput, plan: InteractionPlan) {
@@ -38,7 +38,7 @@ test("the current canvas view discards a selection left on another page", () => 
 });
 
 test("P0 only registers single-frame storyboard and asset generation tasks", () => {
-  const taskTypes: CreateTaskInput["taskType"][] = ["storyboard", "frame_image_generate", "asset_parse"];
+  const taskTypes: AgentTaskType[] = ["storyboard", "frame_image_generate", "asset_parse"];
 
   for (const taskType of taskTypes) assert.doesNotThrow(() => assertTaskCreationAllowed(taskType));
   for (const taskType of ["page_layout", "frame_image_refine", "dialogue", "export"]) {
@@ -89,14 +89,45 @@ test("frame-image application stays locked to the previewed frame", () => {
 test("storyboard entry editing and frame-image generation are distinct capabilities", () => {
   const capability = getAgentCapability("storyboard.edit_single_entry");
   assert.equal(capability?.target.required, true);
-  assert.deepEqual(capability?.target.selectionTypes, ["comic_frame"]);
+  assert.deepEqual(capability?.target.types, ["comic_frame"]);
   assert.equal(capability?.target.min, 1);
   assert.equal(capability?.target.max, 1);
   assert.match(capability?.description ?? "", /StoryboardBeat|文字标题与画面描述/);
   assert.match(capability?.description ?? "", /不能处理.*格内成稿图/);
   const frameImage = getAgentCapability("frame_image.generate_or_replace");
   assert.equal(frameImage?.taskType, "frame_image_generate");
-  assert.deepEqual(frameImage?.target, { required: true, selectionTypes: ["comic_frame"], min: 1, max: 1 });
+  assert.deepEqual(frameImage?.target, { required: true, types: ["comic_frame"], min: 1, max: 1 });
+});
+
+test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
+  const first = semanticCapabilityCatalogManifest();
+  const second = semanticCapabilityCatalogManifest();
+  assert.equal(first.revision, 1);
+  assert.equal(first.hash, second.hash);
+  assert.match(first.hash, /^[a-f0-9]{64}$/);
+  assert.doesNotThrow(() => JSON.stringify(first));
+  assert.deepEqual(first.capabilities.map((capability) => capability.id), [
+    "context.inspect_images",
+    "storyboard.edit_single_entry",
+    "frame_image.generate_or_replace",
+    "asset.generate_character_or_scene",
+  ]);
+  const storyboard = first.capabilities.find((capability) => capability.id === "storyboard.edit_single_entry");
+  assert.equal(storyboard?.version, 1);
+  assert.equal(storyboard?.agentAccess.external, "execute");
+  assert.deepEqual(storyboard?.executionModes, ["lantern_managed"]);
+  assert.deepEqual(storyboard?.domainCapabilities, ["update_storyboard_beat", "create_frame_storyboard_beat"]);
+  assert.equal(typeof storyboard?.inputSchema, "object");
+  assert.equal(typeof storyboard?.outputSchema, "object");
+});
+
+test("external Candidate Apply is direct in v1 but remains controlled by one service policy", () => {
+  const invocation = { actor: "external", client: { name: "codex" } } as const;
+  assert.doesNotThrow(() => assertCandidateApplicationAllowed(invocation));
+  assert.throws(
+    () => assertCandidateApplicationAllowed(invocation, { externalAgent: "product_confirmation" }),
+    /Lantern.*确认.*应用候选/,
+  );
 });
 
 test("ordinary conversation stays a direct answer without creating work or exposing routing details", () => {
@@ -137,6 +168,7 @@ test("a semantic asset plan enters the registered asset task without a mode", ()
   });
   assert.deepEqual(decision, {
     kind: "ready_to_run",
+    capabilityId: "asset.generate_character_or_scene",
     message: "我会按当前描述生成一个可编辑的资产候选；确认后才保存到资产空间。",
     scope: "reference_only",
     taskType: "asset_parse",
@@ -330,6 +362,7 @@ test("single storyboard-entry editing requires a selected comic frame and stays 
   assert.equal(guardedDecision(baseInteractionInput, plan).kind, "needs_input");
   assert.deepEqual(guardedDecision({ ...baseInteractionInput, selection: { type: "comic_frame", id: "frame-1" } }, plan), {
     kind: "ready_to_run",
+    capabilityId: "storyboard.edit_single_entry",
     message: "我会编辑目标画格的分镜条目，只更新它的标题和画面描述；应用前不会改变工作稿。",
     scope: "selected_comic_frame",
     taskType: "storyboard",
@@ -354,6 +387,7 @@ test("equivalent storyboard-entry wording shares one semantic plan instead of ke
       selection: { type: "comic_frame", id: "frame-1", label: "画格 01" },
     }, plan), {
       kind: "ready_to_run",
+      capabilityId: "storyboard.edit_single_entry",
       message: "我会编辑目标画格的分镜条目，只更新它的标题和画面描述；应用前不会改变工作稿。",
       scope: "selected_comic_frame",
       taskType: "storyboard",
@@ -378,6 +412,7 @@ test("frame image regeneration uses a separate candidate task", () => {
   });
   assert.deepEqual(decision, {
     kind: "ready_to_run",
+    capabilityId: "frame_image.generate_or_replace",
     message: "我会为目标画格生成新的格内图片；应用前不会替换当前画面。",
     scope: "selected_comic_frame",
     taskType: "frame_image_generate",

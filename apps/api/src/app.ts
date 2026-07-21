@@ -7,6 +7,7 @@ import { registerAgentRoutes } from "./routes/agent";
 import { registerAssetRoutes } from "./routes/assets";
 import { registerComicRoutes } from "./routes/comics";
 import { registerExportRoutes } from "./routes/export";
+import { registerMcpRoutes } from "./routes/mcp";
 import { registerSystemRoutes } from "./routes/system";
 import { registerWorkbenchRoutes } from "./routes/workbench";
 
@@ -37,6 +38,7 @@ export async function createApiApp(options: { logger?: FastifyServerOptions["log
   registerWorkbenchRoutes(app);
   registerAgentRoutes(app);
   registerExportRoutes(app);
+  registerMcpRoutes(app);
 
   return app;
 }

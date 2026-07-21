@@ -12,6 +12,7 @@ export type LanternRuntimePaths = {
   configDir: string;
   runtimeConfigFile: string;
   providerConfigFile: string;
+  mcpConfigFile: string;
   starterStateFile: string;
   logsDir: string;
   tempDir: string;
@@ -51,6 +52,7 @@ export function getRuntimePaths(dataDir = resolveLanternDataDir()): LanternRunti
     configDir,
     runtimeConfigFile: path.join(configDir, "runtime.json"),
     providerConfigFile: path.join(configDir, "providers.env"),
+    mcpConfigFile: path.join(configDir, "mcp.env"),
     starterStateFile: path.join(configDir, "starter.json"),
     logsDir: path.join(resolved, "logs"),
     tempDir: path.join(resolved, "temp"),

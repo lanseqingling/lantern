@@ -12,6 +12,7 @@ import {
 
 let app: FastifyInstance;
 let authorization: string;
+let mcpAuthorization: string;
 
 before(async () => {
   await initializeDatabaseConnection();
@@ -25,6 +26,7 @@ before(async () => {
     update: {},
   });
   authorization = `Bearer ${getConfig().LANTERN_LOCAL_TOKEN}`;
+  mcpAuthorization = `Bearer ${getConfig().LANTERN_MCP_TOKEN}`;
   app = await createApiApp({ logger: false });
   await app.ready();
 });
@@ -63,6 +65,72 @@ test("protected API routes resolve the stable local user", async () => {
   const body = response.json();
   assert.equal(body.data.id, LOCAL_USER_ID);
   assert.equal(body.data.email, LOCAL_USER_EMAIL);
+});
+
+test("MCP uses an independent loopback credential and rejects browser origins", async () => {
+  const payload = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "lantern-test", version: "1.0.0" },
+    },
+  };
+  const localToken = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { authorization, accept: "application/json, text/event-stream" },
+    payload,
+  });
+  assert.equal(localToken.statusCode, 401);
+
+  const browserOrigin = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { authorization: mcpAuthorization, origin: "http://localhost:18788", accept: "application/json, text/event-stream" },
+    payload,
+  });
+  assert.equal(browserOrigin.statusCode, 403);
+  assert.equal(browserOrigin.json().error.code, "mcp_origin_forbidden");
+
+  const initialized = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { authorization: mcpAuthorization, accept: "application/json, text/event-stream" },
+    payload,
+  });
+  assert.equal(initialized.statusCode, 200);
+  assert.match(initialized.body, /"name":"lantern"/);
+  assert.match(initialized.body, /当前端点只读/);
+
+  const tools = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { authorization: mcpAuthorization, accept: "application/json, text/event-stream" },
+    payload: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+  });
+  assert.equal(tools.statusCode, 200);
+  for (const name of ["lantern_projects_list", "lantern_context_get", "lantern_capabilities_list", "lantern_images_inspect"]) {
+    assert.match(tools.body, new RegExp(`"name":"${name}"`));
+  }
+  assert.match(tools.body, /"readOnlyHint":true/);
+
+  const capabilities = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { authorization: mcpAuthorization, accept: "application/json, text/event-stream" },
+    payload: {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "lantern_capabilities_list", arguments: {} },
+    },
+  });
+  assert.equal(capabilities.statusCode, 200);
+  assert.match(capabilities.body, /context\.inspect_images/);
+  assert.doesNotMatch(capabilities.body, /storyboard\.edit_single_entry/);
 });
 
 test("registered domain routes preserve validation and response envelopes", async () => {

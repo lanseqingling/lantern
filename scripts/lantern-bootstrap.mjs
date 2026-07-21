@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import commandCatalog from "./lantern-commands.json" with { type: "json" };
 import { prismaClientReady, prismaSchemaState, recordPrismaClientState } from "./prisma-client-state.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -148,17 +149,13 @@ function ensurePrismaClient() {
 }
 
 function printHelp() {
+  const runtimeHelp = Object.values(commandCatalog.runtimeCommands)
+    .map((entry) => `  ./lantern ${entry.usage.padEnd(25)} ${entry.description}`)
+    .join("\n");
   console.log(`Lantern local launcher
 
 Usage:
-  ./lantern start       Initialize and start Lantern
-  ./lantern dev         Start Lantern in development mode
-  ./lantern stop        Stop the running local service
-  ./lantern status      Show local service status
-  ./lantern doctor      Inspect the local runtime
-  ./lantern sample:init Initialize the sample in an empty database
-  ./lantern backup:create [file] Create a consistent work backup
-  ./lantern backup:restore <file> Restore a validated work backup
+${runtimeHelp}
   ./lantern setup       Install the locked dependencies only
   ./lantern test        Run any package.json script without global pnpm
 
@@ -183,7 +180,7 @@ installDependencies();
 ensurePrismaClient();
 const requestedCommand = args[0] ?? "start";
 const commandArgs = args.slice(1);
-const runtimeCommands = new Set(["start", "dev", "stop", "status", "doctor", "sample:init", "backup:create", "backup:restore"]);
+const runtimeCommands = new Set(Object.keys(commandCatalog.runtimeCommands));
 if (runtimeCommands.has(requestedCommand)) {
   runPnpm(["run", "lantern", requestedCommand, ...commandArgs]);
 } else if (requestedCommand !== "lantern" && packageJson.scripts?.[requestedCommand]) {

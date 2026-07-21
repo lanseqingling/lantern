@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { comicDocumentSchema, presentationUnitSchema } from "@lantern/shared";
+import { agentCapabilityIds } from "./capability-registry";
 
 const versionedWorkspaceObjectTypes = new Set(["asset", "character", "scene", "style", "storyboard_beat"]);
 
@@ -154,6 +155,7 @@ export const interactionDecisionSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("ready_to_run"),
+    capabilityId: z.enum(agentCapabilityIds),
     message: z.string().min(1),
     scope: z.enum(["reference_only", "selected_storyboard_beat", "selected_comic_frame", "selected_element", "current_page", "after_current", "whole_chapter"]),
     taskType: z.enum(["storyboard", "frame_image_generate", "asset_parse"]),
@@ -187,7 +189,7 @@ export const interactionPlanSchema = z.discriminatedUnion("outcome", [
     ...interactionPlanBase,
     outcome: z.literal("invoke_capability"),
     requestType: z.literal("operation"),
-    capabilityId: z.string().trim().min(1).max(160),
+    capabilityId: z.enum(agentCapabilityIds),
     targetHandles: z.array(z.string().trim().min(1).max(120)).max(24).default([]),
     arguments: z.record(z.string(), z.unknown()).default({}),
   }),

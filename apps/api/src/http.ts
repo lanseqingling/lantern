@@ -10,17 +10,46 @@ import { LOCAL_USER_ID } from "@lantern/server/local-runtime";
 
 const config = getConfig();
 
+function bearerTokenMatches(request: FastifyRequest, expected: string) {
+  const authorization = request.headers.authorization ?? "";
+  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  return supplied.length === expected.length
+    && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+}
+
+function isLoopbackHost(host: string | undefined) {
+  if (!host) return false;
+  try {
+    const hostname = new URL(`http://${host}`).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
 export function requestId(request: FastifyRequest) {
   return request.id || randomUUID();
 }
 
 export async function currentUser(request: FastifyRequest) {
-  const authorization = request.headers.authorization ?? "";
-  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  const expected = config.LANTERN_LOCAL_TOKEN;
-  const authenticated = supplied.length === expected.length
-    && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
-  if (!authenticated) throw new AppError("unauthorized", "无法验证本地 Lantern 安装身份。", 401);
+  if (!bearerTokenMatches(request, config.LANTERN_LOCAL_TOKEN)) {
+    throw new AppError("unauthorized", "无法验证本地 Lantern 安装身份。", 401);
+  }
+  const user = await prisma.user.findUnique({ where: { id: LOCAL_USER_ID } });
+  if (!user) throw new AppError("unauthorized", "本地 Lantern 工作空间尚未初始化。", 401);
+  return user;
+}
+
+export async function currentMcpUser(request: FastifyRequest) {
+  if (!isLoopbackHost(request.headers.host)) {
+    throw new AppError("mcp_loopback_required", "Lantern MCP 只接受 loopback 请求。", 403);
+  }
+  if (request.headers.origin) {
+    throw new AppError("mcp_origin_forbidden", "Lantern MCP 不接受浏览器跨域请求。", 403);
+  }
+  if (!bearerTokenMatches(request, config.LANTERN_MCP_TOKEN)) {
+    throw new AppError("unauthorized", "无法验证 Lantern MCP 凭证。", 401);
+  }
   const user = await prisma.user.findUnique({ where: { id: LOCAL_USER_ID } });
   if (!user) throw new AppError("unauthorized", "本地 Lantern 工作空间尚未初始化。", 401);
   return user;

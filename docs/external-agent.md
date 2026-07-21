@@ -23,7 +23,7 @@ Agent 的整体运行时、上下文、Task、Candidate 和写入边界见 [Agen
 ## 3. 总体架构
 
 ```text
-Codex / Claude Code / 其他外置 Agent
+兼容的本地外置 Agent
   ├─ Lantern Skill：对象语义、范围判断和协作习惯
   └─ Lantern MCP Server：工具发现与调用
          ↓
@@ -106,9 +106,9 @@ Manifest 是内置 Planner capability catalog、MCP tool、服务端执行守卫
 
 ### 5.1 传输与运行
 
-Lantern 首先提供 Streamable HTTP MCP endpoint。当前本地开发运行时由本地 API 暴露 endpoint，Codex 直接连接本机地址；未来部署为远程服务时复用相同工具和服务实现。
+Lantern 首先提供 Streamable HTTP MCP endpoint。外置 Agent 直接连接本机地址；未来部署为远程服务时复用相同工具和服务实现。MCP 只是协议适配层，产品内调用继续直接使用同一个语义 Capability 服务，不绕行 MCP。
 
-本地运行只需要轻量调用身份：MCP 连接映射到当前本地用户，并把客户端记录为外置 Agent。未来登录和多用户部署可以替换连接身份解析与授权策略，不改变工具输入、Capability 或作品归属。
+本地运行使用独立于产品 Web/API 安装令牌的 MCP 凭证：凭证只对 MCP endpoint 有效，连接映射到当前本地用户，并把客户端记录为外置 Agent。未来登录和多用户部署可以替换连接身份解析与授权策略，不改变工具输入、Capability 或作品归属。服务端能力、工具契约和 Skill 不包含客户端专属业务分支。
 
 MCP 初始化说明只保留跨工具的硬规则：
 
@@ -132,7 +132,7 @@ MCP 初始化说明只保留跨工具的硬规则：
 - `lantern_capabilities_list`：返回当前调用者可见 Capability、版本、effect、执行模式和目录 revision。
 - `lantern_images_inspect`：读取明确附件或目标图片，返回只读视觉 Observation。
 
-`lantern_context_get` 不依赖工作台当前选择。外置 Agent 必须显式提供 Project 和可选焦点；服务端根据可见对象构造受控 handle，后续工具只接受本次上下文存在的 handle 或经过所有权校验的稳定引用。
+`lantern_context_get` 不依赖工作台当前选择。外置 Agent 必须显式提供 Project 和可选焦点；服务端根据可见对象构造不可猜测的受控 handle，并把 handle 绑定到 owner、Project、base revision 和有效期。后续工具只接受本次上下文存在且仍有效的 handle，或经过所有权校验的稳定引用；不能依赖 MCP 连接内存维持目标事实。
 
 #### 当前创作能力
 
@@ -149,7 +149,7 @@ MCP 初始化说明只保留跨工具的硬规则：
 
 创建异步任务的工具立即返回 Lantern Task ID，不维持长时间阻塞的 MCP tool call。Agent 通过 Task 工具读取真实状态；任务完成后获取 Candidate。Candidate 应用继续检查目标、权限、状态和 expected working revision。
 
-首个版本不要求在 MCP 中实现工作台画布预览。Candidate 查询返回目标、影响摘要、base revision、状态和可展示的图片或资源引用，使外置 Agent 能向用户说明结果；应用仍以 Candidate ID 为唯一事实。
+首个版本不要求在 MCP 中实现工作台画布预览。Candidate 查询返回目标、影响摘要、base revision、状态和可展示的图片或资源引用，使外置 Agent 能向用户说明结果；应用仍以 Candidate ID 为唯一事实。首个版本允许外置 Agent 显式调用 `lantern_candidate_apply`，但 Task 完成后不得自动应用 Candidate。Apply 权限由统一服务守卫决定，不写死在 MCP handler 中，以便未来切换为全局设置或产品内预览确认机制。
 
 ### 5.3 统一结果
 
@@ -191,9 +191,15 @@ lantern_external_image_finalize
 
 ## 6. Lantern Skill
 
-### 6.1 职责
+### 6.1 应用分发与安装
 
-Lantern Skill 使用通用 Agent Skills 目录格式，服务 Codex、Claude Code 和其他兼容客户端。Skill 负责补足通用 Agent 缺少的漫画产品心智模型和协作经验，不承担工具注册、权限或数据事实。
+Lantern Skill 是随 Lantern 应用发行的创作能力说明，不是 Lantern 源码仓库的开发 Skill。发行包保留一份应用级 Skill 源，安装器再把它部署到目标 Agent 的用户级 Skill 目录；不能依赖用户恰好在 Lantern 仓库中工作，也不能放入仓库级自动发现目录来冒充已经完成应用安装。
+
+`lantern agent:install` 完成幂等安装：识别当前兼容的本地 Agent，把同一份应用 Skill 部署到其用户级发现位置，并只维护该客户端中名为 `lantern` 的 MCP 配置。安装器使用当前 Lantern API 端口和独立 MCP 凭证，不把凭证写入 Skill、终端输出或作品数据；重新安装用于同步 Skill、endpoint 和凭证变化。客户端专属路径、配置格式和审批模式只存在于安装适配层，所有客户端连接同一个 endpoint，并使用相同 Skill 内容、MCP 工具和 Capability 守卫。
+
+### 6.2 职责
+
+Lantern Skill 使用通用 Agent Skills 目录格式。Skill 负责补足通用 Agent 缺少的漫画产品心智模型和协作经验，不承担工具注册、权限或数据事实。
 
 主 `SKILL.md` 保持简短，包含：
 
@@ -201,7 +207,7 @@ Lantern Skill 使用通用 Agent Skills 目录格式，服务 Codex、Claude Cod
 - Comic、Chapter、Project、StoryboardBeat、Frame、Asset 与固定 AssetVersion 的核心区别；
 - WorkingRevision、Candidate 和 SavedSnapshot 的生命周期；
 - 显式要求、引用、焦点和上下文的优先级；
-- 读取上下文、固定目标、选择 Capability、检查结果、说明影响和确认应用的通用循环；
+- 读取上下文、固定目标、选择 Capability、检查结果、说明影响和显式应用的通用循环；
 - revision 冲突、过期 Candidate、目标歧义和能力未开放时的恢复方式。
 
 详细但稳定的概念说明和少量通用工作流可以进入 `references/`，按需加载。Skill 不保存：
@@ -212,7 +218,7 @@ Lantern Skill 使用通用 Agent Skills 目录格式，服务 Codex、Claude Cod
 - 特定角色、题材、镜头和页面的长场景手册；
 - 可以由 Capability、作品上下文或工具返回值确定的默认值。
 
-### 6.2 标准协作循环
+### 6.3 标准协作循环
 
 ```text
 确认 Comic / Chapter / Project
@@ -221,12 +227,12 @@ Lantern Skill 使用通用 Agent Skills 目录格式，服务 Codex、Claude Cod
   → 选择已登记 Capability 与执行模式
   → 获取 Observation，或创建 Task / Candidate
   → 检查状态并向用户说明实际影响
-  → 用户确认后应用，或继续调整和丢弃
+  → 显式应用，或继续调整和丢弃
 ```
 
 Skill 不要求所有请求进入固定流程。讨论和分析可以保持只读；简单且目标明确的动作可以直接调用对应 Capability；只有缺少会改变结果的目标或约束时才追问。
 
-### 6.3 Skill 与服务说明的边界
+### 6.4 Skill 与服务说明的边界
 
 MCP server instructions 保存所有客户端每次连接都必须知道的短规则；Skill 保存需要漫画概念和协作判断才能正确使用工具的知识。服务端守卫保存必须确定执行的安全和一致性规则。
 
@@ -252,43 +258,50 @@ CI 至少验证：
 - 调用者不能提交 WorkspaceCommand、Candidate operations 或对象存储键；
 - Task、Candidate、target handle、owner 和 revision 守卫保持有效；
 - Skill 在典型请求中能够正确触发、选择现有能力并处理不支持请求；
-- Codex 能连接本地 MCP、列出工具并完成一条现有能力闭环。
+- 兼容的本地 Agent 能连接 MCP、列出工具并完成一条现有能力闭环。
 
 ## 8. 落地顺序
 
-外置能力按三个紧凑阶段交付，每个阶段都保持可运行并允许在下一轮对话中根据实际接入结果修订。
+外置能力按四个紧凑阶段交付。契约收口与外部行为扩展分开进行，每个阶段都保持可验证，并允许根据真实接入结果修订下一阶段。
 
-### 阶段一：契约与只读连接
+### 阶段一：契约底座
 
-- 补全语义 Capability Manifest，并建立 MCP 投影需要的服务入口；
+- 补全语义 Capability Manifest、目录 revision 与内容 hash；
+- 让内置 Planner、任务创建与后续 MCP 投影共用同一 Manifest 和服务守卫；
+- 固定 Capability、actor、客户端、scope、context snapshot 和目录版本等审计事实；
+- 保持现有内置 Agent 行为不变，不在本阶段增加 MCP endpoint 或 Skill。
+
+### 阶段二：只读 MCP 与最小 Skill
+
 - 接入本地 Streamable HTTP MCP endpoint；
 - 完成 Project、Context、Capability 目录和图片 Observation 工具；
-- 使用当前本地用户作为轻量调用身份；
-- 用 Codex 验证连接、工具发现、上下文大小和目标 handle。
+- 接入独立 MCP 凭证、受控 handle 和连接安全守卫；
+- 提供包含核心对象、上下文和生命周期规则的最小 Lantern Skill；
+- 用兼容的本地 Agent 验证连接、工具发现、上下文大小和目标 handle。
 
-### 阶段二：现有创作闭环
+### 阶段三：现有创作闭环
 
 - 投影单格分镜、单格图片、角色或场景资产三个现有生成能力；
 - 接通 Task 查询、取消、重试，以及 Candidate 查询、应用和丢弃；
 - 确保所有操作复用现有 Context Builder、Task、Candidate 和领域 Capability；
-- 完成第一版 Lantern Skill，并用 Codex 执行一条从上下文到 Candidate 应用的完整用例。
+- 补全 Task、Candidate 和 revision 恢复规则，并用外置 Agent 执行一条从上下文到 Candidate 显式应用的完整用例。
 
-### 阶段三：接入修订与外部结果
+### 阶段四：交付收口与外部结果
 
-- 根据 Codex 实际调用修订工具描述、结果大小、错误信息和 Skill；
+- 根据外置 Agent 实际调用修订工具描述、结果大小、错误信息和 Skill；
 - 增加外部文字结果与图片上传、登记和 Candidate 创建；
 - 固化 MCP 合约测试、Skill 回归用例和 capability catalog 同步检查。
 
-前两个阶段应在两轮主要实现与修订任务中形成现有能力的可用 MCP；第三轮用于真实 Codex 接入修订，并开始验证外置 Agent 自身模型结果进入 Candidate 的链路。
+前三个阶段形成首个可用的 MCP + Skill；第四阶段根据真实调用收口交付质量，并开始验证外置 Agent 自身模型结果进入 Candidate 的链路。
 
 ## 9. 首个版本验收
 
-- Codex 可以连接 Lantern 本地 MCP Server 并读取 server instructions。
-- Codex 可以列出 Project，获取有限上下文和当前可用 Capability。
-- Codex 可以读取明确图片并获得只读 Observation。
-- Codex 可以对唯一目标调用单格分镜或单格图片能力，或创建角色/场景资产任务。
+- 兼容的本地 Agent 可以连接 Lantern MCP Server 并读取 server instructions。
+- 外置 Agent 可以列出 Project，获取有限上下文和当前可用 Capability。
+- 外置 Agent 可以读取明确图片并获得只读 Observation。
+- 外置 Agent 可以对唯一目标调用单格分镜或单格图片能力，或创建角色/场景资产任务。
 - 异步工具快速返回 Task ID，任务可查询、取消和重试。
-- 完成结果形成 Candidate；Codex 可以查看、应用或丢弃，revision 冲突时不会覆盖当前工作稿。
+- 完成结果形成 Candidate；外置 Agent 可以查看、应用或丢弃，revision 冲突时不会覆盖当前工作稿。
 - MCP 不暴露 Prisma、对象存储凭证、原始 LCD 写入、WorkspaceCommand 或任意 ChangeSet。
 - Lantern Skill 不复制工具 schema，能够指导 Agent 正确区分 StoryboardBeat、Frame、Asset、Candidate 和保存快照。
 - 工作台刷新后可以看到外置 Agent 创建的 Task、Candidate 和已应用 revision，不出现外置专属作品状态。

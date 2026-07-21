@@ -4,16 +4,18 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   assertTaskCreationAllowed,
-  createGenerationTask,
   getGenerationTask,
+  invokeTaskCapability,
   requestTaskCancellation,
   retryTask,
   type CreateTaskInput,
 } from "@lantern/agent-runtime/task-service";
+import { getTaskAgentCapability } from "@lantern/agent-runtime/capability-registry";
 import { retryAgentInteraction, runAgentInteraction, type AgentImageAttachment } from "@lantern/agent-runtime/interaction-service";
 import { resolveAgentMessage } from "@lantern/agent-runtime/conversation-service";
 import { explicitWorkspaceReferencesSchema } from "@lantern/agent-runtime/schemas";
 import { applyCandidate, discardCandidate } from "@lantern/server/candidate-service";
+import { AppError } from "@lantern/server/errors";
 import { revertCandidateApplication } from "@lantern/server/workbench-service";
 import { currentUser, ok, publicTask } from "../http";
 
@@ -127,17 +129,21 @@ export function registerAgentRoutes(app: FastifyInstance) {
     return ok(request, result.task ? { decision: result.decision, task: publicTask(result.task) } : { decision: result.decision });
   });
 
-  app.post<{ Body: Omit<CreateTaskInput, "ownerUserId"> }>("/v1/tasks", async (request) => {
+  app.post("/v1/tasks", async (request) => {
     const user = await currentUser(request);
     const body = taskRequestSchema.parse(request.body);
     assertTaskCreationAllowed(body.taskType);
-    const task = await createGenerationTask({
+    const capability = getTaskAgentCapability(body.taskType);
+    if (!capability || capability.execution !== "task" || !capability.scope) throw new Error(`AGENT_TASK_CAPABILITY_MISSING:${body.taskType}`);
+    if (body.scope !== capability.scope) throw new AppError("invalid_scope", "任务范围与能力契约不一致。", 422);
+    const task = await invokeTaskCapability({
       ownerUserId: user.id,
       projectId: body.projectId,
       conversationId: body.conversationId,
-      taskType: body.taskType,
-      instruction: body.instruction,
-      scope: body.scope,
+      capabilityId: capability.id,
+      actor: "internal",
+      client: { name: "lantern-web" },
+      arguments: { instruction: body.instruction },
       selection: body.selection,
       explicitReferences: body.explicitReferences as CreateTaskInput["explicitReferences"],
       idempotencyKey: body.idempotencyKey,
@@ -163,7 +169,10 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { candidateId: string }; Body: { expectedWorkingRevision: number; expectedFrameTarget?: { unitId: string; frameId: string } } }>("/v1/candidates/:candidateId/apply", async (request) => {
     const user = await currentUser(request);
-    return ok(request, await applyCandidate(user.id, request.params.candidateId, request.body));
+    return ok(request, await applyCandidate(user.id, request.params.candidateId, request.body, {
+      actor: "human",
+      client: { name: "lantern-web" },
+    }));
   });
 
   app.post<{ Params: { candidateId: string } }>("/v1/candidates/:candidateId/discard", async (request) => {

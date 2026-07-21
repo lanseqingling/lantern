@@ -84,11 +84,22 @@ lantern start
 lantern status
 lantern stop
 lantern doctor
+lantern agent:install
 lantern backup:create
 lantern backup:restore <backup-file>
 ```
 
 不添加全局命令时，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`。
+
+### 外置 Agent 接入
+
+需要从兼容的本地 Agent 使用 Lantern 时，先完成一次 Lantern 启动，再让该 Agent 运行：
+
+```bash
+lantern agent:install
+```
+
+该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
 
 ## 开发与构建
 

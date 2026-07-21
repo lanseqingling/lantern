@@ -29,10 +29,13 @@ test("runtime initialization creates one data tree and a restricted installation
   try {
     await ensureRuntimeLayout(paths);
     const providerConfig = await readFile(paths.providerConfigFile, "utf8");
+    const mcpConfig = await readFile(paths.mcpConfigFile, "utf8");
     assert.match(providerConfig, /^LANTERN_LOCAL_TOKEN=[A-Za-z0-9_-]{40,}/m);
+    assert.match(mcpConfig, /^LANTERN_MCP_TOKEN=[A-Za-z0-9_-]{40,}/m);
     assert.equal(JSON.parse(await readFile(paths.runtimeConfigFile, "utf8")).apiPort, 18787);
     assert.equal((await stat(paths.databaseFile)).isFile(), true);
     if (process.platform !== "win32") assert.equal((await stat(paths.providerConfigFile)).mode & 0o777, 0o600);
+    if (process.platform !== "win32") assert.equal((await stat(paths.mcpConfigFile)).mode & 0o777, 0o600);
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }

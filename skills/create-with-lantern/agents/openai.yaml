@@ -1,0 +1,12 @@
+interface:
+  display_name: "Create with Lantern"
+  short_description: "读取 Lantern 漫画上下文并通过受控能力继续协作创作"
+  default_prompt: "Use $create-with-lantern to inspect my Lantern comic project and help me continue creating it."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "lantern"
+      description: "Lantern application MCP for bounded comic context and registered creative capabilities"
+      transport: "streamable_http"
+      url: "http://127.0.0.1:18787/mcp"

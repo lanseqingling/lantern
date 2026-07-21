@@ -509,7 +509,7 @@ type AgentInteractionRequest = {
 type AgentInteractionResult = { decision:
     | { kind: "direct_answer"; message: string }
     | { kind: "needs_input"; message: string; questions: Array<{ options?: Array<{ label: string }> }> }
-    | { kind: "ready_to_run"; message: string; scope: string; taskType: string };
+    | { kind: "ready_to_run"; capabilityId: string; message: string; scope: string; taskType: string };
     task?: { id: string; type: string; status: string; scope: string; progress: number; createdAt: string };
   };
 

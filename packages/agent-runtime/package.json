@@ -7,6 +7,7 @@
     "./agent-loop": "./src/agent-loop.ts",
     "./capability-registry": "./src/capability-registry.ts",
     "./context-builder": "./src/context-builder.ts",
+    "./external-agent-service": "./src/external-agent-service.ts",
     "./conversation-service": "./src/conversation-service.ts",
     "./interaction-service": "./src/interaction-service.ts",
     "./local-task-runner": "./src/local-task-runner.ts",

@@ -15,12 +15,13 @@ import {
   runtimeOwner,
 } from "@lantern/server/local-runtime";
 import { getRuntimePaths } from "@lantern/server/runtime-paths";
+import commandCatalog from "./lantern-commands.json";
 import { initializeRuntime, repositoryRoot, runCommand, runPrismaCommand } from "./runtime-init";
 
-type Command = "start" | "dev" | "stop" | "status" | "doctor" | "sample:init" | "backup:create" | "backup:restore";
+type Command = keyof typeof commandCatalog.runtimeCommands;
 const command = (process.argv[2] ?? "start") as Command;
 const commandArgs = process.argv.slice(3);
-const supportedCommands: Command[] = ["start", "dev", "stop", "status", "doctor", "sample:init", "backup:create", "backup:restore"];
+const supportedCommands = Object.keys(commandCatalog.runtimeCommands) as Command[];
 
 type ManagedService = {
   child: ChildProcess;
@@ -272,9 +273,12 @@ async function doctor() {
   }
 
   let providerPermissions: string | undefined;
+  let mcpPermissions: string | undefined;
   if (process.platform !== "win32") {
     providerPermissions = ((await stat(paths.providerConfigFile)).mode & 0o777).toString(8).padStart(3, "0");
     if (providerPermissions !== "600") issues.push(`Provider configuration permissions should be 600; found ${providerPermissions}.`);
+    mcpPermissions = ((await stat(paths.mcpConfigFile)).mode & 0o777).toString(8).padStart(3, "0");
+    if (mcpPermissions !== "600") issues.push(`MCP configuration permissions should be 600; found ${mcpPermissions}.`);
   }
 
   let runtimeJson: unknown;
@@ -342,7 +346,7 @@ async function doctor() {
   console.log(JSON.stringify({
     status: issues.length ? "attention" : "ok",
     node: { version: process.versions.node, supported: nodeSupported },
-    data: { directory: paths.dataDir, writable: dataWritable, providerConfigPermissions: providerPermissions },
+    data: { directory: paths.dataDir, writable: dataWritable, providerConfigPermissions: providerPermissions, mcpConfigPermissions: mcpPermissions },
     runtimeConfig: runtimeJson,
     database: { integrity: databaseIntegrity },
     objects: { checked: checkedObjects, missing: missingObjects, damaged: damagedObjects },
@@ -355,6 +359,24 @@ async function doctor() {
     issues,
   }, null, 2));
   if (issues.length) process.exitCode = 1;
+}
+
+async function installExternalAgent() {
+  await ensureRuntimeLayout(getRuntimePaths());
+  resetConfigForTests();
+  const config = getConfig();
+  const { installLanternAgentIntegration, resolveAgentForInstall } = await import("./agent-install");
+  const agentId = await resolveAgentForInstall({ requestedAgent: commandArgs[0] });
+  const result = await installLanternAgentIntegration({
+    agentId,
+    sourceSkillDir: path.join(repositoryRoot, "skills", "create-with-lantern"),
+    mcpUrl: `http://127.0.0.1:${config.API_PORT}/mcp`,
+    token: config.LANTERN_MCP_TOKEN,
+  });
+  console.log(`Lantern Agent integration installed for ${result.agentName}.`);
+  console.log(`Lantern application Skill installed: ${result.skillDirectories.join(", ")}`);
+  console.log(`Lantern MCP configured: ${result.configFile}`);
+  console.log(`Restart ${result.agentName} after Lantern is running to load the integration.`);
 }
 
 async function withExclusiveRuntime<T>(operation: (paths: ReturnType<typeof getRuntimePaths>) => Promise<T>) {
@@ -417,9 +439,11 @@ async function main() {
   if (command === "stop") return stopRuntime();
   if (command === "status") return showStatus();
   if (command === "doctor") return doctor();
+  if (command === "agent:install") return installExternalAgent();
   if (command === "sample:init") return initializeSample();
   if (command === "backup:create") return createBackup();
-  return restoreBackup();
+  if (command === "backup:restore") return restoreBackup();
+  command satisfies never;
 }
 
 main().catch((error) => {

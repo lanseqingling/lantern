@@ -2,6 +2,7 @@
 @media (min-width: 1540px) {
   .workbench { --focus-layout-shift-x: -41px; }
   .creation-drawer { width: 270px; }
+  .canvas-stage.left-open .page-canvas-fit-stage { left: 308px; }
   .comic-stage-wrap { width: 460px; }
   .reference-card { width: var(--reference-base-width, 168px); }
   .object-toolbar { left: calc(50% - 278px); }
@@ -12,6 +13,8 @@
   .project-chip { left: 14px; width: 232px; }
   .creation-drawer { left: 14px; width: 232px; }
   .agent-workspace { right: 20px; width: 310px; }
+  .canvas-stage.left-open .page-canvas-fit-stage { left: 264px; }
+  .canvas-stage.agent-open .page-canvas-fit-stage { right: 348px; }
   .canvas-stage.agent-open .vertical-scroll-navigator { right: 368px; }
   .canvas-stage.agent-open .object-inspector { right: 402px; }
   .comic-stage-wrap { width: min(370px, 56vw); }
@@ -24,6 +27,7 @@
 @media (max-width: 1120px) {
   .workbench { --focus-layout-shift-x: 0px; }
   .creation-drawer { transform: translateX(-110%); opacity: 0; pointer-events: none; }
+  .canvas-stage.left-open .page-canvas-fit-stage { left: 24px; }
   .drawer-reopen.left { display: grid; }
   .reference-card { display: none; }
 }
@@ -40,6 +44,7 @@
   .project-chip { left: 10px; top: 10px; width: 230px; }
   .canvas-global-actions { top: 10px; right: 10px; }
   .agent-workspace { top: 68px; right: 10px; bottom: 10px; width: min(92vw, 374px); }
+  .canvas-stage.agent-open .page-canvas-fit-stage { right: calc(min(92vw, 374px) + 28px); }
   .canvas-stage.agent-open .vertical-scroll-navigator { right: calc(min(92vw, 374px) + 48px); }
   .agent-workspace.open { box-shadow: -20px 0 80px rgba(23,32,38,.2); }
   .comic-stage-wrap { width: min(430px, 80vw); }

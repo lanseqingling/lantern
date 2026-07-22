@@ -638,7 +638,7 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
       world: {
         summary: modelInput.comic.worldSummary,
         settings: modelInput.comic.settings,
-        note: modelInput.comic.worldSummary ? "漫画级世界观背景，会与故事梗概和章节内容一起进入模型上下文。" : "尚未填写世界观背景。可在漫画设置中补充。",
+        note: modelInput.comic.worldSummary ? "漫画级世界观背景，会与故事梗概和章节内容一起进入模型上下文。" : "尚未填写世界观背景。可在资产空间补充。",
       },
       assets: {
         characters: assetsByKind("character"),

@@ -19,12 +19,6 @@
 
 Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台。它把故事、角色、场景、分镜、页面编排、单格精修、预览与导出放在一个持续可编辑的创作空间中，并通过 MCP 与 Skill 让产品内外的 Agent 复用同一套创作能力与作品边界。
 
-<p align="center">
-  <img src="./docs/images/readme/workbench-overview.jpg" width="100%" alt="Lantern AI 漫画工作台主界面">
-</p>
-
-<p align="center"><sub>漫画编排与 Agent 协作工作台</sub></p>
-
 ## 产品设计
 
 Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑边界内支持创作者与 Agent 协作：
@@ -46,6 +40,12 @@ Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑�
                 ↓
           预览、保存与导出
 ```
+
+<p align="center">
+  <img src="./docs/images/readme/workbench-overview.png" width="100%" alt="Lantern AI 漫画工作台主界面">
+</p>
+
+<p align="center"><sub>漫画编排与 Agent 协作工作台</sub></p>
 
 ## 当前能力状态
 

@@ -13,7 +13,7 @@ export function LandingClient() {
       <div className="landing-brand"><span className="lantern-logo"><i /></span><strong>Lantern <em>AI</em></strong></div>
       <h1>一盏灯，陪你打磨漫画故事</h1>
       <p>续写旧作篇章，新建故事企划，打造独属于你的漫画世界</p>
-      <button type="button" className="landing-start" onClick={() => router.push("/workspace")}>开始创作 <span>→</span></button>
+      <button type="button" className="landing-start" onClick={() => router.push("/workspace")}>开始创作</button>
     </section>
 
     <section className="landing-composition" aria-label="漫画创作示例">

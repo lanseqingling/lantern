@@ -31,6 +31,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         const loaded = loadDemoWorkbench();
         if (canceled) return;
         setState(loaded);
+        setPageDisplayMode("single");
         setLoaded(true);
         return;
       }
@@ -38,7 +39,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         const loaded = await apiLoadWorkbench(chapterId);
         if (canceled) return;
         setState(loaded.state);
-        setPageDisplayMode(loaded.comic.canvasPageMode);
+        setPageDisplayMode("single");
         setLoaded(true);
       } catch (error) {
         if (!canceled) setLoadError(error instanceof Error ? error.message : "无法连接 Lantern API");

@@ -88,7 +88,7 @@ export function guardInteractionPlan(input: InteractionInput, plan: InteractionP
   if (!capability) {
     return { kind: "decision", decision: { kind: "direct_answer", message: "这项操作目前还不能直接完成。你可以继续描述期望的创作结果，我会协助整理可行方案。" } };
   }
-  if (capability.execution === "observation") {
+  if (capability.effect === "observe") {
     const attachmentHandles = (input.imageAttachments ?? []).map((attachment) => attachment.handle);
     const availableHandles = new Set([
       ...attachmentHandles,

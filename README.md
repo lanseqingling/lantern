@@ -8,7 +8,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台。它把�
 - 编辑分镜条目、漫画页、条漫段、画格、格内图片、纸面图片、对白与旁白。
 - 支持双页、破格、跨页、跨段、画格重叠和固定资源版本等漫画编排能力。
 - 通过内置 Agent 完成创作问答、图片理解、单格分镜编辑和图片生成候选。
-- 以相同的 LCD、Capability 和 Candidate 边界连接 MCP 与配套 Skill。
+- 通过 MCP 与应用级 Skill 复用同一套领域 Capability、ChangeSet 和 Candidate 边界；同步原子编辑不被强制包装成 Task。
 - 预览作品，导出 PNG、LCD JSON 或包含图片资源的完整 LCD ZIP，并可将完整 ZIP 导入一话。
 
 产品规则与协议文档从 [`docs/README.md`](./docs/README.md) 进入；仓库导航与开发边界见 [`AGENTS.md`](./AGENTS.md)。
@@ -99,7 +99,7 @@ lantern backup:restore <backup-file>
 lantern agent:install
 ```
 
-该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
+该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。Agent 只使用 Lantern 当前实际开放的受控领域能力，并按能力需要读取作品上下文。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
 
 ## 开发与构建
 
@@ -198,4 +198,4 @@ Web (React / Vinext)
 - `packages/editor-core` 与 `packages/layout-engine` 提供确定性编辑和页面布局能力。
 - `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 负责 Agent 上下文、任务和模型适配。
 - Workspace 模块通过各自 `package.json` 的公开 `exports` 协作，不跨目录引用其他包的 `src` 实现。
-- Web UI、产品内 Agent 和外置 Agent 共享领域 Capability，不各自复制作品写入规则。
+- Web UI、产品内 Agent 和外置 Agent 共享领域服务、Editor Capability 和作品写入规则；MCP 只投影已登记能力。

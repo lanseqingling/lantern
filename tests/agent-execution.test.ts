@@ -102,7 +102,7 @@ test("storyboard entry editing and frame-image generation are distinct capabilit
 test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
   const first = semanticCapabilityCatalogManifest();
   const second = semanticCapabilityCatalogManifest();
-  assert.equal(first.revision, 1);
+  assert.equal(first.revision, 2);
   assert.equal(first.hash, second.hash);
   assert.match(first.hash, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => JSON.stringify(first));
@@ -114,6 +114,8 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   ]);
   const storyboard = first.capabilities.find((capability) => capability.id === "storyboard.edit_single_entry");
   assert.equal(storyboard?.version, 1);
+  assert.equal(storyboard?.execution, "asynchronous");
+  assert.equal(storyboard?.effect, "candidate");
   assert.equal(storyboard?.agentAccess.external, "execute");
   assert.deepEqual(storyboard?.executionModes, ["lantern_managed"]);
   assert.deepEqual(storyboard?.domainCapabilities, ["update_storyboard_beat", "create_frame_storyboard_beat"]);

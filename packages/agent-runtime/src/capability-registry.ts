@@ -10,8 +10,8 @@ export const agentCapabilityIds = [
   "asset.generate_character_or_scene",
 ] as const;
 export type AgentCapabilityId = typeof agentCapabilityIds[number];
-export type AgentCapabilityExecution = "observation" | "task";
-export type AgentCapabilityEffect = "observe" | "task" | "candidate" | "direct_change";
+export type AgentCapabilityExecution = "synchronous" | "asynchronous";
+export type AgentCapabilityEffect = "observe" | "resource_mutation" | "direct_change" | "candidate";
 export type AgentCapabilityRisk = "low" | "medium" | "high";
 export type AgentCapabilityAccess = "disabled" | "observe" | "preview" | "execute";
 export type AgentCapabilityActor = "internal" | "external";
@@ -34,7 +34,7 @@ export type SemanticCapabilityManifest = {
   scope?: "selected_comic_frame" | "reference_only";
   contextProfile: AgentCapabilityContextProfile;
   effect: AgentCapabilityEffect;
-  executionModes: Array<"lantern_managed" | "external_result">;
+  executionModes: Array<"deterministic" | "lantern_managed" | "external_result">;
   risk: AgentCapabilityRisk;
   agentAccess: {
     internal: AgentCapabilityAccess;
@@ -42,7 +42,6 @@ export type SemanticCapabilityManifest = {
   };
   idempotency: "required" | "optional";
   domainCapabilities: EditorCapabilityId[];
-  result: "observation" | "candidate";
   confirmation: "none";
   userMessage: string;
   missingTargetMessage?: string;
@@ -78,7 +77,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   {
     id: "context.inspect_images",
     version: 1,
-    execution: "observation",
+    execution: "synchronous",
     description: "读取本轮上传图片，或用户唯一指明的当前页对象所关联图片的可见内容与文字，返回只读 Observation。当回答或后续规划依赖图片内容且尚无 inspect_images Observation 时调用；不创建任务或候选。",
     inputSchema: imageObservationInputSchema,
     outputSchema: imageObservationOutputSchema,
@@ -90,7 +89,6 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     agentAccess: { internal: "observe", external: "observe" },
     idempotency: "optional",
     domainCapabilities: [],
-    result: "observation",
     confirmation: "none",
     userMessage: "",
     missingTargetMessage: "请先添加图片，或明确说出当前页中包含图片的画格或分镜。",
@@ -98,7 +96,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   {
     id: "storyboard.edit_single_entry",
     version: 1,
-    execution: "task",
+    execution: "asynchronous",
     taskType: "storyboard",
     description: "创建或编辑唯一明确目标漫画格所绑定的一个分镜条目（StoryboardBeat），目标可来自当前选择、显式引用，或用户在当前页上下文中唯一指明的画格、对白、气泡或分镜名称。结果只包含该条目的文字标题与画面描述。当用户明确要求改变这一个分镜条目，且期望产物是文字分镜而不是图片、对白、画格结构或整页方案时调用。不能处理多个画格、整页、整话、页面编排或格内成稿图。",
     inputSchema: instructionSchema,
@@ -106,13 +104,12 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     target: { required: true, types: ["comic_frame"], min: 1, max: 1 },
     scope: "selected_comic_frame",
     contextProfile: "single_frame_generation",
-    effect: "task",
+    effect: "candidate",
     executionModes: ["lantern_managed"],
     risk: "medium",
     agentAccess: { internal: "execute", external: "execute" },
     idempotency: "required",
     domainCapabilities: ["update_storyboard_beat", "create_frame_storyboard_beat"],
-    result: "candidate",
     confirmation: "none",
     userMessage: "我会编辑目标画格的分镜条目，只更新它的标题和画面描述；应用前不会改变工作稿。",
     missingTargetMessage: "请选中一个漫画格，或明确说出当前页中的画格编号、对白、气泡或分镜名称。",
@@ -120,7 +117,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   {
     id: "frame_image.generate_or_replace",
     version: 1,
-    execution: "task",
+    execution: "asynchronous",
     taskType: "frame_image_generate",
     description: "为唯一明确目标漫画格生成格内图片，目标可来自当前选择、显式引用，或用户在当前页上下文中唯一指明的画格、对白、气泡或分镜名称；画格已有主图时形成替换候选，没有主图时形成放入候选。当用户明确要求重新生成、重画或替换该格的视觉画面，并且期望产物是图片而不是文字分镜时调用。不能改变分镜条目、对白、画格几何、页面编排或其他画格。",
     inputSchema: instructionSchema,
@@ -128,13 +125,12 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     target: { required: true, types: ["comic_frame"], min: 1, max: 1 },
     scope: "selected_comic_frame",
     contextProfile: "single_frame_generation",
-    effect: "task",
+    effect: "candidate",
     executionModes: ["lantern_managed"],
     risk: "high",
     agentAccess: { internal: "execute", external: "execute" },
     idempotency: "required",
     domainCapabilities: ["place_frame_image", "replace_frame_image"],
-    result: "candidate",
     confirmation: "none",
     userMessage: "我会为目标画格生成新的格内图片；应用前不会替换当前画面。",
     missingTargetMessage: "请选中一个漫画格，或明确说出当前页中的画格编号、对白、气泡或分镜名称。",
@@ -142,7 +138,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   {
     id: "asset.generate_character_or_scene",
     version: 1,
-    execution: "task",
+    execution: "asynchronous",
     taskType: "asset_parse",
     description: "根据用户明确的生成要求创建一个角色或场景资产图片候选。讨论、设计或完善设定但未要求生成图片、卡片或资产时不调用。",
     inputSchema: assetGenerationInputSchema,
@@ -150,19 +146,18 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     target: { required: false, types: [], min: 0, max: 0 },
     scope: "reference_only",
     contextProfile: "asset_generation",
-    effect: "task",
+    effect: "candidate",
     executionModes: ["lantern_managed"],
     risk: "high",
     agentAccess: { internal: "execute", external: "execute" },
     idempotency: "required",
     domainCapabilities: [],
-    result: "candidate",
     confirmation: "none",
     userMessage: "我会按当前描述生成一个可编辑的资产候选；确认后才保存到资产空间。",
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 1;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 2;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });
@@ -185,7 +180,7 @@ export function getAgentCapability(id: string) {
 }
 
 export function getTaskAgentCapability(taskType: string) {
-  return semanticCapabilities.find((capability) => capability.execution === "task" && capability.taskType === taskType);
+  return semanticCapabilities.find((capability) => capability.execution === "asynchronous" && capability.taskType === taskType);
 }
 
 export function isAgentTaskType(taskType: string): taskType is AgentTaskType {
@@ -194,7 +189,7 @@ export function isAgentTaskType(taskType: string): taskType is AgentTaskType {
 
 export function assertAgentCapabilityAccess(capability: AgentCapabilityDescriptor, actor: AgentCapabilityActor) {
   const access = capability.agentAccess[actor];
-  const required = capability.execution === "observation" ? "observe" : "execute";
+  const required = capability.effect === "observe" ? "observe" : "execute";
   if (access === required || access === "execute") return;
   throw new Error(`AGENT_CAPABILITY_ACCESS_DENIED:${actor}:${capability.id}`);
 }
@@ -231,7 +226,6 @@ export function plannerCapabilityCatalog() {
     contextProfile: capability.contextProfile,
     effect: capability.effect,
     risk: capability.risk,
-    result: capability.result,
     confirmation: capability.confirmation,
   }));
 }

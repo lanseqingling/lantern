@@ -15,7 +15,7 @@ Lantern Agent 是漫画工作台中的创作协作者。它理解当前创作现
 | 3 | Capability Registry 与执行守卫 | 已落地 | 统一声明工具输入、目标、范围、风险、结果与 Agent 权限 | Agent 不直接写 LCD、Prisma 或底层命令 |
 | 4 | Task、Candidate 与恢复 | 已落地 | 异步任务、重试、取消、checkpoint、Candidate、revision 冲突和刷新恢复共用一套生命周期 | 任何生成结果都不能静默覆盖工作稿 |
 | 5 | 当前创作闭环 | 已落地 | 普通问答与图片理解；单格分镜条目；单格图片生成或替换；角色或场景资产图 | 问答保持只读；写入任务每次只处理一个明确目标并产生单个 Candidate |
-| 6 | 外置 Agent、MCP 与 Skill | 优先 | 让产品内外的 Agent 复用同一套 Context、Capability、Task 和 Candidate，并获得一致的产品语义 | 接入方式不改变权限、目标范围、确认和写入边界 |
+| 6 | 外置 Agent、MCP 与 Skill | 优先 | 让产品内外的 Agent 复用同一套领域 Capability、管理服务、ChangeSet，并在适用时复用 Task 和 Candidate | 接入方式不改变权限、目标范围、确认和写入边界，也不强制所有编辑进入 Workflow |
 | 7 | 评测与可观测性 | 优先 | 建立目标识别、上下文命中、越界、无效追问、结构化输出、任务成功率和 Candidate 采用率评测 | 记录决策与证据，不记录思维链或不必要的私有内容 |
 | 8 | 动态上下文管理 | 优先 | Capability 声明上下文需求，按任务动态检索、裁剪、排序并解释取舍 | 显式引用和用户本轮要求优先，检索不能扩大写入范围 |
 | 9 | 记忆 | 优先 | 分离会话摘要、项目连续性事实、用户偏好和任务临时状态，并提供更新、失效与溯源规则 | 记忆不是作品事实，不能覆盖显式输入或固定版本 |
@@ -60,9 +60,9 @@ Agent 需要同时满足四个目标：理解当前创作、让行动可预期�
 
 Agent 不是数据库写入器、JSON Patch 生成器或隐藏自动化脚本。对话、消息、任务、进度、Observation 和 Candidate 都不是作品事实；只有经过领域校验的 ChangeSet 才能产生新的 WorkingRevision。确定性低风险编辑只有在 Capability 明确允许时才能直接提交；生成、结构、多对象和其他高风险变化先成为 Candidate。
 
-能力与运行时保持解耦：新增创作能力通过 Registry 注册输入、目标、上下文需求、风险和结果契约，不修改 Agent Loop；新增模型供应商通过 Provider Adapter 接入，不改变产品任务语义；新增 Workflow 或子 Agent 复用同一套 Context、Tool、Task、Candidate 和 revision 边界。
+能力与运行时保持解耦：新增创作能力通过 Registry 注册输入、目标、上下文需求、风险和结果契约，不修改 Agent Loop；新增模型供应商通过 Provider Adapter 接入，不改变产品任务语义；新增 Workflow 或子 Agent 复用同一套领域服务、Context、Tool、ChangeSet、Task、Candidate 和 revision 边界。
 
-产品内与外置 Agent 是同一能力体系的不同调用入口。适合 Agent 使用的 Capability 在交付时同时评估两类入口；不依赖产品界面的能力可以先由外置 Agent 使用，但必须经过显式权限登记，并遵守相同的目标、上下文、Candidate 和 revision 守卫。
+产品内与外置 Agent 是同一能力体系的不同调用入口。适合 Agent 使用的 Capability 在交付时同时评估两类入口；不依赖产品界面的能力可以先由外置 Agent 使用，但必须经过显式权限登记，并遵守相同的目标、上下文、领域服务、ChangeSet、Candidate 和 revision 守卫。接入方式不能把同步原子编辑强制包装成 Task，也不能让 Task 或 Workflow 成为领域能力的前置条件。
 
 ## 4. Agent Runtime
 
@@ -114,11 +114,11 @@ Prompt Builder 输出 prompt、上下文策略和 schema 的版本与内容 hash
 - 风险、确认、预览、撤销和幂等语义；
 - Agent 是否可见，以及对应执行器。
 
-只读工具返回 Observation；异步生成工具创建 Task；写入类结果返回 Candidate 或经过允许的原子 ChangeSet。工具不得把模型输出直接当作数据库操作，也不得让模型决定对象 ID、事务、revision 或资源归属。
+Capability 分别声明 `synchronous` 或 `asynchronous` 执行方式，以及 `observe`、`resource_mutation`、`direct_change` 或 `candidate` effect。只读工具返回 Observation；确定性资源管理调用领域服务；低风险编辑产生经过允许的原子 ChangeSet；异步生成才创建 Task；生成、结构和其他高风险结果形成 Candidate。工具不得把模型输出直接当作数据库操作，也不得让模型决定对象 ID、事务、revision 或资源归属。
 
 ## 5. 上下文与记忆
 
-上下文分两次构建：交互规划上下文用于理解目标和选择能力，执行上下文按已选 Capability 精确补齐并冻结到 Task。两阶段共享对象解析和版本规则，但执行阶段不能依赖 Planner 未固定的临时信息。
+上下文按能力需要构建：交互规划上下文用于理解目标和选择能力，执行上下文按已选 Capability 精确补齐。异步能力把执行上下文冻结到 Task；同步管理或编辑只固定本次调用所需的 owner、目标、输入和 revision。两者共享对象解析和版本规则，执行阶段不能依赖 Planner 未固定的临时信息。
 
 证据优先级为：本轮明确要求 → 显式引用和附件 Observation → 当前选择 → 当前可见视图 → 近期仍有效约束 → 检索与记忆。低优先级信息不得覆盖高优先级事实；冲突会改变写入结果时必须请求用户决定。
 
@@ -169,7 +169,7 @@ Workflow Run 是 Task 之上的持久编排层：它组合工具和 Task，维�
 
 ## 8. Agent 接入与运行规范
 
-Lantern 的 Agent 协作能力不绑定单一界面或单一模型。MCP 向外置 Agent 投影已开放的语义 Capability，Skill 补充稳定的产品概念和协作方法；两者都不拥有独立权限或作品状态。外置 Agent 复用 Lantern 的 Context、Capability、Task、Candidate 和 revision 边界，不建立独立写入链路。接入协议、协作知识、外部结果登记、能力版本和同步发布的完整规则见[外置 Agent 接入](./external-agent.md)。
+Lantern 的 Agent 协作能力不绑定单一界面或单一模型。MCP 向外置 Agent 投影已开放的语义 Capability，Skill 补充稳定的产品概念和协作方法；两者都不拥有独立权限或作品状态。外置 Agent 复用 Lantern 的领域服务、Editor Capability、Context、ChangeSet 和 revision 边界，并在能力需要时复用 Task 与 Candidate，不建立独立写入链路。接入协议、协作知识、外部结果登记、能力版本和同步发布的完整规则见[外置 Agent 接入](./external-agent.md)。
 
 内置与外置 Agent 都要记录 actor、客户端、工具版本、决策、scope、context snapshot、工具调用、校验和最终 revision；任何接入方式都不能暴露数据库、对象存储凭证、任意 LCD 写入或原始底层命令。
 

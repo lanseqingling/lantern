@@ -103,7 +103,7 @@ test("MCP uses an independent loopback credential and rejects browser origins", 
   });
   assert.equal(initialized.statusCode, 200);
   assert.match(initialized.body, /"name":"lantern"/);
-  assert.match(initialized.body, /当前端点只读/);
+  assert.match(initialized.body, /当前开放工具只读/);
 
   const tools = await app.inject({
     method: "POST",

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { plannerCapabilityCatalog } from "../capability-registry";
 
 export const PLANNER_PROMPT_ID = "lantern.agent.planner";
-export const PLANNER_PROMPT_VERSION = "1.3.0";
+export const PLANNER_PROMPT_VERSION = "1.4.0";
 export const PLANNER_CONTEXT_POLICY_VERSION = "interaction-context-v3";
 export const INTERACTION_PLAN_SCHEMA_VERSION = "interaction-plan-v2";
 
@@ -20,11 +20,11 @@ const planningPolicy = `选择 outcome：
 - invoke_capability：用户明确要求执行，且 capability catalog 中存在完全匹配的能力。
 - unsupported：用户明确要求执行，但 catalog 中没有匹配能力。只说明这项请求当前无法直接完成，并给出最接近的可行建议。
 
-Capability catalog 完整列出了本轮当前可执行的范围：execution=task 才能创建生成任务，execution=observation 只能读取证据。未出现在 catalog 的编辑、生成或结构操作都不可执行，不得根据上下文中存在对应对象而推断能力已经开放。
+Capability catalog 完整列出了本轮当前可执行的范围。execution 表示同步或异步执行；effect 表示只读观察、领域资源变更、直接原子编辑或 Candidate。只有 execution=asynchronous 的能力创建任务，只有 effect=observe 的能力保持只读。未出现在 catalog 的管理、编辑、生成或结构操作都不可执行，不得根据上下文中存在对应对象而推断能力已经开放。
 
 先判断 requestType：用户在问答、讨论、分析或征求建议时是 conversation；用户要求生成、修改、替换、编排或以其他方式让作品发生变化时是 operation。不要因为某个词出现就机械分类，要结合动词、期望产物、目标对象、显式引用和上下文判断完整语义。respond 的 requestType 只能是 conversation，其余 outcome 的 requestType 只能是 operation。
 
-如果用户要求作品发生变化，而 catalog 没有完全匹配的 task，必须选择 unsupported；不得用 respond 假装可以协助执行，也不得用 ask_user 追问大小、位置、数量等细节。只有用户明确在讨论方案、征求建议或分析现状时才用 respond。如果理解目标或形成回答依赖本轮图片内容，且 observations 中还没有 inspect_images 结果，先调用对应只读能力；得到 Observation 后再规划最终回复或任务。confidence 仅用于诊断，不能改变权限。`;
+如果用户要求作品发生变化，而 catalog 没有完全匹配的能力，必须选择 unsupported；不得用 respond 假装可以协助执行，也不得用 ask_user 追问大小、位置、数量等细节。只有用户明确在讨论方案、征求建议或分析现状时才用 respond。如果理解目标或形成回答依赖本轮图片内容，且 observations 中还没有 inspect_images 结果，先调用对应只读能力；得到 Observation 后再规划最终回复或操作。confidence 仅用于诊断，不能改变权限。`;
 
 const outputContract = `只返回一个 JSON 对象，不要输出 Markdown。四种合法结构：
 {"outcome":"respond","requestType":"conversation","goal":"归一化目标","message":"给用户的回答","evidenceHandles":["selection"],"confidence":0.0}

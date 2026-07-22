@@ -246,7 +246,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     }, {
       id: "storyboard.edit_single_entry",
       version: 1,
-      catalogRevision: 1,
+      catalogRevision: 2,
     });
     assert.match(invocationAudit.capability?.catalogHash ?? "", /^[a-f0-9]{64}$/);
     assert.deepEqual(invocationAudit.invocation && {

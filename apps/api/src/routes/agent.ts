@@ -134,7 +134,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
     const body = taskRequestSchema.parse(request.body);
     assertTaskCreationAllowed(body.taskType);
     const capability = getTaskAgentCapability(body.taskType);
-    if (!capability || capability.execution !== "task" || !capability.scope) throw new Error(`AGENT_TASK_CAPABILITY_MISSING:${body.taskType}`);
+    if (!capability || capability.execution !== "asynchronous" || !capability.scope) throw new Error(`AGENT_TASK_CAPABILITY_MISSING:${body.taskType}`);
     if (body.scope !== capability.scope) throw new AppError("invalid_scope", "任务范围与能力契约不一致。", 422);
     const task = await invokeTaskCapability({
       ownerUserId: user.id,

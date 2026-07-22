@@ -1,7 +1,7 @@
 interface:
   display_name: "Create with Lantern"
-  short_description: "读取 Lantern 漫画上下文并通过受控能力继续协作创作"
-  default_prompt: "Use $create-with-lantern to inspect my Lantern comic project and help me continue creating it."
+  short_description: "通过 Lantern 受控领域能力管理和编辑漫画"
+  default_prompt: "Use $create-with-lantern to work with my Lantern comics through the management and editing capabilities currently available."
 
 dependencies:
   tools:

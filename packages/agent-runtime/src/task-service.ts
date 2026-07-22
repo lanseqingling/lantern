@@ -27,7 +27,7 @@ function persistedTaskType(taskType: AgentTaskType) {
 }
 
 const registeredTaskTypes = listAgentCapabilities().flatMap((capability) =>
-  capability.execution === "task" && capability.taskType ? [persistedTaskType(capability.taskType)] : []);
+  capability.execution === "asynchronous" && capability.taskType ? [persistedTaskType(capability.taskType)] : []);
 
 export async function getActiveConversationTask(ownerUserId: string, conversationId: string) {
   return prisma.generationTask.findFirst({
@@ -110,7 +110,7 @@ function invocationRequestHash(input: CreateTaskInput, parsedArguments: unknown)
 
 export async function invokeTaskCapability(input: CreateTaskInput, taskQueue: TaskQueueAdapter = localTaskQueue) {
   const capability = getAgentCapability(input.capabilityId);
-  if (!capability || capability.execution !== "task" || !capability.taskType || !capability.scope) {
+  if (!capability || capability.execution !== "asynchronous" || !capability.taskType || !capability.scope) {
     throw new AppError("unsupported_capability", "该能力当前不能创建任务。", 422);
   }
   try {
@@ -280,7 +280,7 @@ export async function retryTask(ownerUserId: string, taskId: string, idempotency
   const storedClient = invocationInput(storedInvocation.client as Prisma.JsonValue);
   const capability = getAgentCapability(typeof storedCapability.id === "string" ? storedCapability.id : "")
     ?? getTaskAgentCapability(task.type.toLowerCase());
-  if (!capability || capability.execution !== "task") throw new AppError("unsupported_task", "原任务能力已经不可用，不能重试。", 422);
+  if (!capability || capability.execution !== "asynchronous") throw new AppError("unsupported_task", "原任务能力已经不可用，不能重试。", 422);
   if (typeof storedCapability.version === "number" && storedCapability.version !== capability.version) {
     throw new AppError("capability_version_conflict", "原任务使用的能力版本已经更新，请重新发起任务。", 409);
   }

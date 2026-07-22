@@ -1,16 +1,41 @@
-# Lantern AI
+<p align="center">
+  <img src="./apps/web/public/favicon.svg" width="96" height="96" alt="Lantern AI">
+</p>
+
+<h1 align="center">Lantern AI</h1>
+
+<p align="center">轻量编排漫画，并与内置或外置 Agent 协作，持续完善同一部作品。</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-%E6%8C%81%E7%BB%AD%E5%BC%80%E5%8F%91%E4%B8%AD-F2B84B" alt="持续开发中">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/open%20source-MIT-2E8B57" alt="Open source under the MIT License"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-5B8DEF" alt="macOS and Windows">
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D22.13-43853D" alt="Node.js 22.13 or newer">
+</p>
+
+<p align="center">
+  <a href="https://github.com/lanseqingling/lantern/releases/latest">下载</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#当前能力状态">当前能力</a> ·
+  <a href="./docs/README.md">文档</a> ·
+  <a href="#通过-mcp-与-skill-接入外置-agent">MCP + Skill</a>
+</p>
+
+<p align="center">
+  <img src="./docs/images/readme/workbench-overview.jpg" width="100%" alt="Lantern AI 漫画工作台主界面">
+</p>
+
+<p align="center"><sub>漫画编排与 Agent 协作工作台。</sub></p>
 
 Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台。它把故事、角色、场景、分镜、页面编排、单格精修、预览与导出放在一个持续可编辑的创作空间中，并通过 MCP 与 Skill 让产品内外的 Agent 复用同一套创作能力与作品边界。
 
 ## 产品设计
 
-Lantern 既是用于编排漫画的轻量级工作台，也能借助内置或外置 Agent 在同一份作品上持续编辑。
+- LCD 作品协议：LCD 统一表达页面、画格、图层、格内内容和固定资产版本，工作台、候选预览、阅读与导出共享同一份作品事实。
 
-- **LCD 作品协议。** LCD 统一表达页面、画格、图层、格内内容和固定资产版本，工作台、候选预览、阅读与导出共享同一份作品事实。
+- 漫画画布：页面或滚动段位于工作台中央，资产、分镜、参考图片和 Agent 对话围绕作品展开；参考图片只有明确放入画格或纸面后才进入成稿。
 
-- **漫画画布。** 页面或滚动段位于工作台中央，资产、分镜、参考图片和 Agent 对话围绕作品展开；参考图片只有明确放入画格或纸面后才进入成稿。
-
-- **受控编辑。** UI 与产品内外的 Agent 共用语义能力和作品边界；普通编辑可撤销，生成、结构和多对象结果先形成 Candidate，由创作者决定是否应用。
+- 受控编辑：UI 与产品内外的 Agent 共用语义能力和作品边界；普通编辑可撤销，生成、结构和多对象结果先形成 Candidate，由创作者决定是否应用。
 
 ```text
 工作台 / 内置 Agent / 外置 Agent
@@ -24,7 +49,7 @@ Lantern 既是用于编排漫画的轻量级工作台，也能借助内置或外
           预览、保存与导出
 ```
 
-## 核心能力
+## 当前能力状态
 
 `✅` 已接入　`🟡` 部分接入　`❌` 未接入
 
@@ -45,31 +70,31 @@ Lantern 既是用于编排漫画的轻量级工作台，也能借助内置或外
 | 页面布局、多页与多对象生成 | ❌ | ❌ | ❌ |
 | 对白 AI、阅读节奏与专业编排 | ❌ | ❌ | ❌ |
 
-表格只展示当前入口覆盖情况，具体范围和安全边界见[漫画编辑与 Agent 能力矩阵](./docs/agent.md#2-漫画编辑与-agent-能力矩阵)。产品规则与协议文档从 [`docs/README.md`](./docs/README.md) 进入；仓库导航与开发边界见 [`AGENTS.md`](./AGENTS.md)。
+表格只展示当前入口覆盖情况，具体范围和安全边界见[漫画编辑与 Agent 能力矩阵](./docs/agent.md#2-漫画编辑与-agent-能力矩阵)。
 
-## 获取与运行
+## 快速开始
 
-Lantern 的发行单位是可运行源码包。运行环境需要带 npm 的 Node.js 22.13 或更高版本。
+> 需要带 npm 的 Node.js 22.13 或更高版本。当前发行验收覆盖 macOS 和 Windows。
 
-### 1. 安装 Node.js
-
-从 [Node.js 官网](https://nodejs.org/en/download) 安装 Node.js 22.13 或更高版本，然后确认终端可以识别：
-
-```bash
-node --version
-npm --version
-```
-
-### 2. 获取 Lantern
-
-推荐从 [GitHub Releases](https://github.com/lanseqingling/lantern/releases/latest) 下载 `lantern-<version>-source.zip` 和同一版本的 `SHA256SUMS`。也可以使用 Git：
+推荐从 [GitHub Releases](https://github.com/lanseqingling/lantern/releases/latest) 下载 `lantern-<version>-source.zip` 和同版本的 `SHA256SUMS`。也可以直接获取源码：
 
 ```bash
 git clone https://github.com/lanseqingling/lantern.git
 cd lantern
 ```
 
-下载 Release 后先校验文件。macOS：
+在解压或克隆后的目录中启动：
+
+```bash
+npm start
+```
+
+首次启动会准备锁定依赖、初始化本地数据，并载入《雨夜车站》和《风停之前》两个示例漫画。工作台默认打开 [http://localhost:18788](http://localhost:18788)。
+
+<details>
+<summary>校验下载的 Release 包</summary>
+
+macOS：
 
 ```bash
 shasum -a 256 -c SHA256SUMS
@@ -84,56 +109,126 @@ $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
 $actual -eq $expected
 ```
 
-校验通过后解压源码包，在解压目录打开终端，再继续下一步。
+校验通过后再解压源码包。
 
-### 3. 启动
+</details>
 
-macOS 和 Windows 使用同一条首次启动命令：
+## 模型配置
 
-```bash
-npm start
+不配置模型 Key 仍可使用漫画画布和确定性编辑。Lantern 当前默认接入 DeepSeek 文本模型与 Qwen 图片、视觉模型，后续将扩展更多模型 Provider；对话、图片生成和视觉理解需要配置对应 Key。
+
+首次启动后，在 Lantern 数据目录中的 `config/providers.env` 填写：
+
+```dotenv
+TEXT_MODEL_API_KEY=你的 DeepSeek API Key
+IMAGE_MODEL_API_KEY=你的百炼 API Key
+VISION_MODEL_API_KEY=
 ```
 
-启动器会准备仓库锁定的依赖、初始化本地数据并启动 Web 工作台。首次创建空数据目录时会载入《雨夜车站》和《风停之前》两个示例漫画。启动完成后浏览器会打开 `http://localhost:18788`。
+保存后重新启动 Lantern。作品数据和图片存储在本地；使用 AI 能力时，请求所需的文本或图片会发送给用户配置的模型 Provider。
 
-### 4. 配置模型
-
-首次启动会创建 `config/providers.env`。填写所需的 Provider Key 后重新启动 Lantern：
+<details>
+<summary>高级 Provider 配置</summary>
 
 ```dotenv
 TEXT_MODEL_PROVIDER=deepseek
-TEXT_MODEL_API_KEY=你的 DeepSeek API Key
+TEXT_MODEL_BASE_URL=https://api.deepseek.com
+TEXT_MODEL_NAME=deepseek-v4-flash
+TEXT_MODEL_API_KEY=
+
 IMAGE_MODEL_PROVIDER=qwen
-IMAGE_MODEL_API_KEY=你的百炼 API Key
+IMAGE_MODEL_BASE_URL=https://dashscope.aliyuncs.com/api/v1
+IMAGE_MODEL_NAME=qwen-image-2.0
+IMAGE_MODEL_API_KEY=
+
+VISION_MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+VISION_MODEL_NAME=qwen3.6-flash
+VISION_MODEL_API_KEY=
 ```
 
-图片理解默认复用图片模型的 Key；需要独立配置时填写同一文件中的 `VISION_MODEL_*`。
+</details>
 
-### 命令行
+## 通过 MCP 与 Skill 接入外置 Agent
 
-完成首次启动后，可以在仓库目录执行一次 `npm link`，随后直接使用：
+需要从兼容的本地 Agent 使用 Lantern 时，先启动 Lantern，再让该 Agent 在 Lantern 目录中运行：
 
 ```bash
-lantern start
-lantern status
-lantern stop
-lantern doctor
-lantern agent:install
-lantern backup:create
-lantern backup:restore <backup-file>
+./lantern agent:install
 ```
 
-不添加全局命令时，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`。
+Windows 使用 `lantern.cmd agent:install`。命令会识别当前 Agent，安装 Lantern 应用级 Skill 并登记本地 MCP。Agent 只能使用 Lantern 当前显式开放的受控能力；Lantern 升级、端口或凭证变化后，重复运行同一命令即可同步。详细边界见 [Agent](./docs/agent.md) 与[外置 Agent 接入](./docs/external-agent.md)。
 
-### 外置 Agent 接入
+## 运行与数据
 
-需要从兼容的本地 Agent 使用 Lantern 时，先完成一次 Lantern 启动，再让该 Agent 运行：
+在源码或发行目录中，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`。如需在任意目录直接执行 `lantern`，可在 Lantern 目录中额外运行一次 `npm link`。
+
+| 命令 | 用途 |
+|---|---|
+| `./lantern start` | 启动 Lantern |
+| `./lantern status` | 查看当前运行状态 |
+| `./lantern stop` | 停止 Lantern 管理的本地服务 |
+| `./lantern doctor` | 检查环境、配置、数据库、对象文件和服务状态 |
+| `./lantern agent:install` | 安装或同步 MCP 与 Skill |
+| `./lantern backup:create` | 创建一致备份 |
+| `./lantern backup:restore <backup-file>` | 恢复一致备份 |
+
+| 系统 | 默认数据目录 |
+|---|---|
+| macOS | `~/Library/Application Support/Lantern` |
+| Windows | `%APPDATA%\Lantern` |
+
+`lantern.db` 保存作品与任务状态，`objects/` 保存图片和导出文件，`config/` 保存运行配置与模型密钥，`logs/` 保存日志。删除安装目录或更换源码包不会删除这些作品数据。
+
+### 备份与恢复
+
+备份包含作品、工作稿、消息、任务、候选、快照和本地对象文件，不包含模型 Key、安装令牌、日志或临时文件。备份和恢复前需要停止 Lantern：
 
 ```bash
-lantern agent:install
+./lantern stop
+./lantern backup:create
+./lantern backup:restore "/path/to/lantern-backup-<time>.zip"
 ```
 
-该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。Agent 只使用 Lantern 当前实际开放的受控领域能力：可以通过 `lantern://` 引用或本地作品链接精确管理漫画、一话、结构化资产资料和固定图片版本，并按能力需要读取绑定同一 WorkingRevision 的 LCD 结构与最终合成画面。上传图片字节通过短时效本地上传位置传输，不进入模型工具参数；合成画面通过 MCP 原生图片内容返回；同步写入可安全重试并保留调用审计。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
+恢复前会验证 manifest、SHA-256 和 SQLite 完整性；验证失败不会替换当前作品。
+
+<details>
+<summary>一次性覆盖运行设置</summary>
+
+| 变量 | 用途 |
+|---|---|
+| `LANTERN_DATA_DIR` | 指定数据目录 |
+| `WEB_PORT` | 指定 Web 端口 |
+| `API_PORT` | 指定本地 API 端口 |
+| `LANTERN_NO_OPEN=1` | 启动后不自动打开浏览器 |
+
+macOS 示例：
+
+```bash
+LANTERN_DATA_DIR="$HOME/LanternData" WEB_PORT=3100 npm start
+```
+
+</details>
+
+## 诊断与支持范围
+
+遇到启动或数据问题时，先运行：
+
+```bash
+./lantern doctor
+```
+
+`doctor` 检查 Node.js 版本、数据目录写入权限、Provider 配置权限、SQLite 完整性、已引用对象文件和运行服务健康状态，不显示模型 Key 或安装令牌。
+
+<details>
+<summary>进一步排查</summary>
+
+1. 确认 `config/runtime.json` 中的 Web 与 API 端口未被占用。
+2. 查看数据目录中的 `logs/api.log` 与 `logs/web.log`。
+3. 修正问题后重新运行 `./lantern start`。
+
+</details>
+
+当前发行单位是可运行源码包，尚未提供独立图形安装器。正式发行以 GitHub Actions 的实际验收结果为准；当前验收覆盖 macOS 14 和 Windows Server 2022，Linux 未列入支持范围。
 
 ## 开发与构建
 
@@ -161,75 +256,34 @@ Windows 将 `./lantern` 换成 `lantern.cmd`。
 ./lantern package:release
 ```
 
-该命令需要在 Git checkout 中运行，并会在存在未跟踪文件时停止，避免把本地临时内容带入发行包。产物写入 `release/lantern-<version>-source.zip` 和 `release/SHA256SUMS`。
+产物写入 `release/lantern-<version>-source.zip` 和 `release/SHA256SUMS`。推送与 `package.json` 一致的 `v<version>` 标签后，GitHub Actions 会验证、打包并创建 GitHub Release。
 
-在 GitHub Actions 中手动运行 `Build source distribution`，会在 macOS 和 Windows 上完成全新安装、启动、停止与重复启动验收，并仅保留七天测试 Artifact。推送与 `package.json` 一致的 `v<version>` 标签会执行相同验收，通过后创建 GitHub Release；版本包含 `-alpha`、`-beta` 或 `-rc` 等预发行标识时，Release 自动标记为 Pre-release。
-
-## 数据与配置
-
-| 系统 | 默认数据目录 |
-|---|---|
-| macOS | `~/Library/Application Support/Lantern` |
-| Windows | `%APPDATA%\Lantern` |
-
-数据目录中的 `lantern.db` 保存作品与任务状态，`objects/` 保存图片和导出文件，`config/` 保存运行配置与模型密钥，`logs/` 保存日志。删除安装目录或更换源码包不会删除这里的作品。
-
-以下环境变量可用于一次性覆盖运行设置：
-
-| 变量 | 用途 |
-|---|---|
-| `LANTERN_DATA_DIR` | 指定数据目录 |
-| `WEB_PORT` | 指定 Web 端口 |
-| `API_PORT` | 指定本地 API 端口 |
-| `LANTERN_NO_OPEN=1` | 启动后不自动打开浏览器 |
-
-macOS 示例：
-
-```bash
-LANTERN_DATA_DIR="$HOME/LanternData" WEB_PORT=3100 npm start
-```
-
-## 备份与恢复
-
-备份包含 SQLite 中的作品、工作稿、消息、任务、候选和快照，以及本地对象存储中的图片与导出文件。模型 Key、安装令牌、日志和临时文件不会写入备份。
-
-备份和恢复要求 Lantern 已停止：
-
-```bash
-lantern stop
-lantern backup:create
-lantern backup:restore "/path/to/lantern-backup-<time>.zip"
-```
-
-默认备份写入数据目录的 `backups/`。恢复前会验证 manifest、每个文件的 SHA-256 和 SQLite 完整性；验证失败不会替换现有作品。恢复会覆盖当前数据库和对象文件，但保留当前安装的 Provider 配置。
-
-## 诊断与支持范围
-
-`lantern doctor` 检查 Node.js 版本、数据目录写入权限、Provider 配置权限、SQLite 完整性、已引用对象文件和运行服务健康状态。输出只包含 Provider 是否已配置，不显示模型 Key 或安装令牌。
-
-遇到启动问题时依次检查：
-
-1. 运行 `lantern doctor`；
-2. 确认 `config/runtime.json` 中的 Web 与 API 端口未被占用；
-3. 查看数据目录中的 `logs/api.log` 与 `logs/web.log`；
-4. 修正问题后重新运行 `lantern start`。
-
-正式 Release 以 GitHub Actions 实际通过的平台为准，当前发行链路覆盖 macOS 14 和 Windows Server 2022。Linux 未列入本阶段支持范围。
-
-## 架构
+## 架构与文档
 
 ```text
 Web (React / Vinext)
-  -> Fastify API
-      -> Domain Service / Capability
-      -> SQLite / Prisma
-      -> Local Task Runner -> Model Provider
-      -> Local Object Storage
+  → Fastify API
+      → Domain Service / Capability
+      → SQLite / Prisma
+      → Local Task Runner → Model Provider
+      → Local Object Storage
 ```
 
 - `apps/web` 是浏览器工作台，`apps/api` 是只监听 loopback 的本地 API 服务。
-- `packages/shared` 提供 LCD、工作区命令和共享契约。
-- `packages/editor-core` 与 `packages/layout-engine` 提供确定性编辑和页面布局能力。
-- `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 负责 Agent 上下文、任务和模型适配。
-- Workspace 模块通过各自 `package.json` 的公开 `exports` 协作，不跨目录引用其他包的 `src` 实现。
-- Web UI、产品内 Agent 和外置 Agent 共享领域服务、Editor Capability 和作品写入规则；MCP 只投影已登记能力。
+
+- `packages/shared` 提供 LCD、工作区命令和共享契约，`packages/editor-core` 与 `packages/layout-engine` 提供确定性编辑和页面布局能力。
+
+- `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 负责 Agent 上下文、任务和模型适配。Web UI、内置 Agent 和外置 Agent 共享领域服务、Editor Capability 和作品写入规则。
+
+| 文档 | 内容 |
+|---|---|
+| [文档入口](./docs/README.md) | 产品、编辑器、LCD 与 Agent 正式文档的阅读顺序 |
+| [LCD](./docs/lcd.md) | 作品结构、坐标、分层、资源引用和写入不变量 |
+| [Agent](./docs/agent.md) | Agent 能力、上下文、任务、Candidate 和扩展边界 |
+| [开发边界](./AGENTS.md) | 仓库导航、稳定架构边界和交付要求 |
+
+## 许可证与反馈
+
+Lantern 使用 [MIT License](./LICENSE) 开源。
+
+如果遇到问题或希望提交功能建议，请使用 [GitHub Issues](https://github.com/lanseqingling/lantern/issues)。提交前请勿公开模型 Key、安装令牌、本地路径或未公开作品内容。

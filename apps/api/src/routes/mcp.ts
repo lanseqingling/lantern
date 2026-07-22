@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { currentMcpUser } from "../http";
+import { receiveExternalAssetUpload } from "@lantern/server/external-upload-service";
+import { assertMcpLoopbackRequest, currentMcpUser, ok } from "../http";
 import { createLanternMcpServer } from "../mcp/server";
 
 function methodNotAllowed(reply: FastifyReply) {
@@ -12,6 +13,16 @@ function methodNotAllowed(reply: FastifyReply) {
 }
 
 export function registerMcpRoutes(app: FastifyInstance) {
+  app.put<{ Params: { uploadId: string }; Body: Buffer }>("/v1/mcp/uploads/:uploadId", async (request) => {
+    assertMcpLoopbackRequest(request);
+    return ok(request, await receiveExternalAssetUpload(
+      request.params.uploadId,
+      request.headers.authorization,
+      request.headers["content-type"],
+      request.body,
+    ));
+  });
+
   app.post("/mcp", async (request, reply) => {
     const user = await currentMcpUser(request);
     const server = createLanternMcpServer(user.id);

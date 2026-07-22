@@ -99,7 +99,7 @@ lantern backup:restore <backup-file>
 lantern agent:install
 ```
 
-该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。Agent 只使用 Lantern 当前实际开放的受控领域能力：可以通过 `lantern://` 引用或本地作品链接精确读取和管理漫画、一话及结构化资产资料，并按能力需要读取画布上下文。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
+该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。Agent 只使用 Lantern 当前实际开放的受控领域能力：可以通过 `lantern://` 引用或本地作品链接精确管理漫画、一话、结构化资产资料、固定图片版本与派生形态，并按能力需要读取画布上下文。图片字节通过短时效本地上传位置传输，不进入模型工具参数；同步写入可安全重试并保留调用审计。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
 
 ## 开发与构建
 

@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to inspect, organize, and edit a creator's comics through the domain capabilities Lantern currently exposes. Use when the user wants to read, understand, manage, review, or continue work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "0.3.0"
-  minimum_catalog_revision: "3"
+  version: "0.4.0"
+  minimum_catalog_revision: "4"
 ---
 
 # Create with Lantern
@@ -16,6 +16,7 @@ Use Lantern as the source of truth for the creator's comic and its current worki
 2. Call `lantern_capabilities_list` when availability or effect is uncertain.
 3. Read projects or bounded context only when the chosen capability needs a project, target, or working revision that is not already unambiguous.
 4. Use only tools currently exposed by Lantern. Do not invent direct database, file, LCD, or command mutations.
+5. For every synchronous mutation that requires an `idempotencyKey`, create one stable key for the creator's single logical action and reuse it unchanged only when retrying the same capability with the same arguments. Never reuse it for a changed input or target.
 
 When bounded context is needed, choose its profile by intent:
 
@@ -25,7 +26,7 @@ When bounded context is needed, choose its profile by intent:
 
 Ask the user to choose only when multiple resources or targets remain materially ambiguous after the available narrow reads.
 
-When the request manages a Comic, Chapter, Project relationship, or structured Asset, read [references/resources.md](references/resources.md). Reuse a returned `lantern://` reference for follow-up changes instead of searching by title again.
+When the request manages a Comic, Chapter, Project relationship, or structured Asset, read [references/resources.md](references/resources.md). When it uploads an asset image, fixes an Asset Version, chooses a primary image, or manages a derived form, also read [references/assets.md](references/assets.md). Reuse a returned `lantern://` reference for follow-up changes instead of searching by title again.
 
 ## Respect Lantern's creative boundaries
 

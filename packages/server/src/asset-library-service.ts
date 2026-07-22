@@ -1,6 +1,7 @@
-import { AssetKind, AssetLibraryStatus, type Prisma } from "@prisma/client";
+import { AssetKind, AssetLibraryStatus, ExternalUploadStatus, type Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { AppError } from "./errors";
+import { deleteObject, deleteTemporaryObject, getTemporaryObject, putImage } from "./object-storage";
 import { createSignedAssetPath } from "./signed-assets";
 import type { UploadedImage } from "./asset-service";
 
@@ -25,9 +26,14 @@ function serializedImages(asset: AssetWithGallery) {
       sortIndex: image.sortIndex,
       isPrimary: index === 0,
       versionId: image.assetVersionId,
+      version: image.assetVersion.version,
       contentUrl: createSignedAssetPath(image.assetVersionId),
+      contentType: image.assetVersion.contentType ?? undefined,
+      byteSize: image.assetVersion.byteSize ?? undefined,
       width: image.assetVersion.width ?? undefined,
       height: image.assetVersion.height ?? undefined,
+      checksum: image.assetVersion.checksum ?? undefined,
+      createdAt: image.assetVersion.createdAt.toISOString(),
     }));
 }
 
@@ -171,6 +177,83 @@ export async function appendAssetImage(ownerUserId: string, assetId: string, upl
   return getAssetFamilyDetail(ownerUserId, assetId);
 }
 
+export async function attachExternalAssetImage(ownerUserId: string, assetId: string, uploadId: string) {
+  const asset = await requireOwnedLibraryAsset(ownerUserId, assetId);
+  const upload = await prisma.externalAssetUpload.findFirst({ where: { id: uploadId, ownerUserId, assetId: asset.id } });
+  if (!upload) throw new AppError("not_found", "图片上传记录不存在或不属于该资产。", 404);
+  if (upload.status === ExternalUploadStatus.CONSUMED && upload.assetVersionId && upload.assetImageId) {
+    return { ...await getAssetFamilyDetail(ownerUserId, asset.id), attached: { versionId: upload.assetVersionId, imageId: upload.assetImageId, replayed: true } };
+  }
+  if (upload.status !== ExternalUploadStatus.UPLOADED
+    || !upload.temporaryObjectKey
+    || !upload.contentType
+    || upload.byteSize === null
+    || !upload.checksum) {
+    throw new AppError("upload_not_ready", "请先把图片上传到 Lantern 返回的一次性位置。", 409);
+  }
+  const temporaryBytes = await getTemporaryObject(upload.temporaryObjectKey)
+    .catch(() => { throw new AppError("upload_not_ready", "临时图片不可用，请重新创建上传位置。", 409); });
+  const stored = await putImage(temporaryBytes, `external-assets/${asset.id}`);
+  if (stored.checksum !== upload.checksum) {
+    await deleteObject(stored.objectKey);
+    throw new AppError("upload_corrupted", "临时图片校验失败，请重新上传。", 409);
+  }
+  let attached: { versionId: string; imageId: string; replayed: boolean };
+  try {
+    attached = await prisma.$transaction(async (tx) => {
+      const currentUpload = await tx.externalAssetUpload.findFirst({ where: { id: upload.id, ownerUserId, assetId: asset.id } });
+      if (currentUpload?.status === ExternalUploadStatus.CONSUMED && currentUpload.assetVersionId && currentUpload.assetImageId) {
+        return { versionId: currentUpload.assetVersionId, imageId: currentUpload.assetImageId, replayed: true };
+      }
+      if (currentUpload?.status !== ExternalUploadStatus.UPLOADED || currentUpload.temporaryObjectKey !== upload.temporaryObjectKey) {
+        throw new AppError("upload_conflict", "该图片上传已经被其他操作处理。", 409);
+      }
+      const latest = await tx.assetVersion.findFirst({ where: { assetId: asset.id }, orderBy: { version: "desc" }, select: { version: true } });
+      const imageCount = await tx.assetImage.count({ where: { assetId: asset.id } });
+      const nextVersion = (latest?.version ?? asset.currentVersionNumber) + 1;
+      const version = await tx.assetVersion.create({
+        data: {
+          assetId: asset.id,
+          version: nextVersion,
+          objectKey: stored.objectKey,
+          contentType: stored.contentType,
+          byteSize: stored.byteSize,
+          width: stored.width,
+          height: stored.height,
+          checksum: stored.checksum,
+          source: "external_upload",
+        },
+      });
+      const image = await tx.assetImage.create({
+        data: {
+          assetId: asset.id,
+          assetVersionId: version.id,
+          label: currentUpload.label || currentUpload.filename.replace(/\.[^.]+$/, "").trim() || `图片 ${imageCount + 1}`,
+          sortIndex: imageCount * 10,
+        },
+      });
+      await tx.asset.update({ where: { id: asset.id }, data: { currentVersionNumber: nextVersion } });
+      await tx.externalAssetUpload.update({
+        where: { id: currentUpload.id },
+        data: {
+          status: ExternalUploadStatus.CONSUMED,
+          temporaryObjectKey: null,
+          assetVersionId: version.id,
+          assetImageId: image.id,
+          consumedAt: new Date(),
+        },
+      });
+      return { versionId: version.id, imageId: image.id, replayed: false };
+    });
+  } catch (error) {
+    await deleteObject(stored.objectKey);
+    throw error;
+  }
+  if (attached.replayed) await deleteObject(stored.objectKey);
+  else await deleteTemporaryObject(upload.temporaryObjectKey);
+  return { ...await getAssetFamilyDetail(ownerUserId, asset.id), attached };
+}
+
 export async function updateAsset(ownerUserId: string, assetId: string, input: { name?: string; description?: string }) {
   const asset = await prisma.asset.findFirst({ where: { id: assetId, ownerUserId, archivedAt: null } });
   if (!asset) throw new AppError("not_found", "资产不存在。", 404);
@@ -215,6 +298,66 @@ export async function deleteAssetImage(ownerUserId: string, assetId: string, ima
     await tx.asset.update({ where: { id: assetId }, data: { updatedAt: new Date() } });
   });
   return getAssetFamilyDetail(ownerUserId, assetId);
+}
+
+export async function createAssetVariant(
+  ownerUserId: string,
+  assetId: string,
+  input: { label: string; name?: string; description?: string },
+) {
+  const requested = await prisma.asset.findFirst({
+    where: { id: assetId, ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY },
+    select: { id: true, variantOfAssetId: true },
+  });
+  if (!requested) throw new AppError("not_found", "资产不存在。", 404);
+  const rootId = requested.variantOfAssetId ?? requested.id;
+  const root = await prisma.asset.findFirst({
+    where: {
+      id: rootId,
+      ownerUserId,
+      archivedAt: null,
+      variantOfAssetId: null,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+    },
+    select: { id: true, projectId: true, kind: true, name: true, description: true },
+  });
+  if (!root) throw new AppError("not_found", "资产不存在。", 404);
+  const lastVariant = await prisma.asset.findFirst({
+    where: { variantOfAssetId: root.id, ownerUserId },
+    orderBy: [{ variantSortIndex: "desc" }, { createdAt: "desc" }],
+    select: { variantSortIndex: true },
+  });
+  const created = await prisma.asset.create({
+    data: {
+      ownerUserId,
+      projectId: root.projectId,
+      kind: root.kind,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      currentVersionNumber: 0,
+      name: input.name?.trim() || `${root.name} · ${input.label}`,
+      description: input.description ?? root.description,
+      variantOfAssetId: root.id,
+      variantLabel: input.label,
+      variantSortIndex: (lastVariant?.variantSortIndex ?? 0) + 10,
+    },
+  });
+  return { ...await getAssetFamilyDetail(ownerUserId, root.id), createdVariantId: created.id };
+}
+
+export async function archiveAssetVariant(ownerUserId: string, assetId: string) {
+  const variant = await prisma.asset.findFirst({
+    where: { id: assetId, ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY },
+    select: { id: true, variantOfAssetId: true },
+  });
+  if (!variant) throw new AppError("not_found", "派生形态不存在。", 404);
+  if (!variant.variantOfAssetId) throw new AppError("validation", "主资产不能作为派生形态归档；请使用资产归档能力。", 400);
+  const archivedAt = new Date();
+  await prisma.$transaction([
+    prisma.asset.update({ where: { id: variant.id }, data: { archivedAt } }),
+    prisma.canvasAssetListItem.updateMany({ where: { assetId: variant.id, ownerUserId }, data: { hiddenAt: archivedAt } }),
+  ]);
+  return { ...await getAssetFamilyDetail(ownerUserId, variant.variantOfAssetId), archivedVariantId: variant.id };
 }
 
 export async function archiveAssetFamily(ownerUserId: string, assetId: string) {
@@ -285,6 +428,7 @@ function detailEntry(asset: AssetWithGallery, fallbackLabel: string) {
     label: asset.variantLabel?.trim() || fallbackLabel,
     name: asset.name,
     description: asset.description,
+    currentVersionNumber: asset.currentVersionNumber,
     images: serializedImages(asset),
     updatedAt: asset.updatedAt.toISOString(),
   };

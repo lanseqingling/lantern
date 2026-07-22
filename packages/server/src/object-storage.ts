@@ -91,6 +91,43 @@ export async function putImage(bytes: Buffer, namespace: string): Promise<Stored
   };
 }
 
+export async function putTemporaryImage(bytes: Buffer, namespace: string): Promise<StoredObject> {
+  if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error("IMAGE_SIZE_LIMIT");
+  if (!/^[a-zA-Z0-9/_-]+$/.test(namespace) || namespace.includes("..")) throw new Error("INVALID_OBJECT_NAMESPACE");
+  const inspected = await inspectImage(bytes);
+  const extension = allowedTypes.get(inspected.contentType)!;
+  const objectKey = `external-uploads/${namespace}/${randomUUID()}${extension}`;
+  const target = path.join(getRuntimePaths().tempDir, objectKey);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, bytes, { flag: "wx" });
+  return {
+    objectKey,
+    contentType: inspected.contentType,
+    byteSize: bytes.length,
+    checksum: createHash("sha256").update(bytes).digest("hex"),
+    width: inspected.width,
+    height: inspected.height,
+  };
+}
+
+function assertTemporaryObjectKey(objectKey: string) {
+  if (!/^external-uploads\/[a-zA-Z0-9/_-]+\.(png|jpg|webp)$/.test(objectKey) || objectKey.includes("..")) {
+    throw new Error("INVALID_TEMPORARY_OBJECT_KEY");
+  }
+}
+
+export async function getTemporaryObject(objectKey: string) {
+  assertTemporaryObjectKey(objectKey);
+  return readFile(path.join(getRuntimePaths().tempDir, objectKey));
+}
+
+export async function deleteTemporaryObject(objectKey: string) {
+  assertTemporaryObjectKey(objectKey);
+  await unlink(path.join(getRuntimePaths().tempDir, objectKey)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+}
+
 export async function putObject(bytes: Buffer, namespace: string, extension: "png" | "json", contentType: "image/png" | "application/json") {
   if (!bytes.length || bytes.length > 100 * 1024 * 1024) throw new Error("OBJECT_SIZE_LIMIT");
   const objectKey = `${categorizedNamespace(namespace, "export")}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;

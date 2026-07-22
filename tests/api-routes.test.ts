@@ -4,6 +4,9 @@ import type { FastifyInstance } from "fastify";
 import { createApiApp } from "../apps/api/src/app";
 import { getConfig } from "@lantern/server/config";
 import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
+import { createComicLibraryAsset } from "@lantern/server/asset-library-service";
+import { createComicChapter } from "@lantern/server/comic-service";
+import { prepareExternalAssetUpload } from "@lantern/server/external-upload-service";
 import {
   LOCAL_USER_DISPLAY_NAME,
   LOCAL_USER_EMAIL,
@@ -112,7 +115,7 @@ test("MCP uses an independent loopback credential and rejects browser origins", 
     payload: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
   });
   assert.equal(tools.statusCode, 200);
-  for (const name of ["lantern_projects_list", "lantern_context_get", "lantern_capabilities_list", "lantern_images_inspect", "lantern_comic_get", "lantern_comic_update", "lantern_chapter_create", "lantern_asset_create"]) {
+  for (const name of ["lantern_projects_list", "lantern_context_get", "lantern_capabilities_list", "lantern_images_inspect", "lantern_comic_get", "lantern_comic_update", "lantern_chapter_create", "lantern_asset_create", "lantern_asset_variant_create", "lantern_asset_image_upload_prepare", "lantern_asset_image_attach", "lantern_asset_image_set_primary"]) {
     assert.match(tools.body, new RegExp(`"name":"${name}"`));
   }
   assert.match(tools.body, /"readOnlyHint":true/);
@@ -172,7 +175,7 @@ test("registered domain routes preserve validation and response envelopes", asyn
       method: "tools/call",
       params: {
         name: "lantern_comic_update",
-        arguments: { comic: `lantern://comics/${comicId}`, worldSummary: "资源引用测试世界观" },
+        arguments: { comic: `lantern://comics/${comicId}`, worldSummary: "资源引用测试世界观", idempotencyKey: `api-comic-update-${comicId}` },
       },
     },
   });
@@ -197,6 +200,33 @@ test("registered domain routes preserve validation and response envelopes", asyn
   });
   assert.equal(updated.statusCode, 200);
   assert.equal(updated.json().data.title, "服务边界测试·已更新");
+
+  await createComicChapter(LOCAL_USER_ID, comicId, { title: "上传测试一话", summary: "验证外置 Agent 图片上传边界。" });
+  const asset = await createComicLibraryAsset(LOCAL_USER_ID, comicId, {
+    kind: "character",
+    name: "上传测试角色",
+    description: "只用于验证一次性上传位置。",
+  });
+  const upload = await prepareExternalAssetUpload(LOCAL_USER_ID, asset.id, { filename: "reference.png", label: "主参考" });
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n0YAAAAASUVORK5CYII=", "base64");
+  const uploaded = await app.inject({
+    method: "PUT",
+    url: `/v1/mcp/uploads/${upload.uploadId}`,
+    headers: { authorization: upload.headers.Authorization, "content-type": "image/png" },
+    payload: png,
+  });
+  assert.equal(uploaded.statusCode, 200);
+  assert.equal(uploaded.json().data.status, "uploaded");
+  assert.equal(uploaded.json().data.uploaded.contentType, "image/png");
+
+  const browserUpload = await app.inject({
+    method: "PUT",
+    url: `/v1/mcp/uploads/${upload.uploadId}`,
+    headers: { authorization: upload.headers.Authorization, "content-type": "image/png", origin: "http://localhost:18788" },
+    payload: png,
+  });
+  assert.equal(browserUpload.statusCode, 403);
+  assert.equal(browserUpload.json().error.code, "mcp_origin_forbidden");
 
   const archived = await app.inject({
     method: "DELETE",

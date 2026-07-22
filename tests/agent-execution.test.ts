@@ -102,7 +102,7 @@ test("storyboard entry editing and frame-image generation are distinct capabilit
 test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
   const first = semanticCapabilityCatalogManifest();
   const second = semanticCapabilityCatalogManifest();
-  assert.equal(first.revision, 3);
+  assert.equal(first.revision, 4);
   assert.equal(first.hash, second.hash);
   assert.match(first.hash, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => JSON.stringify(first));
@@ -121,6 +121,13 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "asset.get",
     "asset.create",
     "asset.update",
+    "asset.variant.create",
+    "asset.variant.archive",
+    "asset.image.upload_prepare",
+    "asset.image.attach",
+    "asset.image.set_primary",
+    "asset.image.rename",
+    "asset.image.archive",
     "asset.archive",
     "context.inspect_images",
     "storyboard.edit_single_entry",

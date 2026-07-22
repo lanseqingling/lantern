@@ -14,6 +14,8 @@
     "./db": "./src/db.ts",
     "./download-service": "./src/download-service.ts",
     "./errors": "./src/errors.ts",
+    "./external-operation-service": "./src/external-operation-service.ts",
+    "./external-upload-service": "./src/external-upload-service.ts",
     "./export-renderer": "./src/export-renderer.ts",
     "./local-runtime": "./src/local-runtime.ts",
     "./object-storage": "./src/object-storage.ts",

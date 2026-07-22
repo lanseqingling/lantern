@@ -43,7 +43,7 @@ test("Codex MCP config update preserves unrelated settings and owns only the Lan
   assert.equal(updated.match(/\[mcp_servers\.lantern]/g)?.length, 1);
   assert.match(updated, /http_headers = \{ Authorization = "Bearer secret-token" \}/);
   assert.match(updated, /default_tools_approval_mode = "prompt"/);
-  assert.equal(updated.match(/approval_mode = "auto"/g)?.length, 4);
+  assert.equal(updated.match(/approval_mode = "auto"/g)?.length, 9);
 });
 
 test("JSON Agent adapters preserve unrelated configuration and replace only Lantern", () => {
@@ -105,6 +105,7 @@ test("Agent installer deploys the shared Skill and writes each supported client 
     await writeFile(path.join(sourceSkillDir, "SKILL.md"), "---\nname: create-with-lantern\ndescription: test\n---\n");
     await writeFile(path.join(sourceSkillDir, "agents", "openai.yaml"), "interface:\n  display_name: Lantern\ndependencies:\n  tools:\n    - type: mcp\n      url: \"http://127.0.0.1:18787/mcp\"\n");
     await writeFile(path.join(sourceSkillDir, "references", "resources.md"), "# Resource Reference\n");
+    await writeFile(path.join(sourceSkillDir, "references", "assets.md"), "# Asset Versions\n");
 
     const agentIds: SupportedAgentId[] = ["codex", "claude-code", "kimi-code", "opencode"];
     for (const agentId of agentIds) {
@@ -125,6 +126,7 @@ test("Agent installer deploys the shared Skill and writes each supported client 
     assert.match(await readFile(path.join(sharedSkill, "SKILL.md"), "utf8"), /create-with-lantern/);
     assert.match(await readFile(path.join(sharedSkill, "agents", "openai.yaml"), "utf8"), /http:\/\/127\.0\.0\.1:19000\/mcp/);
     assert.match(await readFile(path.join(sharedSkill, "references", "resources.md"), "utf8"), /Resource Reference/);
+    assert.match(await readFile(path.join(sharedSkill, "references", "assets.md"), "utf8"), /Asset Versions/);
     assert.match(await readFile(path.join(homeDirectory, ".claude", "skills", "create-with-lantern", "SKILL.md"), "utf8"), /create-with-lantern/);
   } finally {
     await rm(root, { recursive: true, force: true });

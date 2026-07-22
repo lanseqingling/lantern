@@ -173,9 +173,11 @@ type ExternalToolResult<T> = {
 
 ### 5.4 外部结果
 
-外置 Agent 使用自身模型生成文字或图片时，先固定 Capability、目标、base revision 和上传限制，再提交受 schema 约束的结果。图片通过一次性上传位置登记为不可变 AssetVersion，随后由领域 Capability 创建 Asset 或 Candidate。
+外置 Agent 使用自身模型生成文字或图片时，先固定 Capability、目标、base revision 和上传限制，再提交受 schema 约束的结果。资产图片先由同步 Capability 为明确 Asset 创建短时效 loopback 上传位置；客户端使用返回的授权把 PNG、JPEG 或 WebP 原始字节 PUT 到该位置，再由登记能力将上传结果原子写成不可变 AssetVersion 和稳定图片槽。上传位置本身不改变资产，不能跨 Asset 复用，也不接受对象存储键、本地客户端路径或放入 MCP JSON 的大段 Base64。
 
 外置 Agent 不提供对象存储键，不把客户端本地路径当作服务端路径，也不决定数据库 ID、作品元素 ID 或 revision。外部结果登记不改变该能力原有的目标、风险和 Candidate 规则。
+
+所有同步资源写入要求调用者为一个逻辑动作提供稳定幂等键。Lantern 记录 owner、Capability 版本、输入 hash、目标引用、状态和结果；相同键与相同输入重试返回原结果，不重复创建资源，相同键绑定不同能力或输入时返回冲突。审计不复制完整创作输入或模型思维过程。
 
 ## 6. Lantern Skill
 
@@ -223,18 +225,18 @@ Capability 使用稳定 ID 和独立版本。目标、影响范围、effect 或�
 
 Skill 不跟随每个工具版本发布。只有产品对象语义、通用作用范围、结果 effect 或长期协作方式变化时才更新 Skill。CI 至少验证 schema 一致、外置权限不越界、底层命令不可提交、owner 和 revision 守卫有效，以及兼容 Agent 可以发现并执行代表性领域能力。
 
-## 8. 后续交付阶段
+## 8. 交付阶段
 
-本地 Streamable HTTP MCP、独立凭证、Project/Context/Capability/Image 工具、Resource Reference、同步作品管理能力、应用级 Skill 和统一安装命令已经构成接入基线。后续只保留三个能力阶段。
+本地 Streamable HTTP MCP、独立凭证、Project/Context/Capability/Image 工具、Resource Reference、同步作品管理能力、应用级 Skill 和统一安装命令构成接入基线。能力按以下三个阶段交付。
 
-### 阶段一：作品与资产管理
+### 阶段一：作品与资产管理（已完成）
 
 - 漫画与一话的列表、读取、创建、更新、深度复制和归档已经通过共享 Resource Reference、同步 `resource_mutation` 执行与 MCP 自动投影开放；世界概要、视觉风格文字和章节资料复用现有领域服务。
 - 角色、场景、道具和参考资料卡已经支持读取、创建、更新和归档，Agent 可以把用户已经确认的结构化设定保存到正确漫画范围，不依赖 Task 或 Candidate。
-- 继续接入图片上传、固定 AssetVersion、图片槽、主版本和派生形态管理，并保持对象存储与版本引用边界。
-- 为同步写入补齐跨重试幂等记录和调用审计；破坏性动作继续要求明确确认。
+- 图片通过短时效上传位置登记为固定 AssetVersion 和稳定图片槽，支持主图、槽位名称与派生形态管理；归档图片槽不删除仍可被作品引用的不可变版本。
+- 同步写入具有跨重试幂等记录和调用审计；破坏性动作继续要求明确确认。
 
-### 阶段二：LCD 编辑与编排
+### 阶段二：LCD 编辑与编排（下一阶段）
 
 - 按页面、画格、图片、气泡文字和覆盖编排分组投影现有 Editor Capability。
 - 确定性低风险编辑使用 expected revision 直接产生可撤销 ChangeSet；结构、多对象和高风险编排形成 Candidate。

@@ -86,6 +86,19 @@ enum CandidateStatus {
   STALE
 }
 
+enum ExternalUploadStatus {
+  PENDING
+  UPLOADED
+  CONSUMED
+  EXPIRED
+}
+
+enum ExternalOperationStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 model User {
   id          String   @id @default(cuid())
   email       String   @unique
@@ -93,17 +106,19 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  comics           Comic[]
-  comicSettings    ComicSetting[]
-  chapters         Chapter[]
-  projects         Project[]
-  assets           Asset[]
-  conversations    AgentConversation[]
-  messages         Message[]
-  tasks            GenerationTask[]
-  candidates       Candidate[]
-  snapshots        SavedSnapshot[]
-  canvasAssetItems CanvasAssetListItem[]
+  comics             Comic[]
+  comicSettings      ComicSetting[]
+  chapters           Chapter[]
+  projects           Project[]
+  assets             Asset[]
+  conversations      AgentConversation[]
+  messages           Message[]
+  tasks              GenerationTask[]
+  candidates         Candidate[]
+  snapshots          SavedSnapshot[]
+  canvasAssetItems   CanvasAssetListItem[]
+  externalUploads    ExternalAssetUpload[]
+  externalOperations ExternalAgentOperation[]
 }
 
 model Comic {
@@ -290,6 +305,7 @@ model Asset {
   variants        Asset[]                    @relation("AssetVariants")
   placements      CanvasReferencePlacement[]
   canvasListItems CanvasAssetListItem[]
+  externalUploads ExternalAssetUpload[]
 
   @@index([ownerUserId, projectId, kind, archivedAt])
   @@index([variantOfAssetId, variantSortIndex, createdAt])
@@ -511,4 +527,62 @@ model Candidate {
 
   @@index([ownerUserId, projectId, status, createdAt])
   @@index([conversationId, status, createdAt])
+}
+
+/// A short-lived loopback upload slot created through a registered external
+/// Agent capability. The token is signed and never stored; this record only
+/// persists ownership, upload metadata, and the immutable version it became.
+model ExternalAssetUpload {
+  id                 String               @id @default(cuid())
+  ownerUserId        String
+  assetId            String
+  status             ExternalUploadStatus @default(PENDING)
+  filename           String
+  label              String               @default("")
+  temporaryObjectKey String?              @unique
+  contentType        String?
+  byteSize           Int?
+  width              Int?
+  height             Int?
+  checksum           String?
+  assetVersionId     String?
+  assetImageId       String?
+  expiresAt          DateTime
+  uploadedAt         DateTime?
+  consumedAt         DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  owner User  @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, assetId, status, createdAt])
+  @@index([expiresAt, status])
+}
+
+/// Durable idempotency and audit record for synchronous mutations invoked by
+/// an external Agent. Inputs are represented by a canonical hash rather than
+/// copied into the audit log.
+model ExternalAgentOperation {
+  id                String                  @id @default(cuid())
+  ownerUserId       String
+  capabilityId      String
+  capabilityVersion Int
+  idempotencyKey    String
+  inputHash         String
+  targetReference   String?
+  status            ExternalOperationStatus @default(RUNNING)
+  result            Json?
+  errorCode         String?
+  errorMessage      String?
+  startedAt         DateTime                @default(now())
+  completedAt       DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  owner User @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerUserId, idempotencyKey])
+  @@index([ownerUserId, capabilityId, createdAt])
+  @@index([ownerUserId, status, updatedAt])
 }

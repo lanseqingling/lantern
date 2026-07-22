@@ -30,6 +30,9 @@ export async function createApiApp(options: { logger?: FastifyServerOptions["log
     methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   });
   await app.register(multipart, { limits: { files: 1, fileSize: 50 * 1024 * 1024, fields: 12 } });
+  for (const contentType of ["image/png", "image/jpeg", "image/webp"]) {
+    app.addContentTypeParser(contentType, { parseAs: "buffer" }, (_request, body, done) => done(null, body));
+  }
 
   installErrorHandler(app);
   registerSystemRoutes(app);

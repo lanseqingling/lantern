@@ -19,6 +19,7 @@ import { commitChangeSet, revertCandidateApplication } from "@lantern/server/wor
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
 import { getExternalAgentContext, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
 import { getConfig } from "@lantern/server/config";
+import { receiveExternalAssetUpload } from "@lantern/server/external-upload-service";
 import { resolveResourceReference } from "@lantern/server/resource-reference-service";
 import { LocalTaskRunner } from "@lantern/agent-runtime/local-task-runner";
 import { invokeTaskCapability } from "@lantern/agent-runtime/task-service";
@@ -195,18 +196,95 @@ test("database candidate apply and revert preserve version heads atomically", as
     );
     const externalComic = await invokeExternalResourceCapability(ids.user, "comic.get", { comic: comicReference });
     assert.equal((externalComic.data as { title: string }).title, "集成测试漫画");
-    const createdExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.create", {
+    const createExternalAssetInput = {
       comic: comicReference,
       kind: "character",
       name: "林澄",
       description: "肩长黑发，穿浅色风衣，神态克制。",
-    });
+      idempotencyKey: `asset-create-${suffix}`,
+    } as const;
+    const createdExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.create", createExternalAssetInput);
+    const replayedExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.create", createExternalAssetInput);
     const createdExternalAssetId = createdExternalAsset.resource?.id;
     assert.ok(createdExternalAssetId);
+    assert.equal(replayedExternalAsset.resource?.id, createdExternalAssetId);
+    assert.equal(await prisma.asset.count({ where: { ownerUserId: ids.user, name: "林澄" } }), 1);
     assert.equal(createdExternalAsset.effect, "resource_mutation");
+    await assert.rejects(() => invokeExternalResourceCapability(ids.user, "asset.create", {
+      ...createExternalAssetInput,
+      name: "重复键下的另一个角色",
+    }), /幂等键已经用于另一项/);
+
+    const createdVariant = await invokeExternalResourceCapability(ids.user, "asset.variant.create", {
+      asset: `lantern://assets/${ids.asset}`,
+      label: "雨天形态",
+      description: "湿发与深色雨衣。",
+      idempotencyKey: `asset-variant-create-${suffix}`,
+    });
+    const createdVariantId = createdVariant.resource?.id;
+    assert.ok(createdVariantId);
+
+    const preparedUpload = await invokeExternalResourceCapability(ids.user, "asset.image.upload_prepare", {
+      asset: `lantern://assets/${ids.asset}`,
+      filename: "rain-reference.png",
+      label: "雨天立绘",
+      idempotencyKey: `asset-upload-prepare-${suffix}`,
+    });
+    const uploadTicket = preparedUpload.data as {
+      uploadId: string;
+      status: string;
+      headers: { Authorization: string };
+    };
+    assert.equal(uploadTicket.status, "pending");
+    await receiveExternalAssetUpload(uploadTicket.uploadId, uploadTicket.headers.Authorization, "image/png", png);
+    const attachedImage = await invokeExternalResourceCapability(ids.user, "asset.image.attach", {
+      asset: `lantern://assets/${ids.asset}`,
+      uploadId: uploadTicket.uploadId,
+      idempotencyKey: `asset-image-attach-${suffix}`,
+    });
+    const attached = (attachedImage.data as { attached: { versionId: string; imageId: string } }).attached;
+    const replayedAttachment = await invokeExternalResourceCapability(ids.user, "asset.image.attach", {
+      asset: `lantern://assets/${ids.asset}`,
+      uploadId: uploadTicket.uploadId,
+      idempotencyKey: `asset-image-attach-${suffix}`,
+    });
+    assert.deepEqual((replayedAttachment.data as { attached: { versionId: string; imageId: string } }).attached, attached);
+    await invokeExternalResourceCapability(ids.user, "asset.image.rename", {
+      asset: `lantern://assets/${ids.asset}`,
+      imageId: attached.imageId,
+      label: "雨夜主参考",
+      idempotencyKey: `asset-image-rename-${suffix}`,
+    });
+    const primaryImage = await invokeExternalResourceCapability(ids.user, "asset.image.set_primary", {
+      asset: `lantern://assets/${ids.asset}`,
+      imageId: attached.imageId,
+      idempotencyKey: `asset-image-primary-${suffix}`,
+    });
+    assert.equal((primaryImage.data as { root: { images: Array<{ id: string; versionId: string; isPrimary: boolean }> } }).root.images[0]?.id, attached.imageId);
+    assert.equal((primaryImage.data as { root: { images: Array<{ id: string; versionId: string; isPrimary: boolean }> } }).root.images[0]?.versionId, attached.versionId);
+    assert.equal((primaryImage.data as { root: { images: Array<{ id: string; versionId: string; isPrimary: boolean }> } }).root.images[0]?.isPrimary, true);
+    await invokeExternalResourceCapability(ids.user, "asset.image.archive", {
+      asset: `lantern://assets/${ids.asset}`,
+      imageId: attached.imageId,
+      confirmed: true,
+      idempotencyKey: `asset-image-archive-${suffix}`,
+    });
+    const archivedVariant = await invokeExternalResourceCapability(ids.user, "asset.variant.archive", {
+      asset: `lantern://assets/${createdVariantId}`,
+      confirmed: true,
+      idempotencyKey: `asset-variant-archive-${suffix}`,
+    });
+    assert.equal((archivedVariant.data as { archivedVariantId: string }).archivedVariantId, createdVariantId);
+    assert.equal(await prisma.assetVersion.count({ where: { id: attached.versionId, assetId: ids.asset } }), 1);
+    assert.equal(await prisma.assetImage.count({ where: { id: attached.imageId } }), 0);
+    const successfulExternalOperations = await prisma.externalAgentOperation.count({
+      where: { ownerUserId: ids.user, status: "SUCCEEDED" },
+    });
+    assert.ok(successfulExternalOperations >= 8);
     const updatedExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.update", {
       asset: `lantern://assets/${createdExternalAssetId}`,
       description: "肩长黑发，浅色风衣，习惯先观察再行动。",
+      idempotencyKey: `asset-update-${suffix}`,
     });
     assert.equal((updatedExternalAsset.data as { root: { description: string } }).root.description, "肩长黑发，浅色风衣，习惯先观察再行动。");
     await assert.rejects(
@@ -216,6 +294,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     const archivedExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.archive", {
       asset: `lantern://assets/${createdExternalAssetId}`,
       confirmed: true,
+      idempotencyKey: `asset-archive-${suffix}`,
     });
     assert.equal((archivedExternalAsset.data as { deleted: boolean }).deleted, true);
     const externalContext = await getExternalAgentContext(ids.user, {
@@ -284,7 +363,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     }, {
       id: "storyboard.edit_single_entry",
       version: 1,
-      catalogRevision: 3,
+      catalogRevision: 4,
     });
     assert.match(invocationAudit.capability?.catalogHash ?? "", /^[a-f0-9]{64}$/);
     assert.deepEqual(invocationAudit.invocation && {
@@ -492,6 +571,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.storyboardBeat.deleteMany({ where: { projectId: ids.project } });
     await prisma.canvasReferencePlacement.deleteMany({ where: { projectId: ids.project } });
     await prisma.canvasAssetListItem.deleteMany({ where: { projectId: ids.project } });
+    await prisma.externalAssetUpload.deleteMany({ where: { asset: { projectId: ids.project } } });
     await prisma.assetImage.deleteMany({ where: { asset: { projectId: ids.project } } });
     await prisma.assetVersion.deleteMany({ where: { asset: { projectId: ids.project } } });
     await prisma.asset.updateMany({ where: { projectId: ids.project }, data: { variantOfAssetId: null } });
@@ -501,6 +581,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.chapter.deleteMany({ where: { id: ids.chapter } });
     await prisma.comicSetting.deleteMany({ where: { comicId: ids.comic } });
     await prisma.comic.deleteMany({ where: { id: ids.comic } });
+    await prisma.externalAgentOperation.deleteMany({ where: { ownerUserId: ids.user } });
     await prisma.user.deleteMany({ where: { id: ids.user } });
     await prisma.$disconnect();
   }

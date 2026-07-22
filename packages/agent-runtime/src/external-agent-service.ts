@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getConfig } from "@lantern/server/config";
 import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
+import { executeIdempotentExternalMutation } from "@lantern/server/external-operation-service";
+import { prepareExternalAssetUpload } from "@lantern/server/external-upload-service";
 import {
   archiveComic,
   archiveComicChapter,
@@ -16,10 +18,16 @@ import {
   updateComicChapter,
 } from "@lantern/server/comic-service";
 import {
+  archiveAssetVariant,
   archiveAssetFamily,
+  attachExternalAssetImage,
+  createAssetVariant,
   createComicLibraryAsset,
+  deleteAssetImage,
   getAssetFamilyDetail,
   listComicAssetCards,
+  renameAssetImage,
+  setPrimaryAssetImage,
   updateAsset,
 } from "@lantern/server/asset-library-service";
 import { resolveResourceReference, resourceReference } from "@lantern/server/resource-reference-service";
@@ -255,18 +263,11 @@ function argument(input: Record<string, unknown>, name: string) {
   return value;
 }
 
-export async function invokeExternalResourceCapability(
+async function executeExternalResourceCapability(
   ownerUserId: string,
-  capabilityId: string,
-  input: unknown,
+  capability: AgentCapabilityDescriptor,
+  parsed: Record<string, unknown>,
 ) {
-  const capability = getAgentCapability(capabilityId);
-  if (!capability || capability.execution !== "synchronous" || !isResourceCapabilityId(capability.id)) {
-    throw new AppError("capability_not_available", "该 Lantern 能力当前未向外置 Agent 开放。", 404);
-  }
-  assertAgentCapabilityAccess(capability, "external");
-  const parsed = capability.inputSchema.parse(input) as Record<string, unknown>;
-
   if (capability.id === "comic.list") {
     const comics = await listComics(ownerUserId, { cursor: parsed.cursor as string | undefined, limit: parsed.limit as number });
     return externalResourceResult(capability, {
@@ -394,6 +395,74 @@ export async function invokeExternalResourceCapability(
         data: await getAssetFamilyDetail(ownerUserId, target.id),
       });
     }
+    if (capability.id === "asset.variant.create") {
+      const data = await createAssetVariant(ownerUserId, target.id, {
+        label: argument(parsed, "label"),
+        name: parsed.name as string | undefined,
+        description: parsed.description as string | undefined,
+      });
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", data.createdVariantId),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data,
+        nextActions: ["Use the returned variant asset URI when uploading images or updating this shape."],
+      });
+    }
+    if (capability.id === "asset.variant.archive") {
+      const data = await archiveAssetVariant(ownerUserId, target.id);
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", data.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data,
+      });
+    }
+    if (capability.id === "asset.image.upload_prepare") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await prepareExternalAssetUpload(ownerUserId, target.id, {
+          filename: argument(parsed, "filename"),
+          label: parsed.label as string | undefined,
+        }),
+        nextActions: ["PUT the raw PNG, JPEG, or WebP bytes to uploadUrl with the returned headers, then call asset.image.attach with uploadId."],
+      });
+    }
+    if (capability.id === "asset.image.attach") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await attachExternalAssetImage(ownerUserId, target.id, argument(parsed, "uploadId")),
+        nextActions: ["Reuse the returned immutable versionId for fixed references; set the image as primary only if the creator requests it."],
+      });
+    }
+    if (capability.id === "asset.image.set_primary") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await setPrimaryAssetImage(ownerUserId, target.id, argument(parsed, "imageId")),
+      });
+    }
+    if (capability.id === "asset.image.rename") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await renameAssetImage(ownerUserId, target.id, argument(parsed, "imageId"), argument(parsed, "label")),
+      });
+    }
+    if (capability.id === "asset.image.archive") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await deleteAssetImage(ownerUserId, target.id, argument(parsed, "imageId")),
+      });
+    }
     if (capability.id === "asset.archive") {
       return externalResourceResult(capability, {
         resource: resourceReference("asset", target.id),
@@ -405,6 +474,29 @@ export async function invokeExternalResourceCapability(
   }
 
   throw new AppError("capability_not_available", "该 Lantern 能力当前没有同步执行器。", 404);
+}
+
+export async function invokeExternalResourceCapability(
+  ownerUserId: string,
+  capabilityId: string,
+  input: unknown,
+) {
+  const capability = getAgentCapability(capabilityId);
+  if (!capability || capability.execution !== "synchronous" || !isResourceCapabilityId(capability.id)) {
+    throw new AppError("capability_not_available", "该 Lantern 能力当前未向外置 Agent 开放。", 404);
+  }
+  assertAgentCapabilityAccess(capability, "external");
+  const parsed = capability.inputSchema.parse(input) as Record<string, unknown>;
+  if (capability.effect === "observe") return executeExternalResourceCapability(ownerUserId, capability, parsed);
+  const idempotencyKey = argument(parsed, "idempotencyKey");
+  return executeIdempotentExternalMutation({
+    ownerUserId,
+    capabilityId: capability.id,
+    capabilityVersion: capability.version,
+    idempotencyKey,
+    input: parsed,
+    operation: () => executeExternalResourceCapability(ownerUserId, capability, parsed),
+  });
 }
 
 function contextRequestForProfile(profile: AgentCapabilityContextProfile) {

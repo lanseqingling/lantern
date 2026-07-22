@@ -41,18 +41,22 @@ export async function currentUser(request: FastifyRequest) {
 }
 
 export async function currentMcpUser(request: FastifyRequest) {
-  if (!isLoopbackHost(request.headers.host)) {
-    throw new AppError("mcp_loopback_required", "Lantern MCP 只接受 loopback 请求。", 403);
-  }
-  if (request.headers.origin) {
-    throw new AppError("mcp_origin_forbidden", "Lantern MCP 不接受浏览器跨域请求。", 403);
-  }
+  assertMcpLoopbackRequest(request);
   if (!bearerTokenMatches(request, config.LANTERN_MCP_TOKEN)) {
     throw new AppError("unauthorized", "无法验证 Lantern MCP 凭证。", 401);
   }
   const user = await prisma.user.findUnique({ where: { id: LOCAL_USER_ID } });
   if (!user) throw new AppError("unauthorized", "本地 Lantern 工作空间尚未初始化。", 401);
   return user;
+}
+
+export function assertMcpLoopbackRequest(request: FastifyRequest) {
+  if (!isLoopbackHost(request.headers.host)) {
+    throw new AppError("mcp_loopback_required", "Lantern MCP 只接受 loopback 请求。", 403);
+  }
+  if (request.headers.origin) {
+    throw new AppError("mcp_origin_forbidden", "Lantern MCP 不接受浏览器跨域请求。", 403);
+  }
 }
 
 export function ok<T>(request: FastifyRequest, data: T) {

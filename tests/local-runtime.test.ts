@@ -16,7 +16,7 @@ import {
 import { createRuntimeBackup, restoreRuntimeBackup } from "@lantern/server/runtime-backup";
 import { defaultLanternDataDir, getRuntimePaths } from "@lantern/server/runtime-paths";
 import { getConfig, resetConfigForTests } from "@lantern/server/config";
-import { initializeStarterData } from "../scripts/starter-data";
+import { initializeInitialData } from "../scripts/starter-data";
 
 test("platform data directories never default to the repository", () => {
   assert.equal(defaultLanternDataDir("darwin", "/Users/creator", {}), "/Users/creator/Library/Application Support/Lantern");
@@ -106,36 +106,50 @@ test("invalid runtime configuration fails with its file path", async () => {
   }
 });
 
-test("starter initialization resumes from the last completed sample", async () => {
+test("initial data creation resumes the single built-in comic after interruption", async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-runtime-starter-"));
   const paths = getRuntimePaths(dataDir);
-  let rainyCalls = 0;
-  let campusCalls = 0;
-  let campusShouldFail = true;
-  const samples = [
-    { key: "rainy-station" as const, seed: async () => { rainyCalls += 1; } },
-    { key: "campus-letter" as const, seed: async () => {
-      campusCalls += 1;
-      if (campusShouldFail) throw new Error("simulated starter interruption");
-    } },
-  ];
+  let seedCalls = 0;
+  let shouldFail = true;
+  const seed = async () => {
+    seedCalls += 1;
+    if (shouldFail) throw new Error("simulated initial data interruption");
+  };
   try {
     await ensureRuntimeLayout(paths);
-    await assert.rejects(() => initializeStarterData(paths, {
-      databaseCounts: async () => ({ users: 0, comics: 0 }),
-      samples,
-    }), /simulated starter interruption/);
-    assert.equal(rainyCalls, 1);
-    assert.equal(campusCalls, 1);
+    await assert.rejects(() => initializeInitialData(paths, {
+      comicCount: async () => 0,
+      seed,
+    }), /simulated initial data interruption/);
+    assert.equal(seedCalls, 1);
 
-    campusShouldFail = false;
-    assert.equal(await initializeStarterData(paths, {
-      databaseCounts: async () => ({ users: 1, comics: 1 }),
-      samples,
+    shouldFail = false;
+    assert.equal(await initializeInitialData(paths, {
+      comicCount: async () => 0,
+      seed,
     }), "resumed");
-    assert.equal(rainyCalls, 1);
-    assert.equal(campusCalls, 2);
+    assert.equal(seedCalls, 2);
     assert.equal(JSON.parse(await readFile(paths.starterStateFile, "utf8")).status, "complete");
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("initial data never adds the built-in comic to an existing library", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-runtime-existing-data-"));
+  const paths = getRuntimePaths(dataDir);
+  let seedCalls = 0;
+  try {
+    await ensureRuntimeLayout(paths);
+    assert.equal(await initializeInitialData(paths, {
+      comicCount: async () => 1,
+      seed: async () => { seedCalls += 1; },
+    }), "skipped");
+    assert.equal(await initializeInitialData(paths, {
+      comicCount: async () => 0,
+      seed: async () => { seedCalls += 1; },
+    }), "complete");
+    assert.equal(seedCalls, 0);
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }

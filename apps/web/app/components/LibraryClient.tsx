@@ -71,7 +71,7 @@ export function LibraryClient() {
         const latest = comic.chapters.at(-1);
         return <article className="comic-library-card" key={comic.id}>
           <button type="button" className="comic-library-open" onClick={() => router.push(`/comics/${comic.id}`)}>
-            <div className="comic-cover">{comic.coverUrl ? <img src={comic.coverUrl} alt={`${comic.title}漫画封面`} loading="lazy" decoding="async" /> : <div className="comic-cover-placeholder" aria-label="尚未设置漫画封面"><b>{comic.title.slice(0, 2)}</b></div>}<span>{comic.chapters.length ? "创作中" : "待建章节"}</span></div>
+            <div className="comic-cover">{comic.coverUrl ? <img src={comic.coverUrl} alt={`${comic.title}漫画封面`} loading="lazy" decoding="async" /> : <div className="comic-cover-placeholder" aria-label="尚未设置漫画封面"><b>{comic.title.slice(0, 2)}</b></div>}<span className={comic.isExample ? "example" : undefined}>{comic.isExample ? "示例漫画" : comic.chapters.length ? "创作中" : "待建章节"}</span></div>
             <div><small>{comic.format === "vertical" ? "条漫" : comic.format === "four_panel" ? "四格" : "页漫"}</small><h2>{comic.title}</h2><p>{comic.summary || "还没有故事简介。"}</p><strong>{latest ? `查看 ${comic.chapters.length} 话` : "先新建一话"} <span>→</span></strong></div>
           </button>
         </article>;

@@ -135,6 +135,7 @@ model Comic {
   coverContentType String?
   coverWidth       Int?
   coverHeight      Int?
+  isExample        Boolean        @default(false)
   archivedAt       DateTime?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt

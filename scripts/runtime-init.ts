@@ -64,8 +64,8 @@ export async function initializeRuntime(options: { seedIfEmpty?: boolean; forceG
   await initializeDatabaseConnection();
   try {
     if (options.seedIfEmpty !== false) {
-      const { initializeStarterData } = await import("./starter-data");
-      await initializeStarterData(paths);
+      const { initializeInitialData } = await import("./starter-data");
+      await initializeInitialData(paths);
     }
   } finally {
     await prisma.$disconnect();

@@ -47,6 +47,7 @@ export type ComicListItem = {
   styleSummary: string;
   format: "page" | "vertical" | "four_panel";
   canvasPageMode: "single" | "spread";
+  isExample: boolean;
   coverUrl?: string;
   updatedAt: string;
   chapters: Array<{ id: string; number: number; title: string; summary: string; coverUrl?: string; updatedAt: string }>;

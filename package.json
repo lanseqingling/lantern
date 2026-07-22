@@ -42,8 +42,6 @@
     "db:migrate:dev": "node scripts/run-tsx.mjs scripts/prisma.ts migrate dev",
     "db:seed": "node scripts/run-tsx.mjs prisma/seed.ts",
     "db:seed:if-empty": "node scripts/run-tsx.mjs prisma/seed-if-empty.ts",
-    "db:sample:rainy-station": "node scripts/run-tsx.mjs samples/rainy-station/seed.ts",
-    "db:reset:rainy-station": "node scripts/run-tsx.mjs scripts/reset-to-rainy-station.ts",
     "db:sample:campus-letter": "node scripts/run-tsx.mjs samples/campus-letter/seed.ts",
     "db:reset:campus-letter": "node scripts/run-tsx.mjs scripts/reset-to-campus-letter.ts",
     "db:studio": "node scripts/run-tsx.mjs scripts/prisma.ts studio",

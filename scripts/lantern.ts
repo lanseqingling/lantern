@@ -469,6 +469,28 @@ async function installExternalAgent() {
   console.log(`Restart ${result.agentName} after Lantern is running to load the integration.`);
 }
 
+async function initializeExampleComic() {
+  await withExclusiveRuntime(async () => {
+    await initializeRuntime({ seedIfEmpty: false });
+    const { prisma } = await import("@lantern/server/db");
+    try {
+      const existing = await prisma.comic.findFirst({
+        where: { id: "comic-campus-letter", archivedAt: null },
+        select: { id: true },
+      });
+      if (existing) {
+        console.log("The example comic already exists.");
+        return;
+      }
+      const { seedCampusLetter } = await import("../samples/campus-letter/seed");
+      await seedCampusLetter();
+      console.log("The example comic has been restored.");
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
 async function withExclusiveRuntime<T>(operation: (paths: ReturnType<typeof getRuntimePaths>) => Promise<T>) {
   const paths = await ensureRuntimeLayout(getRuntimePaths());
   const lock = await acquireRuntimeLock(paths);
@@ -510,27 +532,14 @@ async function restoreBackup() {
   });
 }
 
-async function initializeSample() {
-  const paths = await initializeRuntime({ seedIfEmpty: false });
-  const { initializeDatabaseConnection, prisma } = await import("@lantern/server/db");
-  const { initializeStarterData } = await import("./starter-data");
-  await initializeDatabaseConnection();
-  try {
-    await initializeStarterData(paths, { requireEmpty: true });
-  } finally {
-    await prisma.$disconnect();
-  }
-  console.log("Lantern sample initialized.");
-}
-
 async function main() {
   if (!supportedCommands.includes(command)) throw new Error(`Unknown command: ${command}`);
   if (command === "start" || command === "dev") return runServices(command);
   if (command === "stop") return stopRuntime();
   if (command === "status") return showStatus();
   if (command === "doctor") return doctor();
+  if (command === "sample:init") return initializeExampleComic();
   if (command === "agent:install") return installExternalAgent();
-  if (command === "sample:init") return initializeSample();
   if (command === "backup:create") return createBackup();
   if (command === "backup:restore") return restoreBackup();
   command satisfies never;

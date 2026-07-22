@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rainyStationStoryboardBeats } from "@lantern/shared/fixtures/storyboard-beats";
+import { demoStoryboardBeats } from "@lantern/shared/fixtures/storyboard-beats";
 import { balloonCutCornerPoints, createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "@lantern/shared";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "@lantern/demo-runtime";
@@ -37,7 +37,7 @@ test("legacy storyboard details fold into the general description without dialog
 });
 
 test("four-panel unit contains four explicitly ordered frames", () => {
-  const document = compileChapterLayoutPlan(fourPanelPlan, rainyStationStoryboardBeats, { comicId: "test-comic", chapterId: "test-chapter" });
+  const document = compileChapterLayoutPlan(fourPanelPlan, demoStoryboardBeats, { comicId: "test-comic", chapterId: "test-chapter" });
   assert.equal(document.units[0].frames.length, 4);
   assert.deepEqual(document.units[0].readingSequence.map((entry) => entry.frameId), document.units[0].frames.map((frame) => frame.id));
 });
@@ -46,11 +46,11 @@ test("resources are stable bindings and URLs remain in the read model", () => {
   const fixture = createInitialFixture();
   assert.equal(fixture.working.document.resources.length, 4);
   assert.ok(fixture.working.document.resources.every((resource) => !("src" in resource) && resource.assetVersionId));
-  assert.ok(Object.values(fixture.working.resolvedResources ?? {}).every((resolved) => resolved.url.startsWith("/samples/rainy-station/")));
+  assert.ok(Object.values(fixture.working.resolvedResources ?? {}).every((resolved) => resolved.url.startsWith("/samples/campus-letter/")));
 });
 
 test("new beats never inherit sample art", () => {
-  const beats = rainyStationStoryboardBeats.map((beat, index) => ({ ...beat, id: `new-beat-${index}`, versionId: `new-beat-${index}-v1` }));
+  const beats = demoStoryboardBeats.map((beat, index) => ({ ...beat, id: `new-beat-${index}`, versionId: `new-beat-${index}-v1` }));
   const document = compileChapterLayoutPlan({ ...fourPanelPlan, readingOrder: beats.map((beat) => beat.id) }, beats, { comicId: "test-comic", chapterId: "test-chapter" });
   assert.equal(document.resources.length, 0);
   assert.equal(document.units[0].frames.flatMap(frameElements).filter((element) => element.kind === "image").length, 0);
@@ -1105,13 +1105,13 @@ test("crop and dialogue commands cannot mutate unrelated layers", () => {
 
 test("candidate ChangeSet is atomic and updates dialogue semantics", () => {
   const fixture = createInitialFixture();
-  const dialogue = fixture.working.document.dialogues.find((item) => item.storyboardBeatId === "fixture-rain-beat-4")!;
+  const dialogue = fixture.working.document.dialogues.find((item) => item.storyboardBeatId === "fixture-demo-beat-4")!;
   const result = applyWorkspaceChangeSet({ working: fixture.working, storyboardBeats: fixture.storyboardBeats }, {
     id: "candidate", projectId: fixture.working.projectId, baseRevision: 1, source: "candidate", sourceCandidateId: "candidate-1",
     commands: [{ type: "update_dialogue", dialogueId: dialogue.id, content: "明天再问吧。" }],
   });
   assert.equal(result.working.revision, 2);
-  assert.equal(result.working.document.dialogues.find((dialogue) => dialogue.storyboardBeatId === "fixture-rain-beat-4")?.content, "明天再问吧。");
+  assert.equal(result.working.document.dialogues.find((dialogue) => dialogue.storyboardBeatId === "fixture-demo-beat-4")?.content, "明天再问吧。");
 });
 
 test("creating a single-frame storyboard beat atomically binds the unassigned frame", () => {

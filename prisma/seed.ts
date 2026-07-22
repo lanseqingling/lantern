@@ -1,10 +1,8 @@
 import { seedCampusLetter } from "../samples/campus-letter/seed";
-import { seedRainyStation } from "../samples/rainy-station/seed";
 import { prisma } from "@lantern/server/db";
 import { pathToFileURL } from "node:url";
 
 export async function seed() {
-  await seedRainyStation();
   await seedCampusLetter();
 }
 

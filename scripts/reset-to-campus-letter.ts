@@ -32,7 +32,7 @@ async function resetToCampusLetter() {
 
   await rm(getRuntimePaths().objectsDir, { recursive: true, force: true });
   await seedCampusLetter();
-  console.log("Local data reset: only the 风停之前 sample remains.");
+  console.log("Local data reset: only 风停之前 remains.");
 }
 
 resetToCampusLetter()

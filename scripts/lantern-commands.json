@@ -5,8 +5,8 @@
     "stop": { "usage": "stop", "description": "Stop the running local service" },
     "status": { "usage": "status", "description": "Show local service status" },
     "doctor": { "usage": "doctor", "description": "Inspect the local runtime" },
+    "sample:init": { "usage": "sample:init", "description": "Restore the bundled example comic" },
     "agent:install": { "usage": "agent:install", "description": "Install Lantern for a compatible local Agent" },
-    "sample:init": { "usage": "sample:init", "description": "Initialize the sample in an empty database" },
     "backup:create": { "usage": "backup:create [file]", "description": "Create a consistent work backup" },
     "backup:restore": { "usage": "backup:restore <file>", "description": "Restore a validated work backup" }
   }

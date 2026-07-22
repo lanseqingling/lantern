@@ -43,6 +43,7 @@ function publicComic(comic: ComicWithChapters) {
     styleSummary: comic.styleSummary,
     format: comic.format.toLowerCase(),
     canvasPageMode: comic.canvasPageMode.toLowerCase(),
+    isExample: comic.isExample,
     coverUrl: comicCoverPath(comic),
     chapters: comic.chapters.map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title, summary: chapter.summary, coverUrl: chapterCoverPath(chapter), updatedAt: chapter.updatedAt.toISOString() })),
     updatedAt: comic.updatedAt.toISOString(),

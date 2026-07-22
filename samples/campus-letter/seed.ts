@@ -222,7 +222,7 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
   });
 }
 
-async function clearPreviousSample() {
+async function clearPreviousComic() {
   const projects = await prisma.project.findMany({ where: { chapter: { comicId: ids.comic } }, select: { id: true } });
   const projectIds = projects.map((item) => item.id);
   if (projectIds.length) {
@@ -256,7 +256,7 @@ async function clearPreviousSample() {
 export async function seedCampusLetter() {
   await prisma.user.upsert({ where: { email: LOCAL_USER_EMAIL }, update: { displayName: LOCAL_USER_DISPLAY_NAME }, create: { id: LOCAL_USER_ID, email: LOCAL_USER_EMAIL, displayName: LOCAL_USER_DISPLAY_NAME } });
   const owner = await prisma.user.findUniqueOrThrow({ where: { id: LOCAL_USER_ID } });
-  await clearPreviousSample();
+  await clearPreviousComic();
   await clearImageNamespace("samples/campus-letter");
 
   const stored = new Map<CampusImageFile, StoredObject>();
@@ -274,7 +274,7 @@ export async function seedCampusLetter() {
 
   const cover = stored.get("breakout-rendezvous-v2.png")!;
   const chapterCover = stored.get("classroom-lesson-v2.png")!;
-  await prisma.comic.create({ data: { id: ids.comic, ownerUserId: owner.id, title: "风停之前", summary: "课堂里出现一封没有署名的信，夏葵循着仅有的两行字走向旧看台。", worldSummary: "当代校园。一个小花封印连接起没有说完的话；寄信人的身份和过去被刻意留白，只让一次克制的赴约浮出水面。", format: ComicFormat.PAGE, readingDirection: "ltr", styleSummary: "清新黑白日漫，人物和分镜接近首页宣传图；精细二次元线条、克制网点、明亮留白与安静校园氛围。", coverObjectKey: cover.objectKey, coverContentType: cover.contentType, coverWidth: cover.width, coverHeight: cover.height } });
+  await prisma.comic.create({ data: { id: ids.comic, ownerUserId: owner.id, title: "风停之前", summary: "课堂里出现一封没有署名的信，夏葵循着仅有的两行字走向旧看台。", worldSummary: "当代校园。一个小花封印连接起没有说完的话；寄信人的身份和过去被刻意留白，只让一次克制的赴约浮出水面。", format: ComicFormat.PAGE, readingDirection: "ltr", styleSummary: "清新黑白日漫，人物和分镜接近首页宣传图；精细二次元线条、克制网点、明亮留白与安静校园氛围。", coverObjectKey: cover.objectKey, coverContentType: cover.contentType, coverWidth: cover.width, coverHeight: cover.height, isExample: true } });
   await prisma.chapter.create({ data: { id: ids.chapter, ownerUserId: owner.id, comicId: ids.comic, number: 1, title: "第 1 话 · 旧看台", summary: "夏葵在放学前发现花印信封，铃声之后走向操场边等待她的人。", coverObjectKey: chapterCover.objectKey, coverContentType: chapterCover.contentType, coverWidth: chapterCover.width, coverHeight: chapterCover.height } });
   await prisma.project.create({ data: { id: ids.project, ownerUserId: owner.id, chapterId: ids.chapter, settings: { generationStyle: "首页宣传图式清新黑白校园日漫", defaultImageSize: "1536*1024", storyBrief: "没有署名的花印信封与风停之前的旧看台赴约" } } });
   await prisma.agentConversation.create({ data: { id: ids.conversation, ownerUserId: owner.id, projectId: ids.project, title: "风停之前 · 第一话创作" } });

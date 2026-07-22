@@ -656,18 +656,17 @@ test("local task runner recovers interrupted and cancel-requested tasks from SQL
   }
 });
 
-test("starter data initializes both reviewed comics", async () => {
+test("initial data contains only the built-in example comic", async () => {
   await initializeDatabaseConnection();
   try {
     await seed();
     const comics = await prisma.comic.findMany({
-      where: { id: { in: ["comic-rainy-station", "comic-campus-letter"] } },
+      where: { isExample: true },
       orderBy: { id: "asc" },
-      select: { id: true, title: true },
+      select: { id: true, title: true, isExample: true },
     });
     assert.deepEqual(comics, [
-      { id: "comic-campus-letter", title: "风停之前" },
-      { id: "comic-rainy-station", title: "雨夜车站" },
+      { id: "comic-campus-letter", title: "风停之前", isExample: true },
     ]);
   } finally {
     await prisma.$disconnect();

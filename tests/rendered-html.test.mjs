@@ -24,7 +24,7 @@ test("server-renders the Lantern workspace entry", async () => {
 });
 
 test("server-renders the workbench route shell", async () => {
-  const response = await render("/comics/comic-rainy-station/chapters/chapter-rainy-station-01");
+  const response = await render("/comics/comic-campus-letter/chapters/chapter-campus-letter-01");
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /漫画工作台 · Lantern AI/);

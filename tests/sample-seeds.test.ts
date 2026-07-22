@@ -3,7 +3,6 @@ import test from "node:test";
 import type { Frame } from "@lantern/shared";
 import type { StoredObject } from "@lantern/server/object-storage";
 import { buildCampusLetterDocument } from "../samples/campus-letter/seed";
-import { buildRainyStationDocument } from "../samples/rainy-station/seed";
 
 const storedObject: StoredObject = {
   objectKey: "samples/test.png",
@@ -25,7 +24,7 @@ function frameImage(frame: Frame) {
   return element;
 }
 
-test("campus sample rebuilds the latest page and spread composition with stable assets", () => {
+test("built-in comic data rebuilds the latest page and spread composition with stable assets", () => {
   const document = buildCampusLetterDocument(mapFiles([
     "character-xiakui.png",
     "classroom-lesson-v2.png",
@@ -64,26 +63,4 @@ test("campus sample rebuilds the latest page and spread composition with stable 
   assert.equal(spread.overlayLayers.find((layer) => layer.id === "campus-spread-cross-page")?.elements.length, 1);
   assert.equal(document.dialogues.length, 2);
   assert.ok(document.resources.every((resource) => resource.assetId.startsWith("campus-asset-")));
-});
-
-test("rainy station sample rebuilds the latest crop and balloon presentation without runtime leftovers", () => {
-  const document = buildRainyStationDocument(mapFiles([
-    "frame-01.png",
-    "frame-02.png",
-    "frame-03.png",
-    "frame-04.png",
-    "frame-05.png",
-    "frame-06.png",
-    "frame-07.png",
-    "frame-08.png",
-  ]));
-
-  assert.deepEqual(document.reading.unitOrder, ["rain-page-01", "rain-page-02"]);
-  const frame1 = document.units[0].frames.find((frame) => frame.id === "rain-frame-01")!;
-  const frame3 = document.units[0].frames.find((frame) => frame.id === "rain-frame-03")!;
-  assert.deepEqual(frameImage(frame1).crop, { x: 0.05153518356643357, y: 0.01500907746100054, width: 0.92, height: 0.92 });
-  assert.equal(frame3.layers[1].elements[0].kind, "balloon");
-  assert.equal(frame3.layers[1].elements[0].kind === "balloon" ? frame3.layers[1].elements[0].shape : undefined, "thought");
-  assert.equal(document.dialogues.length, 6);
-  assert.ok(document.dialogues.every((dialogue) => dialogue.content !== "新对白"));
 });

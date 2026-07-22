@@ -87,8 +87,9 @@ async function waitForWorkbench(url, child, timeoutMs = 10 * 60 * 1000) {
       const response = await fetch(`${url}/api/backend/v1/comics`, { signal: AbortSignal.timeout(1500) });
       if (response.ok) {
         const payload = await response.json();
-        const titles = payload?.data?.items?.map?.((comic) => comic.title) ?? [];
-        if (titles.includes("雨夜车站") && titles.includes("风停之前")) return titles.sort();
+        const comics = payload?.data?.items ?? [];
+        const example = comics.find?.((comic) => comic.title === "风停之前");
+        if (example?.isExample === true && comics.length === 1) return comics.map((comic) => comic.title);
       }
     } catch {}
     await delay(500);
@@ -119,7 +120,7 @@ async function runOnce(env, webUrl) {
   child.stderr?.on("data", (chunk) => { output += chunk.toString(); process.stderr.write(chunk); });
   try {
     const titles = await waitForWorkbench(webUrl, child);
-    console.log(`Workbench ready with ${titles.length} starter comics; stopping...`);
+    console.log(`Workbench ready with ${titles.length} comics; stopping...`);
     await stopLantern(env, child);
     return { titles, output };
   } catch (error) {
@@ -146,7 +147,7 @@ try {
   const databaseBeforeRestart = await readFile(path.join(dataDir, "lantern.db"));
   const second = await runOnce(env, `http://localhost:${webPort}`);
   const databaseAfterRestart = await readFile(path.join(dataDir, "lantern.db"));
-  if (first.titles.join("|") !== second.titles.join("|")) throw new Error("Starter comics changed after restart.");
+  if (first.titles.join("|") !== second.titles.join("|")) throw new Error("Comics changed after restart.");
   if (!databaseBeforeRestart.length || !databaseAfterRestart.length) throw new Error("Lantern database was not persisted.");
   console.log(`Lantern release smoke passed on ${process.platform}: ${second.titles.join(", ")}`);
 } finally {

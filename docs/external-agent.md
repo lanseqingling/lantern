@@ -4,7 +4,7 @@
 
 本文定义 Lantern 面向外置 Agent 的领域能力投影、MCP 接入、应用级 Skill、外部结果和版本发布规则，是外置 Agent 接入设计的事实源。
 
-Agent 的整体运行时、上下文、Task、Candidate 和写入边界见 [Agent](./agent.md)；作品结构与 ChangeSet 不变量见 [LCD](./lcd.md)。本文只说明外置 Agent 如何复用 Lantern 已有能力，不重新定义内置 Agent，也不复制编辑器交互。
+Agent 的整体运行时、上下文、Task、Candidate 和写入边界见 [Agent](./agent.md)，UI、内置 Agent 与 MCP 的当前开放差异见[漫画能力矩阵](./capabilities.md)，作品结构与 ChangeSet 不变量见 [LCD](./lcd.md)。本文只说明外置 Agent 如何复用 Lantern 已有能力，不重新定义内置 Agent，也不复制编辑器交互。
 
 ## 2. 目标与原则
 

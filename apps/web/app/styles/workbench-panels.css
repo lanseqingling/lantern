@@ -302,6 +302,7 @@
 .comic-cover-placeholder, .chapter-cover-placeholder, .chapter-thumb-placeholder { display: grid; place-items: center; width: 100%; height: 100%; background: radial-gradient(circle at 78% 18%, rgba(247,198,79,.24), transparent 28%), linear-gradient(145deg, rgba(100,200,200,.24), rgba(255,255,255,.92)); color: var(--cyan-deep); }
 .comic-cover-placeholder b { font-size: 36px; letter-spacing: -.08em; }
 .comic-cover span { position: absolute; left: 10px; top: 10px; padding: 6px 9px; border-radius: 999px; background: var(--cyan); color: #fff; font-size: 9px; font-weight: 900; }
+.comic-cover span.example { background: var(--amber); color: #5e430d; }
 .comic-library-open > div:last-child { align-self: center; min-width: 0; }
 .comic-library-card small { color: var(--cyan-deep); font-size: 10px; font-weight: 850; }
 .comic-library-card h2 { margin: 10px 0 8px; font-size: 26px; }

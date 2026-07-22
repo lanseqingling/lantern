@@ -9,7 +9,9 @@ import {
   acquireRuntimeLock,
   consumeRuntimeStopRequest,
   ensureRuntimeLayout,
+  releaseRuntimeOwner,
   requestRuntimeStop,
+  runtimeOwner,
 } from "@lantern/server/local-runtime";
 import { createRuntimeBackup, restoreRuntimeBackup } from "@lantern/server/runtime-backup";
 import { defaultLanternDataDir, getRuntimePaths } from "@lantern/server/runtime-paths";
@@ -32,10 +34,40 @@ test("runtime initialization creates one data tree and a restricted installation
     const mcpConfig = await readFile(paths.mcpConfigFile, "utf8");
     assert.match(providerConfig, /^LANTERN_LOCAL_TOKEN=[A-Za-z0-9_-]{40,}/m);
     assert.match(mcpConfig, /^LANTERN_MCP_TOKEN=[A-Za-z0-9_-]{40,}/m);
-    assert.equal(JSON.parse(await readFile(paths.runtimeConfigFile, "utf8")).apiPort, 18787);
+    const runtimeConfig = JSON.parse(await readFile(paths.runtimeConfigFile, "utf8"));
+    assert.equal(runtimeConfig.configVersion, 1);
+    assert.equal(runtimeConfig.apiPort, 18787);
+    assert.equal(runtimeConfig.webPort, 18788);
     assert.equal((await stat(paths.databaseFile)).isFile(), true);
     if (process.platform !== "win32") assert.equal((await stat(paths.providerConfigFile)).mode & 0o777, 0o600);
     if (process.platform !== "win32") assert.equal((await stat(paths.mcpConfigFile)).mode & 0o777, 0o600);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime initialization migrates only the generated legacy web port", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-runtime-port-"));
+  const paths = getRuntimePaths(dataDir);
+  try {
+    await ensureRuntimeLayout(paths);
+    await writeFile(paths.runtimeConfigFile, `${JSON.stringify({ apiPort: 18787, webPort: 3000, logLevel: "info" })}\n`);
+    await ensureRuntimeLayout(paths);
+    assert.deepEqual(JSON.parse(await readFile(paths.runtimeConfigFile, "utf8")), {
+      apiPort: 18787,
+      webPort: 18788,
+      logLevel: "info",
+      configVersion: 1,
+    });
+
+    await writeFile(paths.runtimeConfigFile, `${JSON.stringify({ apiPort: 18787, webPort: 3100, logLevel: "info" })}\n`);
+    await ensureRuntimeLayout(paths);
+    assert.deepEqual(JSON.parse(await readFile(paths.runtimeConfigFile, "utf8")), {
+      apiPort: 18787,
+      webPort: 3100,
+      logLevel: "info",
+      configVersion: 1,
+    });
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }
@@ -115,6 +147,11 @@ test("the runtime lock rejects a second local service and can be released", asyn
   const lock = await acquireRuntimeLock(paths);
   try {
     await assert.rejects(() => acquireRuntimeLock(paths), /LANTERN_ALREADY_RUNNING/);
+    await lock.updateServices({ apiPid: process.pid + 1, webPid: process.pid + 2 }, { api: 18787, web: 18788 });
+    assert.deepEqual(JSON.parse(await readFile(paths.lockFile, "utf8")).services, {
+      apiPid: process.pid + 1,
+      webPid: process.pid + 2,
+    });
   } finally {
     await lock.release();
     await rm(dataDir, { recursive: true, force: true });
@@ -135,6 +172,27 @@ test("runtime stop requests only target the active runtime instance", async () =
     assert.equal(await consumeRuntimeStopRequest(lock.owner, paths), false);
   } finally {
     await lock.release();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime ownership keeps orphaned services discoverable after the supervisor exits", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-runtime-orphan-"));
+  const paths = getRuntimePaths(dataDir);
+  const owner = {
+    pid: 2_147_483_647,
+    instanceId: "orphaned-runtime",
+    services: { webPid: process.pid },
+    ports: { api: 18787, web: 18788 },
+  };
+  try {
+    await ensureRuntimeLayout(paths);
+    await writeFile(paths.lockFile, `${JSON.stringify(owner)}\n`);
+    assert.deepEqual(await runtimeOwner(paths), owner);
+    await assert.rejects(() => acquireRuntimeLock(paths), /LANTERN_ALREADY_RUNNING/);
+    assert.equal(await releaseRuntimeOwner(owner, paths), true);
+    assert.equal(await runtimeOwner(paths), undefined);
+  } finally {
     await rm(dataDir, { recursive: true, force: true });
   }
 });

@@ -19,6 +19,7 @@
     "./object-storage": "./src/object-storage.ts",
     "./runtime-backup": "./src/runtime-backup.ts",
     "./runtime-paths": "./src/runtime-paths.ts",
+    "./resource-reference-service": "./src/resource-reference-service.ts",
     "./signed-assets": "./src/signed-assets.ts",
     "./workbench-agent-visibility": "./src/workbench-agent-visibility.ts",
     "./workbench-service": "./src/workbench-service.ts"

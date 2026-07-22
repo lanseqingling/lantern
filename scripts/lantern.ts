@@ -11,7 +11,9 @@ import {
   consumeRuntimeStopRequest,
   ensureRuntimeLayout,
   requestRuntimeStop,
+  releaseRuntimeOwner,
   resetRuntimeTemp,
+  runtimeProcessExists,
   runtimeOwner,
 } from "@lantern/server/local-runtime";
 import { getRuntimePaths } from "@lantern/server/runtime-paths";
@@ -24,11 +26,13 @@ const commandArgs = process.argv.slice(3);
 const supportedCommands = Object.keys(commandCatalog.runtimeCommands) as Command[];
 
 type ManagedService = {
+  name: "api" | "web";
   child: ChildProcess;
   requestShutdown?: () => void;
 };
 
 function spawnService(
+  name: ManagedService["name"],
   args: string[],
   env: Record<string, string | undefined>,
   logFile: string,
@@ -38,6 +42,7 @@ function spawnService(
     cwd: options.cwd ?? repositoryRoot,
     env: { ...process.env, ...env },
     stdio: options.ipc ? ["inherit", "pipe", "pipe", "ipc"] : ["inherit", "pipe", "pipe"],
+    detached: process.platform !== "win32",
     windowsHide: true,
   });
   const log = createWriteStream(logFile, { flags: "a", mode: 0o600 });
@@ -47,6 +52,7 @@ function spawnService(
   child.stderr?.pipe(log, { end: false });
   child.once("close", () => log.end());
   return {
+    name,
     child,
     requestShutdown: options.ipc
       ? () => {
@@ -117,21 +123,69 @@ async function terminateWindowsProcessTree(pid: number) {
   });
 }
 
+function processExists(pid: number) {
+  return runtimeProcessExists(pid);
+}
+
+function posixProcessGroupExists(pid: number) {
+  if (process.platform === "win32") return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function signalPosixProcessTree(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    try {
+      process.kill(pid, signal);
+    } catch (fallbackError) {
+      if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") throw fallbackError;
+    }
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processExists(pid) && !posixProcessGroupExists(pid)) return true;
+    await delay(100);
+  }
+  return !processExists(pid) && !posixProcessGroupExists(pid);
+}
+
+async function terminateProcessTree(pid: number) {
+  if (!processExists(pid) && !posixProcessGroupExists(pid)) return;
+  if (process.platform === "win32") {
+    await terminateWindowsProcessTree(pid);
+    return;
+  }
+  signalPosixProcessTree(pid, "SIGTERM");
+  if (await waitForProcessExit(pid, 5000)) return;
+  signalPosixProcessTree(pid, "SIGKILL");
+  if (!await waitForProcessExit(pid, 5000)) throw new Error(`LANTERN_SERVICE_STOP_TIMEOUT:${pid}`);
+}
+
 async function stopChildren(services: ManagedService[]) {
   for (const service of services) {
     const { child } = service;
     if (childHasExited(child) || !child.pid) continue;
     if (service.requestShutdown) service.requestShutdown();
     else if (process.platform === "win32") await terminateWindowsProcessTree(child.pid);
-    else child.kill("SIGTERM");
+    else signalPosixProcessTree(child.pid, "SIGTERM");
   }
 
   await Promise.all(services.map(async ({ child }) => {
-    if (await waitForChildExit(child, 5000)) return;
     if (!child.pid) return;
-    if (process.platform === "win32") await terminateWindowsProcessTree(child.pid);
-    else child.kill("SIGKILL");
-    if (!await waitForChildExit(child, 5000)) throw new Error(`LANTERN_SERVICE_STOP_TIMEOUT:${child.pid}`);
+    const childExited = await waitForChildExit(child, 5000);
+    if (childExited && !posixProcessGroupExists(child.pid)) return;
+    await terminateProcessTree(child.pid);
+    if (!childHasExited(child) && !await waitForChildExit(child, 5000)) throw new Error(`LANTERN_SERVICE_STOP_TIMEOUT:${child.pid}`);
   }));
 }
 
@@ -141,17 +195,23 @@ async function runServices(mode: "start" | "dev") {
   await resetRuntimeTemp(paths);
   const services: ManagedService[] = [];
   let stopping = false;
+  let shutdownPromise: Promise<void> | undefined;
   let acceptStopRequests = false;
   let checkingStopRequest = false;
-  const shutdown = async () => {
-    if (stopping) return;
-    stopping = true;
-    clearInterval(stopMonitor);
-    await stopChildren(services);
-    await lock.release();
+  const shutdown = () => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      stopping = true;
+      clearInterval(stopMonitor);
+      await stopChildren(services);
+      await lock.release();
+    })();
+    return shutdownPromise;
   };
-  process.once("SIGINT", () => void shutdown());
-  process.once("SIGTERM", () => void shutdown());
+  const requestShutdown = () => void shutdown().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 
   const checkStopRequest = async () => {
     if (!acceptStopRequests || checkingStopRequest || stopping) return;
@@ -164,6 +224,8 @@ async function runServices(mode: "start" | "dev") {
   };
   const stopMonitor = setInterval(() => void checkStopRequest(), 250);
   stopMonitor.unref();
+  process.once("SIGINT", requestShutdown);
+  process.once("SIGTERM", requestShutdown);
 
   try {
     await initializeRuntime();
@@ -195,9 +257,13 @@ async function runServices(mode: "start" | "dev") {
       ? [vinextCli, "dev", "--host", "localhost", "--port", String(config.WEB_PORT), "--strictPort"]
       : [vinextCli, "start", "--hostname", "localhost", "--port", String(config.WEB_PORT)];
     services.push(
-      spawnService(apiArgs, sharedEnv, path.join(paths.logsDir, "api.log"), { ipc: true }),
-      spawnService(webArgs, sharedEnv, path.join(paths.logsDir, "web.log"), { cwd: webRoot }),
+      spawnService("api", apiArgs, sharedEnv, path.join(paths.logsDir, "api.log"), { ipc: true }),
+      spawnService("web", webArgs, sharedEnv, path.join(paths.logsDir, "web.log"), { cwd: webRoot }),
     );
+    await lock.updateServices({
+      apiPid: services.find((service) => service.name === "api")?.child.pid,
+      webPid: services.find((service) => service.name === "web")?.child.pid,
+    }, { api: config.API_PORT, web: config.WEB_PORT });
     acceptStopRequests = true;
     void checkStopRequest();
     const exitPromise = Promise.race(services.map(({ child }) => new Promise<number>((resolve, reject) => {
@@ -239,6 +305,13 @@ async function stopRuntime() {
     return;
   }
   console.log(`Stopping Lantern (pid ${owner.pid}).`);
+  if (!runtimeProcessExists(owner.pid)) {
+    const servicePids = [owner.services?.apiPid, owner.services?.webPid].filter((pid): pid is number => Boolean(pid));
+    await Promise.all(servicePids.map((pid) => terminateProcessTree(pid)));
+    await releaseRuntimeOwner(owner, paths);
+    console.log("Lantern stopped.");
+    return;
+  }
   if (!owner.instanceId) {
     if (process.platform === "win32") await terminateWindowsProcessTree(owner.pid);
     else process.kill(owner.pid, "SIGTERM");
@@ -246,6 +319,23 @@ async function stopRuntime() {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     const current = await runtimeOwner(paths);
     if (!current || current.instanceId !== owner.instanceId) {
+      const servicePids = [owner.services?.apiPid, owner.services?.webPid].filter((pid): pid is number => Boolean(pid));
+      await Promise.all(servicePids.map((pid) => terminateProcessTree(pid)));
+      if (!current && owner.ports) {
+        for (let portAttempt = 0; portAttempt < 40; portAttempt += 1) {
+          try {
+            await Promise.all([
+              assertPortAvailable("127.0.0.1", owner.ports.api, "Lantern API"),
+              assertPortAvailable("localhost", owner.ports.web, "Lantern Web"),
+            ]);
+            console.log("Lantern stopped.");
+            return;
+          } catch {
+            await delay(250);
+          }
+        }
+        throw new Error(`LANTERN_PORT_RELEASE_TIMEOUT:${owner.ports.api}:${owner.ports.web}`);
+      }
       console.log("Lantern stopped.");
       return;
     }

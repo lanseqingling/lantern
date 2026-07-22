@@ -225,14 +225,14 @@ Skill 不跟随每个工具版本发布。只有产品对象语义、通用作�
 
 ## 8. 后续交付阶段
 
-本地 Streamable HTTP MCP、独立凭证、只读 Project/Context/Capability/Image 工具、应用级 Skill 和统一安装命令已经构成接入基线。后续只保留三个能力阶段。
+本地 Streamable HTTP MCP、独立凭证、Project/Context/Capability/Image 工具、Resource Reference、同步作品管理能力、应用级 Skill 和统一安装命令已经构成接入基线。后续只保留三个能力阶段。
 
 ### 阶段一：作品与资产管理
 
-- 建立共享 Resource Reference 解析、同步 `resource_mutation` 执行与 MCP 自动投影，复用现有 Comic、Chapter、Project 和 Asset 服务。
-- 接入漫画与一话的创建、读取、更新、复制和归档，以及世界概要、视觉风格和章节资料。
-- 接入角色、场景、道具和参考图的创建、更新、归档、图片版本与主版本管理。
-- 让 Agent 能把已经确认的角色或世界设定保存到正确作品范围，不依赖 Task 或 Candidate 工作流。
+- 漫画与一话的列表、读取、创建、更新、深度复制和归档已经通过共享 Resource Reference、同步 `resource_mutation` 执行与 MCP 自动投影开放；世界概要、视觉风格文字和章节资料复用现有领域服务。
+- 角色、场景、道具和参考资料卡已经支持读取、创建、更新和归档，Agent 可以把用户已经确认的结构化设定保存到正确漫画范围，不依赖 Task 或 Candidate。
+- 继续接入图片上传、固定 AssetVersion、图片槽、主版本和派生形态管理，并保持对象存储与版本引用边界。
+- 为同步写入补齐跨重试幂等记录和调用审计；破坏性动作继续要求明确确认。
 
 ### 阶段二：LCD 编辑与编排
 

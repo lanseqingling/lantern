@@ -101,8 +101,10 @@ test("Agent installer deploys the shared Skill and writes each supported client 
   const homeDirectory = path.join(root, "home");
   try {
     await mkdir(path.join(sourceSkillDir, "agents"), { recursive: true });
+    await mkdir(path.join(sourceSkillDir, "references"), { recursive: true });
     await writeFile(path.join(sourceSkillDir, "SKILL.md"), "---\nname: create-with-lantern\ndescription: test\n---\n");
     await writeFile(path.join(sourceSkillDir, "agents", "openai.yaml"), "interface:\n  display_name: Lantern\ndependencies:\n  tools:\n    - type: mcp\n      url: \"http://127.0.0.1:18787/mcp\"\n");
+    await writeFile(path.join(sourceSkillDir, "references", "resources.md"), "# Resource Reference\n");
 
     const agentIds: SupportedAgentId[] = ["codex", "claude-code", "kimi-code", "opencode"];
     for (const agentId of agentIds) {
@@ -122,6 +124,7 @@ test("Agent installer deploys the shared Skill and writes each supported client 
     const sharedSkill = path.join(homeDirectory, ".agents", "skills", "create-with-lantern");
     assert.match(await readFile(path.join(sharedSkill, "SKILL.md"), "utf8"), /create-with-lantern/);
     assert.match(await readFile(path.join(sharedSkill, "agents", "openai.yaml"), "utf8"), /http:\/\/127\.0\.0\.1:19000\/mcp/);
+    assert.match(await readFile(path.join(sharedSkill, "references", "resources.md"), "utf8"), /Resource Reference/);
     assert.match(await readFile(path.join(homeDirectory, ".claude", "skills", "create-with-lantern", "SKILL.md"), "utf8"), /create-with-lantern/);
   } finally {
     await rm(root, { recursive: true, force: true });

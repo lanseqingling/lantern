@@ -8,10 +8,19 @@ export const LOCAL_USER_EMAIL = "creator@lantern.local";
 export const LOCAL_USER_DISPLAY_NAME = "Lantern Creator";
 
 const defaultRuntimeConfig = {
+  configVersion: 1,
   apiPort: 18787,
-  webPort: 3000,
+  webPort: 18788,
   logLevel: "info",
 } as const;
+
+type StoredRuntimeConfig = {
+  configVersion?: number;
+  apiPort?: number;
+  webPort?: number;
+  logLevel?: string;
+  [key: string]: unknown;
+};
 
 const providerDefaults = [
   "TEXT_MODEL_PROVIDER=deepseek",
@@ -52,14 +61,32 @@ export async function ensureRuntimeLayout(paths = getRuntimePaths()) {
   await open(paths.databaseFile, "a", 0o600).then((handle) => handle.close());
   await chmod(paths.databaseFile, 0o600).catch(() => undefined);
 
+  let runtimeConfigCreated = false;
   await open(paths.runtimeConfigFile, "wx", 0o600)
     .then(async (handle) => {
       await handle.writeFile(`${JSON.stringify(defaultRuntimeConfig, null, 2)}\n`);
       await handle.close();
+      runtimeConfigCreated = true;
     })
     .catch((error: NodeJS.ErrnoException) => {
       if (error.code !== "EEXIST") throw error;
     });
+  if (!runtimeConfigCreated) {
+    try {
+      const stored = JSON.parse(await readFile(paths.runtimeConfigFile, "utf8")) as StoredRuntimeConfig;
+      if (stored.configVersion === undefined) {
+        const migrated = {
+          ...stored,
+          configVersion: defaultRuntimeConfig.configVersion,
+          ...(stored.apiPort === 18787 && stored.webPort === 3000 ? { webPort: defaultRuntimeConfig.webPort } : {}),
+        };
+        await writeRestricted(paths.runtimeConfigFile, `${JSON.stringify(migrated, null, 2)}\n`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+      // Configuration validation reports malformed JSON with the canonical file path.
+    }
+  }
 
   let providerText = "";
   let providerExists = true;
@@ -98,7 +125,7 @@ export async function resetRuntimeTemp(paths = getRuntimePaths()) {
   await mkdir(paths.tempDir, { recursive: true });
 }
 
-function processExists(pid: number) {
+export function runtimeProcessExists(pid: number) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -108,9 +135,15 @@ function processExists(pid: number) {
   }
 }
 
+function runtimeOwnerIsAlive(owner?: RuntimeOwner) {
+  return Boolean(owner && [owner.pid, owner.services?.apiPid, owner.services?.webPid]
+    .some((pid) => pid !== undefined && runtimeProcessExists(pid)));
+}
+
 export type RuntimeLock = {
   paths: LanternRuntimePaths;
   owner: RuntimeOwner;
+  updateServices(services: RuntimeOwner["services"], ports: RuntimeOwner["ports"]): Promise<void>;
   release(): Promise<void>;
 };
 
@@ -118,6 +151,14 @@ export type RuntimeOwner = {
   pid: number;
   instanceId?: string;
   startedAt?: string;
+  services?: {
+    apiPid?: number;
+    webPid?: number;
+  };
+  ports?: {
+    api: number;
+    web: number;
+  };
 };
 
 type RuntimeStopRequest = {
@@ -146,20 +187,23 @@ export async function acquireRuntimeLock(paths = getRuntimePaths()): Promise<Run
       return {
         paths,
         owner,
-        async release() {
+        async updateServices(services, ports) {
           const current = await readRuntimeOwner(paths);
-          if (current?.pid === owner.pid && current.instanceId === owner.instanceId) {
-            await Promise.all([
-              unlink(paths.lockFile).catch(() => undefined),
-              unlink(paths.stopRequestFile).catch(() => undefined),
-            ]);
+          if (current?.pid !== owner.pid || current.instanceId !== owner.instanceId) {
+            throw new Error("LANTERN_RUNTIME_LOCK_LOST");
           }
+          owner.services = services;
+          owner.ports = ports;
+          await writeRestricted(paths.lockFile, `${JSON.stringify(owner)}\n`);
+        },
+        async release() {
+          await releaseRuntimeOwner(owner, paths);
         },
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const owner = await readRuntimeOwner(paths);
-      if (owner?.pid && processExists(owner.pid)) throw new Error(`LANTERN_ALREADY_RUNNING:${owner.pid}`);
+      if (runtimeOwnerIsAlive(owner)) throw new Error(`LANTERN_ALREADY_RUNNING:${owner?.pid}`);
       await unlink(paths.lockFile).catch(() => undefined);
     }
   }
@@ -168,7 +212,17 @@ export async function acquireRuntimeLock(paths = getRuntimePaths()): Promise<Run
 
 export async function runtimeOwner(paths = getRuntimePaths()) {
   const owner = await readRuntimeOwner(paths);
-  return owner?.pid && processExists(owner.pid) ? owner : undefined;
+  return runtimeOwnerIsAlive(owner) ? owner : undefined;
+}
+
+export async function releaseRuntimeOwner(owner: RuntimeOwner, paths = getRuntimePaths()) {
+  const current = await readRuntimeOwner(paths);
+  if (current?.pid !== owner.pid || current.instanceId !== owner.instanceId) return false;
+  await Promise.all([
+    unlink(paths.lockFile).catch(() => undefined),
+    unlink(paths.stopRequestFile).catch(() => undefined),
+  ]);
+  return true;
 }
 
 export async function requestRuntimeStop(paths = getRuntimePaths()) {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CandidateKind, TaskType } from "@prisma/client";
 import { runAgentLoop, type AgentLoopCheckpoint } from "@lantern/agent-runtime/agent-loop";
-import { getAgentCapability, semanticCapabilityCatalogManifest, type AgentTaskType } from "@lantern/agent-runtime/capability-registry";
+import { getAgentCapability, plannerCapabilityCatalog, semanticCapabilityCatalogManifest, type AgentTaskType } from "@lantern/agent-runtime/capability-registry";
 import { normalizeSelectionForCurrentView } from "@lantern/agent-runtime/context-builder";
 import { guardInteractionPlan, type InteractionInput } from "@lantern/agent-runtime/orchestrator";
 import { assetDraftSchema, explicitDialogueReferenceSchema, explicitWorkspaceReferencesSchema, interactionPlanSchema, parseCandidatePayload, type InteractionPlan } from "@lantern/agent-runtime/schemas";
@@ -102,11 +102,26 @@ test("storyboard entry editing and frame-image generation are distinct capabilit
 test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
   const first = semanticCapabilityCatalogManifest();
   const second = semanticCapabilityCatalogManifest();
-  assert.equal(first.revision, 2);
+  assert.equal(first.revision, 3);
   assert.equal(first.hash, second.hash);
   assert.match(first.hash, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => JSON.stringify(first));
   assert.deepEqual(first.capabilities.map((capability) => capability.id), [
+    "comic.list",
+    "comic.get",
+    "comic.create",
+    "comic.update",
+    "comic.duplicate",
+    "comic.archive",
+    "chapter.get",
+    "chapter.create",
+    "chapter.update",
+    "chapter.archive",
+    "asset.list",
+    "asset.get",
+    "asset.create",
+    "asset.update",
+    "asset.archive",
     "context.inspect_images",
     "storyboard.edit_single_entry",
     "frame_image.generate_or_replace",
@@ -121,6 +136,13 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   assert.deepEqual(storyboard?.domainCapabilities, ["update_storyboard_beat", "create_frame_storyboard_beat"]);
   assert.equal(typeof storyboard?.inputSchema, "object");
   assert.equal(typeof storyboard?.outputSchema, "object");
+  const comicUpdate = first.capabilities.find((capability) => capability.id === "comic.update");
+  assert.equal(comicUpdate?.execution, "synchronous");
+  assert.equal(comicUpdate?.effect, "resource_mutation");
+  assert.deepEqual(comicUpdate?.executionModes, ["deterministic"]);
+  assert.equal(comicUpdate?.agentAccess.external, "execute");
+  assert.equal(comicUpdate?.agentAccess.internal, "disabled");
+  assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "comic.update"), false);
 });
 
 test("external Candidate Apply is direct in v1 but remains controlled by one service policy", () => {

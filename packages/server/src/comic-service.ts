@@ -73,6 +73,25 @@ export async function getComic(ownerUserId: string, comicId: string) {
   return publicComic(comic);
 }
 
+export async function getComicChapter(ownerUserId: string, chapterId: string) {
+  const chapter = await prisma.chapter.findFirst({
+    where: { id: chapterId, ownerUserId, archivedAt: null, comic: { archivedAt: null } },
+    include: { project: { select: { id: true, workingRevisions: { orderBy: { revision: "desc" }, take: 1, select: { revision: true } } } } },
+  });
+  if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
+  return {
+    id: chapter.id,
+    comicId: chapter.comicId,
+    number: chapter.number,
+    title: chapter.title,
+    summary: chapter.summary,
+    coverUrl: chapterCoverPath(chapter),
+    projectId: chapter.project?.id,
+    workingRevision: chapter.project?.workingRevisions[0]?.revision,
+    updatedAt: chapter.updatedAt.toISOString(),
+  };
+}
+
 export async function createComic(ownerUserId: string, input: { title: string; summary: string; worldSummary?: string; styleSummary?: string; format: "page" | "vertical" | "four_panel"; canvasPageMode: "single" | "spread" }) {
   const format = ({ page: ComicFormat.PAGE, vertical: ComicFormat.VERTICAL, four_panel: ComicFormat.FOUR_PANEL } as const)[input.format];
   const comic = await prisma.comic.create({ data: { ownerUserId, title: input.title, summary: input.summary, worldSummary: input.worldSummary ?? "", styleSummary: input.styleSummary ?? "", format, canvasPageMode: input.canvasPageMode === "spread" ? "SPREAD" : "SINGLE" } });

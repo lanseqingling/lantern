@@ -3,11 +3,36 @@ import { z } from "zod";
 import { getConfig } from "@lantern/server/config";
 import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
+import {
+  archiveComic,
+  archiveComicChapter,
+  createComic,
+  createComicChapter,
+  duplicateComic,
+  getComic,
+  getComicChapter,
+  listComics,
+  updateComic,
+  updateComicChapter,
+} from "@lantern/server/comic-service";
+import {
+  archiveAssetFamily,
+  createComicLibraryAsset,
+  getAssetFamilyDetail,
+  listComicAssetCards,
+  updateAsset,
+} from "@lantern/server/asset-library-service";
+import { resolveResourceReference, resourceReference } from "@lantern/server/resource-reference-service";
 import { buildAgentContext } from "./context-builder";
 import {
+  assertAgentCapabilityAccess,
+  getAgentCapability,
+  listAgentCapabilities,
   semanticCapabilityCatalogManifest,
+  type AgentCapabilityDescriptor,
   type AgentCapabilityContextProfile,
 } from "./capability-registry";
+import { externalResourceToolResultSchema, isResourceCapabilityId } from "./resource-capabilities";
 import { analyzeImageVersions } from "./visual-context";
 
 export const externalContextProfiles = [
@@ -179,14 +204,207 @@ export async function listExternalAgentProjects(ownerUserId: string) {
   });
 }
 
-export function listExternalReadOnlyCapabilities() {
+export function listExternalCapabilities() {
   const catalog = semanticCapabilityCatalogManifest();
   return externalCapabilitiesListOutputSchema.parse({
     catalogRevision: catalog.revision,
     catalogHash: catalog.hash,
     capabilities: catalog.capabilities.filter((capability) =>
-      capability.agentAccess.external !== "disabled" && capability.effect === "observe"),
+      capability.agentAccess.external !== "disabled"
+      && (capability.effect === "observe" || isResourceCapabilityId(capability.id))),
   });
+}
+
+export function listExternalResourceCapabilities() {
+  return listAgentCapabilities().filter((capability) =>
+    capability.execution === "synchronous"
+    && capability.agentAccess.external !== "disabled"
+    && isResourceCapabilityId(capability.id));
+}
+
+function jsonValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function externalResourceResult(
+  capability: AgentCapabilityDescriptor,
+  input: {
+    data?: unknown;
+    resource?: ReturnType<typeof resourceReference>;
+    projectId?: string;
+    baseRevision?: number;
+    workingRevision?: number;
+    nextActions?: string[];
+  },
+) {
+  return externalResourceToolResultSchema.parse({
+    capability: { id: capability.id, version: capability.version },
+    effect: capability.effect,
+    ...(input.resource ? { resource: input.resource } : {}),
+    ...(input.projectId ? { projectId: input.projectId } : {}),
+    ...(input.baseRevision ? { baseRevision: input.baseRevision } : {}),
+    ...(input.workingRevision ? { workingRevision: input.workingRevision } : {}),
+    ...(input.data !== undefined ? { data: jsonValue(input.data) } : {}),
+    nextActions: input.nextActions ?? [],
+  });
+}
+
+function argument(input: Record<string, unknown>, name: string) {
+  const value = input[name];
+  if (typeof value !== "string") throw new AppError("validation", `缺少 ${name} 参数。`, 400);
+  return value;
+}
+
+export async function invokeExternalResourceCapability(
+  ownerUserId: string,
+  capabilityId: string,
+  input: unknown,
+) {
+  const capability = getAgentCapability(capabilityId);
+  if (!capability || capability.execution !== "synchronous" || !isResourceCapabilityId(capability.id)) {
+    throw new AppError("capability_not_available", "该 Lantern 能力当前未向外置 Agent 开放。", 404);
+  }
+  assertAgentCapabilityAccess(capability, "external");
+  const parsed = capability.inputSchema.parse(input) as Record<string, unknown>;
+
+  if (capability.id === "comic.list") {
+    const comics = await listComics(ownerUserId, { cursor: parsed.cursor as string | undefined, limit: parsed.limit as number });
+    return externalResourceResult(capability, {
+      data: { ...comics, items: comics.items.map((comic) => ({ ...comic, uri: resourceReference("comic", comic.id).uri })) },
+      nextActions: comics.items.length ? ["Use a returned comic URI for a precise follow-up action."] : [],
+    });
+  }
+
+  if (capability.id === "comic.create") {
+    const created = await createComic(ownerUserId, parsed as unknown as Parameters<typeof createComic>[1]);
+    const comic = await getComic(ownerUserId, created.comic.id);
+    return externalResourceResult(capability, {
+      resource: resourceReference("comic", comic.id),
+      data: comic,
+      nextActions: ["Create the first chapter before saving assets or editing pages."],
+    });
+  }
+
+  if (capability.id.startsWith("comic.")) {
+    const target = await resolveResourceReference(ownerUserId, argument(parsed, "comic"), "comic");
+    if (capability.id === "comic.get") {
+      return externalResourceResult(capability, { resource: resourceReference("comic", target.id), data: await getComic(ownerUserId, target.id) });
+    }
+    if (capability.id === "comic.update") {
+      const updates = { ...parsed };
+      delete updates.comic;
+      await updateComic(ownerUserId, target.id, updates as Parameters<typeof updateComic>[2]);
+      return externalResourceResult(capability, { resource: resourceReference("comic", target.id), data: await getComic(ownerUserId, target.id) });
+    }
+    if (capability.id === "comic.duplicate") {
+      const copied = await duplicateComic(ownerUserId, target.id);
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", copied.comicId),
+        data: { ...copied, comic: await getComic(ownerUserId, copied.comicId) },
+        nextActions: ["Use the new comic URI for all follow-up changes."],
+      });
+    }
+    if (capability.id === "comic.archive") {
+      return externalResourceResult(capability, { resource: resourceReference("comic", target.id), data: await archiveComic(ownerUserId, target.id) });
+    }
+  }
+
+  if (capability.id === "chapter.create") {
+    const comic = await resolveResourceReference(ownerUserId, argument(parsed, "comic"), "comic");
+    const created = await createComicChapter(ownerUserId, comic.id, { title: argument(parsed, "title"), summary: argument(parsed, "summary") });
+    return externalResourceResult(capability, {
+      resource: resourceReference("chapter", created.chapterId),
+      projectId: created.projectId,
+      workingRevision: 1,
+      data: { ...created, chapter: await getComicChapter(ownerUserId, created.chapterId) },
+      nextActions: ["Use the returned chapter URI or projectId for follow-up work."],
+    });
+  }
+
+  if (capability.id.startsWith("chapter.")) {
+    const target = await resolveResourceReference(ownerUserId, argument(parsed, "chapter"), "chapter");
+    if (capability.id === "chapter.get") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("chapter", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await getComicChapter(ownerUserId, target.id),
+      });
+    }
+    if (capability.id === "chapter.update") {
+      const updates = { ...parsed };
+      delete updates.chapter;
+      await updateComicChapter(ownerUserId, target.comicId!, target.id, updates as Parameters<typeof updateComicChapter>[3]);
+      return externalResourceResult(capability, {
+        resource: resourceReference("chapter", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await getComicChapter(ownerUserId, target.id),
+      });
+    }
+    if (capability.id === "chapter.archive") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("chapter", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await archiveComicChapter(ownerUserId, target.comicId!, target.id),
+      });
+    }
+  }
+
+  if (capability.id === "asset.list" || capability.id === "asset.create") {
+    const comic = await resolveResourceReference(ownerUserId, argument(parsed, "comic"), "comic");
+    if (capability.id === "asset.list") {
+      const assets = await listComicAssetCards(ownerUserId, comic.id);
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", comic.id),
+        data: assets.map((asset) => ({ ...asset, uri: resourceReference("asset", asset.id).uri })),
+      });
+    }
+    const created = await createComicLibraryAsset(ownerUserId, comic.id, {
+      kind: parsed.kind as "character" | "scene" | "prop" | "reference_image",
+      name: argument(parsed, "name"),
+      description: argument(parsed, "description"),
+    });
+    return externalResourceResult(capability, {
+      resource: resourceReference("asset", created.id),
+      data: created,
+      nextActions: ["Use the returned asset URI to update its confirmed description or manage future image versions."],
+    });
+  }
+
+  if (capability.id.startsWith("asset.")) {
+    const target = await resolveResourceReference(ownerUserId, argument(parsed, "asset"), "asset");
+    if (capability.id === "asset.get") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await getAssetFamilyDetail(ownerUserId, target.id),
+      });
+    }
+    if (capability.id === "asset.update") {
+      const updates = { ...parsed };
+      delete updates.asset;
+      await updateAsset(ownerUserId, target.id, updates as Parameters<typeof updateAsset>[2]);
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await getAssetFamilyDetail(ownerUserId, target.id),
+      });
+    }
+    if (capability.id === "asset.archive") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("asset", target.id),
+        projectId: target.projectId,
+        workingRevision: target.workingRevision,
+        data: await archiveAssetFamily(ownerUserId, target.id),
+      });
+    }
+  }
+
+  throw new AppError("capability_not_available", "该 Lantern 能力当前没有同步执行器。", 404);
 }
 
 function contextRequestForProfile(profile: AgentCapabilityContextProfile) {

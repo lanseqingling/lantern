@@ -1,8 +1,23 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { EditorCapabilityId } from "@lantern/editor-core";
+import { resourceCapabilities } from "./resource-capabilities";
+import type {
+  AgentCapabilityActor,
+  AgentTaskType,
+  SemanticCapabilityManifest,
+} from "./capability-types";
 
-export type AgentTaskType = "storyboard" | "frame_image_generate" | "asset_parse";
+export type {
+  AgentCapabilityAccess,
+  AgentCapabilityActor,
+  AgentCapabilityContextProfile,
+  AgentCapabilityEffect,
+  AgentCapabilityExecution,
+  AgentCapabilityRisk,
+  AgentTaskType,
+  SemanticCapabilityManifest,
+} from "./capability-types";
+
 export const agentCapabilityIds = [
   "context.inspect_images",
   "storyboard.edit_single_entry",
@@ -10,42 +25,6 @@ export const agentCapabilityIds = [
   "asset.generate_character_or_scene",
 ] as const;
 export type AgentCapabilityId = typeof agentCapabilityIds[number];
-export type AgentCapabilityExecution = "synchronous" | "asynchronous";
-export type AgentCapabilityEffect = "observe" | "resource_mutation" | "direct_change" | "candidate";
-export type AgentCapabilityRisk = "low" | "medium" | "high";
-export type AgentCapabilityAccess = "disabled" | "observe" | "preview" | "execute";
-export type AgentCapabilityActor = "internal" | "external";
-export type AgentCapabilityContextProfile = "visual_observation" | "single_frame_generation" | "asset_generation";
-
-export type SemanticCapabilityManifest = {
-  id: AgentCapabilityId;
-  version: number;
-  execution: AgentCapabilityExecution;
-  taskType?: AgentTaskType;
-  description: string;
-  inputSchema: z.ZodType;
-  outputSchema: z.ZodType;
-  target: {
-    required: boolean;
-    types: string[];
-    min: number;
-    max: number;
-  };
-  scope?: "selected_comic_frame" | "reference_only";
-  contextProfile: AgentCapabilityContextProfile;
-  effect: AgentCapabilityEffect;
-  executionModes: Array<"deterministic" | "lantern_managed" | "external_result">;
-  risk: AgentCapabilityRisk;
-  agentAccess: {
-    internal: AgentCapabilityAccess;
-    external: AgentCapabilityAccess;
-  };
-  idempotency: "required" | "optional";
-  domainCapabilities: EditorCapabilityId[];
-  confirmation: "none";
-  userMessage: string;
-  missingTargetMessage?: string;
-};
 
 const instructionSchema = z.strictObject({
   instruction: z.string().trim().min(1).max(20_000),
@@ -74,6 +53,7 @@ const assetGenerationInputSchema = instructionSchema.extend({
 export type AgentCapabilityDescriptor = SemanticCapabilityManifest;
 
 const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
+  ...resourceCapabilities,
   {
     id: "context.inspect_images",
     version: 1,
@@ -157,7 +137,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 2;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 3;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });
@@ -175,12 +155,16 @@ export function listAgentCapabilities() {
   return semanticCapabilities;
 }
 
+export function getAgentCapability(id: AgentCapabilityId): (AgentCapabilityDescriptor & { id: AgentCapabilityId }) | undefined;
+export function getAgentCapability(id: string): AgentCapabilityDescriptor | undefined;
 export function getAgentCapability(id: string) {
   return semanticCapabilities.find((capability) => capability.id === id);
 }
 
 export function getTaskAgentCapability(taskType: string) {
-  return semanticCapabilities.find((capability) => capability.execution === "asynchronous" && capability.taskType === taskType);
+  return semanticCapabilities.find((capability) => capability.execution === "asynchronous" && capability.taskType === taskType) as
+    | (AgentCapabilityDescriptor & { id: AgentCapabilityId; execution: "asynchronous"; taskType: AgentTaskType })
+    | undefined;
 }
 
 export function isAgentTaskType(taskType: string): taskType is AgentTaskType {
@@ -217,7 +201,7 @@ export function semanticCapabilityCatalogManifest() {
 }
 
 export function plannerCapabilityCatalog() {
-  return semanticCapabilities.map((capability) => ({
+  return semanticCapabilities.filter((capability) => capability.agentAccess.internal !== "disabled").map((capability) => ({
     id: capability.id,
     version: capability.version,
     execution: capability.execution,

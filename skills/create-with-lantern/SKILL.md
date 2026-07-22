@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to inspect, organize, and edit a creator's comics through the domain capabilities Lantern currently exposes. Use when the user wants to read, understand, manage, review, or continue work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "0.2.0"
-  minimum_catalog_revision: "2"
+  version: "0.3.0"
+  minimum_catalog_revision: "3"
 ---
 
 # Create with Lantern
@@ -24,6 +24,8 @@ When bounded context is needed, choose its profile by intent:
 - `asset_generation`: prepare work involving character, scene, prop, or other asset references.
 
 Ask the user to choose only when multiple resources or targets remain materially ambiguous after the available narrow reads.
+
+When the request manages a Comic, Chapter, Project relationship, or structured Asset, read [references/resources.md](references/resources.md). Reuse a returned `lantern://` reference for follow-up changes instead of searching by title again.
 
 ## Respect Lantern's creative boundaries
 

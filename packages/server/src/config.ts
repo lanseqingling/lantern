@@ -5,14 +5,15 @@ import { getRuntimePaths } from "./runtime-paths";
 
 const optionalSecret = z.preprocess((value) => value === "" ? undefined : value, z.string().optional());
 const runtimeConfigSchema = z.object({
+  configVersion: z.number().int().positive().default(1),
   apiPort: z.number().int().positive(),
   webPort: z.number().int().positive(),
 });
 
 const envSchema = z.object({
   APP_ENV: z.enum(["local", "test", "production"]).default("local"),
-  WEB_PORT: z.coerce.number().int().positive().default(3000),
-  WEB_ORIGIN: z.string().default("http://localhost:3000"),
+  WEB_PORT: z.coerce.number().int().positive().default(18788),
+  WEB_ORIGIN: z.string().default("http://localhost:18788"),
   API_PORT: z.coerce.number().int().positive().default(18787),
   LANTERN_LOCAL_TOKEN: z.string().min(32),
   LANTERN_MCP_TOKEN: z.string().min(32),

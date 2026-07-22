@@ -278,9 +278,11 @@ export async function retryTask(ownerUserId: string, taskId: string, idempotency
   const storedCapability = invocationInput(stored.capability as Prisma.JsonValue);
   const storedInvocation = invocationInput(stored.invocation as Prisma.JsonValue);
   const storedClient = invocationInput(storedInvocation.client as Prisma.JsonValue);
-  const capability = getAgentCapability(typeof storedCapability.id === "string" ? storedCapability.id : "")
-    ?? getTaskAgentCapability(task.type.toLowerCase());
-  if (!capability || capability.execution !== "asynchronous") throw new AppError("unsupported_task", "原任务能力已经不可用，不能重试。", 422);
+  const capability = getTaskAgentCapability(task.type.toLowerCase());
+  if (!capability) throw new AppError("unsupported_task", "原任务能力已经不可用，不能重试。", 422);
+  if (typeof storedCapability.id === "string" && storedCapability.id !== capability.id) {
+    throw new AppError("capability_version_conflict", "原任务使用的能力已经更新，请重新发起任务。", 409);
+  }
   if (typeof storedCapability.version === "number" && storedCapability.version !== capability.version) {
     throw new AppError("capability_version_conflict", "原任务使用的能力版本已经更新，请重新发起任务。", 409);
   }

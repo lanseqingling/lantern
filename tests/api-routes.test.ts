@@ -103,7 +103,7 @@ test("MCP uses an independent loopback credential and rejects browser origins", 
   });
   assert.equal(initialized.statusCode, 200);
   assert.match(initialized.body, /"name":"lantern"/);
-  assert.match(initialized.body, /当前开放工具只读/);
+  assert.match(initialized.body, /lantern:\/\//);
 
   const tools = await app.inject({
     method: "POST",
@@ -112,7 +112,7 @@ test("MCP uses an independent loopback credential and rejects browser origins", 
     payload: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
   });
   assert.equal(tools.statusCode, 200);
-  for (const name of ["lantern_projects_list", "lantern_context_get", "lantern_capabilities_list", "lantern_images_inspect"]) {
+  for (const name of ["lantern_projects_list", "lantern_context_get", "lantern_capabilities_list", "lantern_images_inspect", "lantern_comic_get", "lantern_comic_update", "lantern_chapter_create", "lantern_asset_create"]) {
     assert.match(tools.body, new RegExp(`"name":"${name}"`));
   }
   assert.match(tools.body, /"readOnlyHint":true/);
@@ -130,6 +130,8 @@ test("MCP uses an independent loopback credential and rejects browser origins", 
   });
   assert.equal(capabilities.statusCode, 200);
   assert.match(capabilities.body, /context\.inspect_images/);
+  assert.match(capabilities.body, /comic\.update/);
+  assert.match(capabilities.body, /asset\.create/);
   assert.doesNotMatch(capabilities.body, /storyboard\.edit_single_entry/);
 });
 
@@ -160,6 +162,24 @@ test("registered domain routes preserve validation and response envelopes", asyn
   assert.equal(created.statusCode, 200);
   const comicId = created.json().data.comic.id as string;
 
+  const mcpUpdated = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { authorization: mcpAuthorization, accept: "application/json, text/event-stream" },
+    payload: {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "lantern_comic_update",
+        arguments: { comic: `lantern://comics/${comicId}`, worldSummary: "资源引用测试世界观" },
+      },
+    },
+  });
+  assert.equal(mcpUpdated.statusCode, 200);
+  assert.match(mcpUpdated.body, /resource_mutation/);
+  assert.match(mcpUpdated.body, /资源引用测试世界观/);
+
   const fetched = await app.inject({
     method: "GET",
     url: `/v1/comics/${comicId}`,
@@ -167,6 +187,7 @@ test("registered domain routes preserve validation and response envelopes", asyn
   });
   assert.equal(fetched.statusCode, 200);
   assert.equal(fetched.json().data.title, "服务边界测试");
+  assert.equal(fetched.json().data.worldSummary, "资源引用测试世界观");
 
   const updated = await app.inject({
     method: "PATCH",

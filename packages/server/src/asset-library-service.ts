@@ -333,6 +333,46 @@ export async function listComicAssetCards(ownerUserId: string, comicId: string) 
   });
 }
 
+export async function createComicLibraryAsset(
+  ownerUserId: string,
+  comicId: string,
+  input: { kind: "character" | "scene" | "prop" | "reference_image"; name: string; description: string },
+) {
+  const comic = await prisma.comic.findFirst({
+    where: { id: comicId, ownerUserId, archivedAt: null },
+    select: {
+      id: true,
+      chapters: {
+        where: { archivedAt: null, project: { isNot: null } },
+        orderBy: { number: "asc" },
+        take: 1,
+        select: { project: { select: { id: true } } },
+      },
+    },
+  });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  const projectId = comic.chapters[0]?.project?.id;
+  if (!projectId) throw new AppError("invalid_state", "请先为漫画创建一话，再保存资产资料。", 422);
+  const kind = ({
+    character: AssetKind.CHARACTER,
+    scene: AssetKind.SCENE,
+    prop: AssetKind.PROP,
+    reference_image: AssetKind.REFERENCE_IMAGE,
+  } as const)[input.kind];
+  const created = await prisma.asset.create({
+    data: {
+      ownerUserId,
+      projectId,
+      kind,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      currentVersionNumber: 0,
+      name: input.name,
+      description: input.description,
+    },
+  });
+  return getAssetFamilyDetail(ownerUserId, created.id);
+}
+
 export async function getAssetFamilyDetail(ownerUserId: string, assetId: string) {
   const requested = await prisma.asset.findFirst({
     where: { id: assetId, ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY },

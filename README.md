@@ -60,7 +60,7 @@ macOS 和 Windows 使用同一条首次启动命令：
 npm start
 ```
 
-启动器会准备仓库锁定的依赖、初始化本地数据并启动 Web 工作台。首次创建空数据目录时会载入《雨夜车站》和《风停之前》两个示例漫画。启动完成后浏览器会打开 `http://localhost:3000`。
+启动器会准备仓库锁定的依赖、初始化本地数据并启动 Web 工作台。首次创建空数据目录时会载入《雨夜车站》和《风停之前》两个示例漫画。启动完成后浏览器会打开 `http://localhost:18788`。
 
 ### 4. 配置模型
 
@@ -99,7 +99,7 @@ lantern backup:restore <backup-file>
 lantern agent:install
 ```
 
-该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。Agent 只使用 Lantern 当前实际开放的受控领域能力，并按能力需要读取作品上下文。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
+该命令会识别当前 Agent，安装 Lantern 应用级创作 Skill 并登记本地 MCP。Agent 只使用 Lantern 当前实际开放的受控领域能力：可以通过 `lantern://` 引用或本地作品链接精确读取和管理漫画、一话及结构化资产资料，并按能力需要读取画布上下文。保持 Lantern 运行并重启当前 Agent 后即可使用；Lantern 升级、端口或凭证变化后重复执行同一命令即可同步。
 
 ## 开发与构建
 

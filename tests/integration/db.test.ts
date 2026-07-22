@@ -17,7 +17,9 @@ import { duplicateComic } from "@lantern/server/comic-service";
 import { putImage } from "@lantern/server/object-storage";
 import { commitChangeSet, revertCandidateApplication } from "@lantern/server/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
-import { getExternalAgentContext, inspectExternalAgentImages, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
+import { getExternalAgentContext, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
+import { getConfig } from "@lantern/server/config";
+import { resolveResourceReference } from "@lantern/server/resource-reference-service";
 import { LocalTaskRunner } from "@lantern/agent-runtime/local-task-runner";
 import { invokeTaskCapability } from "@lantern/agent-runtime/task-service";
 import type { StoryboardBeat } from "@lantern/shared";
@@ -180,6 +182,42 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.deepEqual(context.comic.settings, [{ id: ids.comicSetting, title: "禁忌规则", content: "午夜后不得直呼失踪者姓名。" }]);
     const externalProjects = await listExternalAgentProjects(ids.user);
     assert.equal(externalProjects.projects.find((project) => project.projectId === ids.project)?.workingRevision, 1);
+    const comicReference = `lantern://comics/${ids.comic}`;
+    const chapterReference = `http://localhost:${getConfig().WEB_PORT}/comics/${ids.comic}/chapters/${ids.chapter}`;
+    const resolvedComic = await resolveResourceReference(ids.user, comicReference, "comic");
+    assert.equal(resolvedComic.id, ids.comic);
+    const resolvedChapter = await resolveResourceReference(ids.user, chapterReference, "chapter");
+    assert.equal(resolvedChapter.projectId, ids.project);
+    assert.equal(resolvedChapter.workingRevision, 1);
+    await assert.rejects(
+      () => resolveResourceReference(ids.user, `http://localhost:${getConfig().WEB_PORT}/comics/wrong-${ids.comic}/chapters/${ids.chapter}`, "chapter"),
+      /不存在或不属于当前用户/,
+    );
+    const externalComic = await invokeExternalResourceCapability(ids.user, "comic.get", { comic: comicReference });
+    assert.equal((externalComic.data as { title: string }).title, "集成测试漫画");
+    const createdExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.create", {
+      comic: comicReference,
+      kind: "character",
+      name: "林澄",
+      description: "肩长黑发，穿浅色风衣，神态克制。",
+    });
+    const createdExternalAssetId = createdExternalAsset.resource?.id;
+    assert.ok(createdExternalAssetId);
+    assert.equal(createdExternalAsset.effect, "resource_mutation");
+    const updatedExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.update", {
+      asset: `lantern://assets/${createdExternalAssetId}`,
+      description: "肩长黑发，浅色风衣，习惯先观察再行动。",
+    });
+    assert.equal((updatedExternalAsset.data as { root: { description: string } }).root.description, "肩长黑发，浅色风衣，习惯先观察再行动。");
+    await assert.rejects(
+      () => invokeExternalResourceCapability(`foreign-${ids.user}`, "asset.get", { asset: `lantern://assets/${createdExternalAssetId}` }),
+      /不存在或不属于当前用户/,
+    );
+    const archivedExternalAsset = await invokeExternalResourceCapability(ids.user, "asset.archive", {
+      asset: `lantern://assets/${createdExternalAssetId}`,
+      confirmed: true,
+    });
+    assert.equal((archivedExternalAsset.data as { deleted: boolean }).deleted, true);
     const externalContext = await getExternalAgentContext(ids.user, {
       projectId: ids.project,
       profile: "visual_observation",
@@ -246,7 +284,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     }, {
       id: "storyboard.edit_single_entry",
       version: 1,
-      catalogRevision: 2,
+      catalogRevision: 3,
     });
     assert.match(invocationAudit.capability?.catalogHash ?? "", /^[a-f0-9]{64}$/);
     assert.deepEqual(invocationAudit.invocation && {

@@ -1,10 +1,6 @@
 <p align="center">
-  <img src="./apps/web/public/favicon.svg" width="96" height="96" alt="Lantern AI">
+  <img src="./docs/images/readme/hero.png" width="100%" alt="Lantern AI：一盏灯，陪你打磨漫画故事">
 </p>
-
-<h1 align="center">Lantern AI</h1>
-
-<p align="center">轻量编排漫画，并与内置或外置 Agent 协作，持续完善同一部作品。</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/status-%E6%8C%81%E7%BB%AD%E5%BC%80%E5%8F%91%E4%B8%AD-F2B84B" alt="持续开发中">
@@ -21,15 +17,17 @@
   <a href="#通过-mcp-与-skill-接入外置-agent">MCP + Skill</a>
 </p>
 
+Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台。它把故事、角色、场景、分镜、页面编排、单格精修、预览与导出放在一个持续可编辑的创作空间中，并通过 MCP 与 Skill 让产品内外的 Agent 复用同一套创作能力与作品边界。
+
 <p align="center">
   <img src="./docs/images/readme/workbench-overview.jpg" width="100%" alt="Lantern AI 漫画工作台主界面">
 </p>
 
-<p align="center"><sub>漫画编排与 Agent 协作工作台。</sub></p>
-
-Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台。它把故事、角色、场景、分镜、页面编排、单格精修、预览与导出放在一个持续可编辑的创作空间中，并通过 MCP 与 Skill 让产品内外的 Agent 复用同一套创作能力与作品边界。
+<p align="center"><sub>漫画编排与 Agent 协作工作台</sub></p>
 
 ## 产品设计
+
+Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑边界内支持创作者与 Agent 协作：
 
 - LCD 作品协议：LCD 统一表达页面、画格、图层、格内内容和固定资产版本，工作台、候选预览、阅读与导出共享同一份作品事实。
 

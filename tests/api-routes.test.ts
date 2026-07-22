@@ -115,7 +115,7 @@ test("MCP uses an independent loopback credential and rejects browser origins", 
     payload: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
   });
   assert.equal(tools.statusCode, 200);
-  for (const name of ["lantern_projects_list", "lantern_context_get", "lantern_capabilities_list", "lantern_images_inspect", "lantern_comic_get", "lantern_comic_update", "lantern_chapter_create", "lantern_asset_create", "lantern_asset_variant_create", "lantern_asset_image_upload_prepare", "lantern_asset_image_attach", "lantern_asset_image_set_primary"]) {
+  for (const name of ["lantern_projects_list", "lantern_context_get", "lantern_composition_inspect", "lantern_capabilities_list", "lantern_images_inspect", "lantern_comic_get", "lantern_comic_update", "lantern_chapter_create", "lantern_asset_create", "lantern_asset_variant_create", "lantern_asset_image_upload_prepare", "lantern_asset_image_attach", "lantern_asset_image_set_primary"]) {
     assert.match(tools.body, new RegExp(`"name":"${name}"`));
   }
   assert.match(tools.body, /"readOnlyHint":true/);
@@ -133,6 +133,7 @@ test("MCP uses an independent loopback credential and rejects browser origins", 
   });
   assert.equal(capabilities.statusCode, 200);
   assert.match(capabilities.body, /context\.inspect_images/);
+  assert.match(capabilities.body, /context\.inspect_composition/);
   assert.match(capabilities.body, /comic\.update/);
   assert.match(capabilities.body, /asset\.create/);
   assert.doesNotMatch(capabilities.body, /storyboard\.edit_single_entry/);

@@ -6,6 +6,7 @@
   "exports": {
     "./agent-loop": "./src/agent-loop.ts",
     "./capability-registry": "./src/capability-registry.ts",
+    "./composition-observation": "./src/composition-observation.ts",
     "./context-builder": "./src/context-builder.ts",
     "./external-agent-service": "./src/external-agent-service.ts",
     "./conversation-service": "./src/conversation-service.ts",

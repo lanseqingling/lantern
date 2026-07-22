@@ -95,10 +95,12 @@ test("the universal Planner receives context and returns a guarded interaction p
     assert.match(requestBodies[0].messages?.[0]?.content ?? "", /Capability catalog/);
     assert.match(requestBodies[0].messages?.[0]?.content ?? "", /storyboard\.edit_single_entry/);
     assert.match(requestBodies[0].messages?.[0]?.content ?? "", /必须选择 unsupported/);
+    assert.match(requestBodies[0].messages?.[0]?.content ?? "", /观察不授予 LCD 编辑能力/);
+    assert.match(requestBodies[0].messages?.[0]?.content ?? "", /不先观察画面/);
     assert.match(requestBodies[0].messages?.[1]?.content ?? "", /"workspaceView":\{"unitIds":\["page-01","page-02"\],"label":"Page 01–02"/);
     assert.equal(result.trace.prompt.id, "lantern.agent.planner");
-    assert.equal(result.trace.prompt.version, "1.4.0");
-    assert.equal(result.trace.prompt.contextPolicyVersion, "interaction-context-v3");
+    assert.equal(result.trace.prompt.version, "1.5.0");
+    assert.equal(result.trace.prompt.contextPolicyVersion, "interaction-context-v4");
     assert.equal(result.trace.prompt.outputSchemaVersion, "interaction-plan-v2");
   } finally {
     globalThis.fetch = originalFetch;

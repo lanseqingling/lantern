@@ -17,7 +17,7 @@ import { duplicateComic } from "@lantern/server/comic-service";
 import { putImage } from "@lantern/server/object-storage";
 import { commitChangeSet, revertCandidateApplication } from "@lantern/server/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
-import { getExternalAgentContext, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
+import { getExternalAgentContext, inspectExternalAgentComposition, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
 import { getConfig } from "@lantern/server/config";
 import { receiveExternalAssetUpload } from "@lantern/server/external-upload-service";
 import { resolveResourceReference } from "@lantern/server/resource-reference-service";
@@ -304,9 +304,24 @@ test("database candidate apply and revert preserve version heads atomically", as
     });
     assert.equal(externalContext.baseRevision, 1);
     assert.equal(externalContext.currentPage?.id, document.units[0].id);
+    const externalPageTarget = externalContext.targets.find((target) => target.type === "presentation_unit");
+    assert.ok(externalPageTarget);
+    const compositionInspection = await inspectExternalAgentComposition(ids.user, {
+      projectId: ids.project,
+      pageHandles: [externalPageTarget.handle],
+    });
+    assert.equal(compositionInspection.output.baseRevision, 1);
+    assert.equal(compositionInspection.output.structure.units[0]?.id, document.units[0].id);
+    assert.ok(compositionInspection.output.structure.units[0]?.frames[0]?.handle);
+    assert.equal(compositionInspection.output.image.mimeType, "image/png");
+    assert.deepEqual([...compositionInspection.image.bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
     const externalAssetTarget = externalContext.targets.find((target) => target.type === "asset" && target.label === "视觉风格");
     assert.ok(externalAssetTarget);
     assert.deepEqual(externalAssetTarget.assetVersionIds, [ids.visualStyleV1]);
+    await assert.rejects(() => inspectExternalAgentComposition(ids.user, {
+      projectId: ids.project,
+      pageHandles: [externalAssetTarget.handle],
+    }), /只能使用页面或滚动段 handle/);
     const imageInspection = await inspectExternalAgentImages(ids.user, {
       projectId: ids.project,
       targetHandles: [externalAssetTarget.handle],
@@ -363,7 +378,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     }, {
       id: "storyboard.edit_single_entry",
       version: 1,
-      catalogRevision: 4,
+      catalogRevision: 5,
     });
     assert.match(invocationAudit.capability?.catalogHash ?? "", /^[a-f0-9]{64}$/);
     assert.deepEqual(invocationAudit.invocation && {

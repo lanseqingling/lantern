@@ -89,6 +89,16 @@ export function guardInteractionPlan(input: InteractionInput, plan: InteractionP
     return { kind: "decision", decision: { kind: "direct_answer", message: "这项操作目前还不能直接完成。你可以继续描述期望的创作结果，我会协助整理可行方案。" } };
   }
   if (capability.effect === "observe") {
+    if (capability.id === "context.inspect_composition") {
+      const pageTargets = (input.currentPageTargets ?? []).filter((target) => target.type === "presentation_unit");
+      const availableHandles = new Set(pageTargets.map((target) => target.handle));
+      const requestedHandles = plan.targetHandles.length ? plan.targetHandles : pageTargets.map((target) => target.handle);
+      const targetHandles = [...new Set(requestedHandles.filter((handle) => availableHandles.has(handle)))].slice(0, 2);
+      if (!targetHandles.length) {
+        return { kind: "decision", decision: missingTargetDecision(capability.missingTargetMessage ?? "请先打开要分析的漫画页或滚动段。") };
+      }
+      return { kind: "tool_call", capabilityId: capability.id, targetHandles };
+    }
     const attachmentHandles = (input.imageAttachments ?? []).map((attachment) => attachment.handle);
     const availableHandles = new Set([
       ...attachmentHandles,

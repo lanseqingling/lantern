@@ -14,6 +14,16 @@ async function modelDataUrl(bytes: Buffer, contentType: string) {
   return `data:image/jpeg;base64,${normalized.toString("base64")}`;
 }
 
+export async function analyzeImageBuffers(input: {
+  message: string;
+  images: Array<{ bytes: Buffer; contentType: string }>;
+}) {
+  const images = input.images.slice(0, 3);
+  if (!images.length) return undefined;
+  const imageUrls = await Promise.all(images.map((image) => modelDataUrl(image.bytes, image.contentType)));
+  return new QwenVisionProvider().analyze({ question: input.message, imageUrls });
+}
+
 export async function analyzeImageVersions(input: {
   ownerUserId: string;
   projectId: string;

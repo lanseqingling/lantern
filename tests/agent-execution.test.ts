@@ -102,7 +102,7 @@ test("storyboard entry editing and frame-image generation are distinct capabilit
 test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
   const first = semanticCapabilityCatalogManifest();
   const second = semanticCapabilityCatalogManifest();
-  assert.equal(first.revision, 4);
+  assert.equal(first.revision, 5);
   assert.equal(first.hash, second.hash);
   assert.match(first.hash, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => JSON.stringify(first));
@@ -130,6 +130,7 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "asset.image.archive",
     "asset.archive",
     "context.inspect_images",
+    "context.inspect_composition",
     "storyboard.edit_single_entry",
     "frame_image.generate_or_replace",
     "asset.generate_character_or_scene",
@@ -348,6 +349,42 @@ test("image inspection accepts only explicitly named current-page targets with f
     confidence: 0.97,
   });
   assert.deepEqual(route, { kind: "tool_call", capabilityId: "context.inspect_images", targetHandles: [target.handle] });
+});
+
+test("composition inspection accepts only visible presentation-unit handles", () => {
+  const pageTarget = {
+    handle: "current-page:1:unit",
+    type: "presentation_unit" as const,
+    label: "Page 01",
+    aliases: ["第1页"],
+    summary: "2 个画格",
+    pageId: "page-1",
+    pageLabel: "Page 01",
+    assetVersionIds: [],
+    dialogueIds: [],
+  };
+  const route = guardInteractionPlan({ ...baseInteractionInput, currentPageTargets: [pageTarget] }, {
+    outcome: "invoke_capability",
+    requestType: "operation",
+    goal: "分析当前页最终构图",
+    capabilityId: "context.inspect_composition",
+    targetHandles: [pageTarget.handle],
+    arguments: {},
+    evidenceHandles: [pageTarget.handle],
+    confidence: 0.98,
+  });
+  assert.deepEqual(route, { kind: "tool_call", capabilityId: "context.inspect_composition", targetHandles: [pageTarget.handle] });
+  const unknown = guardInteractionPlan({ ...baseInteractionInput, currentPageTargets: [pageTarget] }, {
+    outcome: "invoke_capability",
+    requestType: "operation",
+    goal: "分析其他页面",
+    capabilityId: "context.inspect_composition",
+    targetHandles: ["current-page:9:unit"],
+    arguments: {},
+    evidenceHandles: [],
+    confidence: 0.8,
+  });
+  assert.equal(unknown.kind, "decision");
 });
 
 test("character design discussion remains a normal answer without a separate asset mode", () => {

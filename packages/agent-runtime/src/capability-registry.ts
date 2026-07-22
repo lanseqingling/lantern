@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { compositionObservationSchema } from "./composition-observation";
 import { resourceCapabilities } from "./resource-capabilities";
 import type {
   AgentCapabilityActor,
@@ -20,6 +21,7 @@ export type {
 
 export const agentCapabilityIds = [
   "context.inspect_images",
+  "context.inspect_composition",
   "storyboard.edit_single_entry",
   "frame_image.generate_or_replace",
   "asset.generate_character_or_scene",
@@ -38,6 +40,10 @@ const imageObservationInputSchema = z.strictObject({
 const imageObservationOutputSchema = z.strictObject({
   type: z.literal("visual_evidence"),
   content: z.string().min(1),
+});
+
+const compositionObservationInputSchema = z.strictObject({
+  targetHandles: z.array(z.string().min(1).max(4096)).min(1).max(2),
 });
 
 const taskOutputSchema = z.strictObject({
@@ -72,6 +78,25 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     confirmation: "none",
     userMessage: "",
     missingTargetMessage: "请先添加图片，或明确说出当前页中包含图片的画格或分镜。",
+  },
+  {
+    id: "context.inspect_composition",
+    version: 1,
+    execution: "synchronous",
+    description: "读取当前可见的一个或两个 PresentationUnit，返回绑定 WorkingRevision 的结构化场景投影和最终合成画面 Observation。仅当回答、空间判断或一个已开放 Capability 的参数判断依赖画格、图片、气泡、文字、裁切、遮挡、层级、留白或阅读关系时调用；观察不授予 LCD 编辑能力，不读取整话，不创建任务、候选或变更。",
+    inputSchema: compositionObservationInputSchema,
+    outputSchema: compositionObservationSchema,
+    target: { required: true, types: ["presentation_unit"], min: 1, max: 2 },
+    contextProfile: "composition_observation",
+    effect: "observe",
+    executionModes: ["lantern_managed"],
+    risk: "low",
+    agentAccess: { internal: "observe", external: "observe" },
+    idempotency: "optional",
+    domainCapabilities: [],
+    confirmation: "none",
+    userMessage: "",
+    missingTargetMessage: "请先打开要分析的漫画页或滚动段。",
   },
   {
     id: "storyboard.edit_single_entry",
@@ -137,7 +162,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 4;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 5;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });

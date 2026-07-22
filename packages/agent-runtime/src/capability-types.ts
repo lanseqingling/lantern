@@ -6,7 +6,7 @@ export type AgentCapabilityEffect = "observe" | "resource_mutation" | "direct_ch
 export type AgentCapabilityRisk = "low" | "medium" | "high";
 export type AgentCapabilityAccess = "disabled" | "observe" | "preview" | "execute";
 export type AgentCapabilityActor = "internal" | "external";
-export type AgentCapabilityContextProfile = "visual_observation" | "single_frame_generation" | "asset_generation";
+export type AgentCapabilityContextProfile = "visual_observation" | "composition_observation" | "single_frame_generation" | "asset_generation";
 
 export type SemanticCapabilityManifest = {
   id: string;

@@ -34,6 +34,17 @@ function buildPageTargetCatalog(page: ComicPage, storyboardBeats: StoryboardBeat
       : []);
   const frameDialogues = (frameId: string) => balloons.flatMap((balloon) => balloon.comicFrameId === frameId ? [balloon.dialogueId] : []);
   return [
+    {
+      handle: `${handlePrefix}:unit`,
+      type: "presentation_unit" as const,
+      label: pageLabel,
+      aliases: compactAliases([pageLabel, page.name, page.kind === "vertical_segment" ? `滚动段${page.pageIndex + 1}` : `第${page.pageIndex + 1}页`]),
+      summary: `${frames.length} 个画格、${images.length} 张图片、${balloons.length} 个气泡、${texts.length} 个文字元素`,
+      pageId: page.id,
+      pageLabel,
+      assetVersionIds: [...new Set(images.map((element) => element.assetVersionId))].slice(0, 12),
+      dialogueIds: balloons.map((balloon) => balloon.dialogueId).slice(0, 12),
+    },
     ...frames.map((frame, index) => {
       const label = frameLabels.get(frame.id) ?? numberedLabel("画格", index + 1);
       const storyboardBeat = storyboardBeatById.get(frame.linkedStoryboardBeatId);
@@ -383,8 +394,12 @@ export async function buildAgentContext(request: ContextRequest) {
   }));
   const primaryPageDialogueIds = new Set(primaryPageElements.flatMap((element) => "dialogueId" in element && typeof element.dialogueId === "string" ? [element.dialogueId] : []));
   const targetPages = interactionPlanning && visiblePages.length ? visiblePages : currentPage ? [currentPage] : [];
-  const allCurrentPageTargets = targetPages.flatMap((page, index) => buildPageTargetCatalog(page, storyboardBeats, index + 1));
-  const currentPageTargets = allCurrentPageTargets.slice(0, 64);
+  const pageTargetCatalogs = targetPages.map((page, index) => buildPageTargetCatalog(page, storyboardBeats, index + 1));
+  const allCurrentPageTargets = pageTargetCatalogs.flat();
+  const currentPageTargets = [
+    ...allCurrentPageTargets.filter((target) => target.type === "presentation_unit"),
+    ...allCurrentPageTargets.filter((target) => target.type !== "presentation_unit"),
+  ].slice(0, 64);
   const includeCurrentPageLcd = request.taskType === "storyboard" || request.taskType === "frame_image_generate" || interactionPlanning;
   const contextStoryboardBeats = request.taskType === "asset_parse" ? [] : localStoryboardBeats;
   const omittedContext = [

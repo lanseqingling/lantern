@@ -3,11 +3,12 @@ import { MessageKind, MessageRole, type Prisma } from "@prisma/client";
 import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
 import { runAgentLoop, type AgentPlanner, type AgentTool } from "./agent-loop";
+import { compositionObservationSchema, loadWorkingCompositionObservation } from "./composition-observation";
 import { buildAgentContext } from "./context-builder";
 import { planInteraction, type InteractionPlanningTrace } from "./orchestrator";
 import type { InteractionDecision, WorkspaceReference } from "./schemas";
 import { getActiveConversationTask, invokeTaskCapability, type CreateTaskInput } from "./task-service";
-import { analyzeImageVersions } from "./visual-context";
+import { analyzeImageBuffers, analyzeImageVersions } from "./visual-context";
 
 export type AgentImageAttachment = {
   assetId: string;
@@ -243,6 +244,49 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
       return { output: { type: "visual_evidence", content: observation }, continueLoop: true };
     },
   };
+  const inspectComposition: AgentTool = {
+    name: "context.inspect_composition",
+    async execute(rawInput) {
+      const toolInput = rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
+        ? rawInput as Record<string, unknown>
+        : {};
+      const requestedHandles = new Set(Array.isArray(toolInput.targetHandles)
+        ? toolInput.targetHandles.filter((handle): handle is string => typeof handle === "string")
+        : []);
+      const unitIds = planningSnapshot.currentPageTargets
+        .filter((target) => target.type === "presentation_unit" && requestedHandles.has(target.handle))
+        .map((target) => target.pageId)
+        .slice(0, 2);
+      if (!unitIds.length) throw new AppError("invalid_composition_context", "没有找到可观察的当前页面。", 422);
+      const composition = await loadWorkingCompositionObservation({
+        ownerUserId: input.ownerUserId,
+        projectId: conversation.projectId,
+        unitIds,
+        expectedRevision: planningSnapshot.workingRevision,
+      });
+      const content = await analyzeImageBuffers({
+        message: `用户本轮目标：${input.message}\n请分析最终合成后的漫画画面，重点描述与目标相关的画格关系、人物与图片构图、裁切、气泡和文字位置、遮挡、层级、留白及阅读顺序。只陈述画面中可见的事实，不补写画面外剧情。`,
+        images: [{ bytes: composition.image.bytes, contentType: composition.image.mimeType }],
+      });
+      if (!content) throw new AppError("invalid_composition_context", "没有生成可用的最终画面 Observation。", 422);
+      return {
+        output: compositionObservationSchema.parse({
+          type: "composition_evidence",
+          projectId: composition.projectId,
+          baseRevision: composition.baseRevision,
+          unitIds: composition.structure.units.map((unit) => unit.id),
+          content,
+          image: {
+            mimeType: composition.image.mimeType,
+            width: composition.image.width,
+            height: composition.image.height,
+          },
+          structure: composition.structure,
+        }),
+        continueLoop: true,
+      };
+    },
+  };
   const startGenerationTask: AgentTool = {
     name: "start_generation_task",
     async execute(rawInput) {
@@ -272,7 +316,7 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
       turnId: userMessage.id,
       context,
       planner,
-      tools: [inspectImages, presentInteraction, startGenerationTask],
+      tools: [inspectImages, inspectComposition, presentInteraction, startGenerationTask],
       maxSteps: 4,
       checkpointStore: {
         async save(checkpoint) {

@@ -130,7 +130,7 @@ MCP server instructions 只保留所有工具共同需要的硬规则：
 
 工具按领域形成以下能力面：
 
-- **发现与上下文**：漫画、章节和 Project 列表，能力目录，按需的有限上下文与图片 Observation。
+- **发现与上下文**：漫画、章节和 Project 列表，能力目录，按需的有限上下文、固定图片 Observation，以及绑定同一 WorkingRevision 的 LCD 结构与最终合成画面 Observation。
 - **漫画与一话管理**：创建、读取、更新、复制和归档 Comic；创建、更新和归档 Chapter，并返回对应 Project。
 - **资产与设定**：管理故事概要、世界设定、视觉风格、角色、场景、道具、参考图和固定 AssetVersion。
 - **页面与展示结构**：创建、命名、复制、排序和删除页面或滚动段，以及受控的合并、拆分和跨页结构。
@@ -148,11 +148,11 @@ http://localhost:{webPort}/comics/{comicId}/chapters/{chapterId}?pageId={unitId}
 
 引用解析器校验当前 owner、资源状态和 Comic → Chapter → Project 关系，返回规范 URI、稳定 ID、显示名称、Project 和适用的 working revision。浏览器链接中的层级不一致、资源不存在或不属于当前用户时直接失败，不能回退为标题搜索或列表猜测。Resource Reference 不是授权 token；MCP 凭证决定调用身份，引用只决定目标资源。
 
-LCD 编辑使用解析后的明确 Project、expected working revision 和受控目标引用；上下文 handle 用于安全解析从作品上下文发现的具体对象，不替代稳定 Resource Reference，也不要求所有调用维持 MCP 会话内状态。MCP Resources 可以用规范 URI 提供读取，所有写入仍必须通过语义 Capability tool。
+LCD 编辑使用解析后的明确 Project、expected working revision 和受控目标引用；上下文 handle 用于安全解析从作品上下文发现的具体对象，不替代稳定 Resource Reference，也不要求所有调用维持 MCP 会话内状态。涉及构图、裁切、气泡、遮挡、层级、留白或阅读关系时，Agent 使用一个或两个 `presentation_unit` handle 同时取得解析后的场景结构与最终合成 PNG；结构中的 frame 和 element handle 可以继续作为后续能力目标。合成图复用预览与导出的渲染事实源，不单独实现外置 Agent 渲染规则。MCP Resources 可以用规范 URI 提供读取，所有写入仍必须通过语义 Capability tool。
 
 ### 5.3 统一结果
 
-工具返回紧凑的结构化结果，不返回整部作品、数据库记录、长期资源地址或大段 base64。通用结果包含适用字段：
+工具返回紧凑的结构化结果，不返回整部作品、数据库记录、长期资源地址或放入 JSON 的大段 base64。最终合成画面使用 MCP 原生 image content 传输，结构化结果只保留尺寸、revision 和场景投影。通用结果包含适用字段：
 
 ```ts
 type ExternalToolResult<T> = {
@@ -227,7 +227,7 @@ Skill 不跟随每个工具版本发布。只有产品对象语义、通用作�
 
 ## 8. 交付阶段
 
-本地 Streamable HTTP MCP、独立凭证、Project/Context/Capability/Image 工具、Resource Reference、同步作品管理能力、应用级 Skill 和统一安装命令构成接入基线。能力按以下三个阶段交付。
+本地 Streamable HTTP MCP、独立凭证、Project/Context/Capability/Image/Composition 工具、Resource Reference、同步作品管理能力、应用级 Skill 和统一安装命令构成接入基线。能力按以下三个阶段交付。
 
 ### 阶段一：作品与资产管理（已完成）
 
@@ -238,6 +238,7 @@ Skill 不跟随每个工具版本发布。只有产品对象语义、通用作�
 
 ### 阶段二：LCD 编辑与编排（下一阶段）
 
+- LCD 结构与最终画面 Observation 已接入内置 Agent 和 MCP：一个或两个可见 PresentationUnit 共用同一 WorkingRevision、受控目标 handle 和正式渲染语义，作为只读理解和后续视觉编辑的前置证据；观察本身不开放任何 LCD 写入。
 - 按页面、画格、图片、气泡文字和覆盖编排分组投影现有 Editor Capability。
 - 确定性低风险编辑使用 expected revision 直接产生可撤销 ChangeSet；结构、多对象和高风险编排形成 Candidate。
 - 补齐领域 Skill references，使 Agent 正确理解 PresentationUnit、PageSurface、Frame、局部坐标、裁切、图层和阅读顺序。
@@ -253,6 +254,7 @@ Skill 不跟随每个工具版本发布。只有产品对象语义、通用作�
 ## 9. 首个能力版本验收
 
 - 兼容 Agent 能发现当前开放的领域能力，不需要记忆 HTTP API 或底层命令。
+- Agent 能通过当前页面 handle 同时取得绑定同一 WorkingRevision 的场景结构和最终合成图，并用返回的 frame、element handle 准确引用画面对象。
 - Agent 能创建或更新漫画和一话，并把已确认的角色、场景或世界设定保存到正确作品范围。
 - Agent 能管理多页结构，并完成画格、图片裁切、气泡或旁白中的代表性原子编辑。
 - 直接编辑产生一次可撤销 WorkingRevision；刷新工作台后可见，预览和导出读取相同结果。

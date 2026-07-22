@@ -49,7 +49,7 @@ const currentComicFrameSchema = z.object({
 
 export const currentPageTargetSchema = z.object({
   handle: z.string().min(1),
-  type: z.enum(["comic_frame", "storyboard_beat", "speech_balloon", "image", "text"]),
+  type: z.enum(["presentation_unit", "comic_frame", "storyboard_beat", "speech_balloon", "image", "text"]),
   label: z.string().min(1).max(120),
   aliases: z.array(z.string().min(1).max(120)).max(8).default([]),
   summary: z.string().max(600).default(""),

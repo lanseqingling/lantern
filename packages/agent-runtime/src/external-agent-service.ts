@@ -31,6 +31,7 @@ import {
   updateAsset,
 } from "@lantern/server/asset-library-service";
 import { resolveResourceReference, resourceReference } from "@lantern/server/resource-reference-service";
+import { compositionObservationSchema, compositionStructureSchema, loadWorkingCompositionObservation } from "./composition-observation";
 import { buildAgentContext } from "./context-builder";
 import {
   assertAgentCapabilityAccess,
@@ -45,6 +46,7 @@ import { analyzeImageVersions } from "./visual-context";
 
 export const externalContextProfiles = [
   "visual_observation",
+  "composition_observation",
   "single_frame_generation",
   "asset_generation",
 ] as const satisfies readonly AgentCapabilityContextProfile[];
@@ -55,7 +57,8 @@ export const externalContextGetInputSchema = z.strictObject({
   projectId: z.string().min(1),
   profile: z.enum(externalContextProfiles).default("visual_observation"),
   pageId: z.string().min(1).optional(),
-});
+  pageIds: z.array(z.string().min(1)).min(1).max(2).optional(),
+}).refine((value) => !(value.pageId && value.pageIds), { message: "pageId 与 pageIds 只能提供一种。" });
 
 export const externalCapabilitiesListInputSchema = z.strictObject({});
 
@@ -63,6 +66,11 @@ export const externalImagesInspectInputSchema = z.strictObject({
   projectId: z.string().min(1),
   targetHandles: z.array(z.string().min(1).max(4096)).min(1).max(3),
   instruction: z.string().trim().min(1).max(2000).optional(),
+});
+
+export const externalCompositionInspectInputSchema = z.strictObject({
+  projectId: z.string().min(1),
+  pageHandles: z.array(z.string().min(1).max(4096)).min(1).max(2),
 });
 
 const externalTargetHandlePayloadSchema = z.strictObject({
@@ -148,6 +156,8 @@ export const externalImagesInspectOutputSchema = z.object({
   observation: z.object({ type: z.literal("visual_evidence"), content: z.string() }),
   evidence: z.array(z.object({ handle: z.string(), assetVersionIds: z.array(z.string()) })),
 });
+
+export const externalCompositionInspectOutputSchema = compositionObservationSchema;
 
 const handlePrefix = "lctx1";
 const handleAdditionalData = Buffer.from("lantern-context-handle-v1", "utf8");
@@ -511,6 +521,7 @@ export async function getExternalAgentContext(
   options: { now?: number; lifetimeMs?: number } = {},
 ) {
   const parsed = externalContextGetInputSchema.parse(input);
+  const requestedPageIds = parsed.pageIds ?? (parsed.pageId ? [parsed.pageId] : []);
   const contextRequest = contextRequestForProfile(parsed.profile);
   const context = await buildAgentContext({
     ownerUserId,
@@ -518,11 +529,11 @@ export async function getExternalAgentContext(
     taskType: contextRequest.taskType,
     instruction: "Read bounded context for an external Agent.",
     scope: contextRequest.scope,
-    currentPageId: parsed.pageId,
-    visiblePageIds: parsed.pageId ? [parsed.pageId] : undefined,
-    selection: { type: "none", ...(parsed.pageId ? { pageId: parsed.pageId } : {}) },
+    currentPageId: requestedPageIds[0],
+    visiblePageIds: requestedPageIds.length ? requestedPageIds : undefined,
+    selection: { type: "none", ...(requestedPageIds[0] ? { pageId: requestedPageIds[0] } : {}) },
   });
-  if (parsed.pageId && context.currentPage?.id !== parsed.pageId) {
+  if (requestedPageIds.length && requestedPageIds.some((pageId) => !context.currentView?.unitIds.includes(pageId))) {
     throw new AppError("not_found", "目标页面不存在或不属于当前创作空间。", 404);
   }
   const now = options.now ?? Date.now();
@@ -636,4 +647,80 @@ export async function inspectExternalAgentImages(
     observation: { type: "visual_evidence", content },
     evidence,
   });
+}
+
+export async function inspectExternalAgentComposition(
+  ownerUserId: string,
+  input: z.input<typeof externalCompositionInspectInputSchema>,
+) {
+  const parsed = externalCompositionInspectInputSchema.parse(input);
+  const resolved = await resolveContextTargetHandles(ownerUserId, parsed.projectId, parsed.pageHandles);
+  if (resolved.decoded.some(({ payload }) => payload.target.type !== "presentation_unit" || !payload.target.pageId)) {
+    throw new AppError("invalid_composition_context", "最终画面 Observation 只能使用页面或滚动段 handle。", 422);
+  }
+  const unitIds = resolved.decoded.map(({ payload }) => payload.target.pageId!);
+  const composition = await loadWorkingCompositionObservation({
+    ownerUserId,
+    projectId: parsed.projectId,
+    unitIds,
+    expectedRevision: resolved.workingRevision,
+  });
+  const pageHandleById = new Map(resolved.decoded.map(({ handle, payload }) => [payload.target.pageId!, handle]));
+  const expiresAt = Math.min(...resolved.decoded.map(({ payload }) => payload.expiresAt));
+  const createHandle = (target: ExternalTargetHandlePayload["target"]) => encodeContextTargetHandle({
+    version: 1,
+    ownerUserId,
+    projectId: parsed.projectId,
+    baseRevision: resolved.workingRevision,
+    expiresAt,
+    nonce: randomBytes(12).toString("base64url"),
+    target,
+  });
+  const structure = compositionStructureSchema.parse({
+    ...composition.structure,
+    units: composition.structure.units.map((unit) => ({
+      ...unit,
+      handle: pageHandleById.get(unit.id),
+      frames: unit.frames.map((frame) => {
+        const frameElements = unit.elements.filter((element) => element.frameId === frame.id);
+        return {
+          ...frame,
+          handle: createHandle({
+            type: "comic_frame",
+            pageId: unit.id,
+            elementId: frame.id,
+            frameId: frame.id,
+            assetVersionIds: [...new Set(frameElements.flatMap((element) => [element.assetVersionId, element.appearanceAssetVersionId].filter((id): id is string => Boolean(id))))].slice(0, 12),
+            dialogueIds: [...new Set(frameElements.flatMap((element) => element.dialogueId ? [element.dialogueId] : []))].slice(0, 12),
+          }),
+        };
+      }),
+      elements: unit.elements.map((element) => ({
+        ...element,
+        handle: createHandle({
+          type: element.kind === "balloon" ? "speech_balloon" : element.kind,
+          pageId: unit.id,
+          elementId: element.id,
+          frameId: element.frameId,
+          assetVersionIds: [element.assetVersionId, element.appearanceAssetVersionId].filter((id): id is string => Boolean(id)),
+          dialogueIds: element.dialogueId ? [element.dialogueId] : [],
+        }),
+      })),
+    })),
+  });
+  return {
+    output: externalCompositionInspectOutputSchema.parse({
+      type: "composition_evidence",
+      projectId: composition.projectId,
+      baseRevision: composition.baseRevision,
+      unitIds: composition.structure.units.map((unit) => unit.id),
+      image: {
+        mimeType: composition.image.mimeType,
+        width: composition.image.width,
+        height: composition.image.height,
+      },
+      structure,
+    }),
+    image: composition.image,
+  };
 }

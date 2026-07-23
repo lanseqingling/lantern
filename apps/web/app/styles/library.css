@@ -51,6 +51,7 @@
   .object-inspector { right: 8px; }
   .object-toolbar { left: 8px; }
   .comic-library { grid-template-columns: 1fr; }
+  .chapter-list { grid-template-columns: 1fr; }
   .chapter-hero { grid-template-columns: 1fr; }
   .chapter-cover-action, .chapter-cover-placeholder { height: 260px; }
 }
@@ -151,26 +152,19 @@
 .asset-studio-entry:hover { background: rgba(236,249,247,.92); }
 .asset-studio-entry svg { width: 12px; height: 12px; }
 .asset-upload-button { margin-left: 0; }
-.comic-asset-studio-page { position: relative; min-height: 100vh; padding: 32px clamp(22px, 6vw, 92px) 80px; background-color: #f7fbfa; background-image: radial-gradient(circle at 78% 7%, rgba(242,184,75,.13), transparent 23%), radial-gradient(circle at 12% 22%, rgba(100,200,200,.11), transparent 22%), radial-gradient(circle at 1px 1px, var(--dot) 1.2px, transparent 1.4px); background-size: auto, auto, 24px 24px; color: #26363b; }
-.asset-studio-page-head { width: min(1280px, 100%); margin: 0 auto 28px; }
-.asset-studio-page-head > button { position: fixed; z-index: 90; top: 32px; left: clamp(16px, 2vw, 32px); display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.84); border-radius: 14px; background: rgba(255,255,255,.78); color: var(--cyan-deep); box-shadow: 0 8px 22px rgba(23,32,38,.06); cursor: pointer; backdrop-filter: blur(14px); }
-.asset-studio-page-head > button:hover { background: #fff; }
-.asset-studio-page-head > button svg { width: 19px; }
-.asset-studio-page-head small { color: var(--cyan-deep); font-size: 9px; font-weight: 900; letter-spacing: .14em; }
-.asset-studio-page-head h1 { margin: 3px 0 2px; font-size: 28px; letter-spacing: -.05em; }
-.asset-studio-page-title { display: flex; min-height: 46px; align-items: center; gap: 13px; }
-.asset-studio-page-title > span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 15px; background: var(--cyan-deep); color: #fff; box-shadow: 0 10px 24px rgba(36,127,130,.16); }
-.asset-studio-page-title > span svg { width: 21px; height: 21px; }
-.comic-brief-section { width: min(1280px, 100%); margin: 0 auto 30px; }
+.comic-asset-studio-page { position: relative; min-height: 100vh; padding: 28px var(--app-page-gutter) 80px; color: #26363b; }
+.asset-studio-page-head { margin-bottom: 28px; }
+.asset-studio-page-title { padding-left: 16px; }
+.asset-studio-back, .asset-studio-global-settings { position: fixed; z-index: 90; top: var(--app-page-corner-top); }
+.asset-studio-back { left: var(--app-page-corner-inset); }
+.asset-studio-global-settings { right: var(--app-page-corner-inset); }
+.comic-brief-section { margin-bottom: 30px; }
 .comic-brief-section > header { display: flex; align-items: end; justify-content: space-between; gap: 22px; margin-bottom: 12px; }
 .comic-brief-section > header small { color: var(--cyan-deep); font-size: 8px; font-weight: 900; letter-spacing: .13em; }
 .comic-brief-section > header h2 { margin: 2px 0 0; color: #34464c; font-size: 14px; letter-spacing: -.02em; }
 .comic-brief-section > header p { max-width: 480px; margin: 0; color: var(--muted); font-size: 9px; font-weight: 700; text-align: right; }
 .comic-brief-rail { display: flex; flex-wrap: nowrap; gap: 13px; overflow-x: auto; padding: 2px 2px 14px; scroll-padding-inline: 2px; scroll-snap-type: x proximity; scrollbar-color: rgba(36,127,130,.26) transparent; scrollbar-width: thin; }
 .comic-brief-card { position: relative; display: grid; min-height: 132px; flex: 0 0 clamp(280px, calc((100% - 26px) / 3), 410px); grid-template-columns: 38px minmax(0, 1fr); align-content: start; gap: 13px; overflow: hidden; border: 1px solid rgba(255,255,255,.88); border-radius: 18px; background: #fff; color: #34464c; padding: 17px 16px 16px; box-shadow: 0 4px 14px rgba(23,32,38,.025); font: inherit; text-align: left; scroll-snap-align: start; cursor: pointer; transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
-.comic-brief-card::after { content: ""; position: absolute; right: -34px; bottom: -48px; width: 118px; height: 118px; border-radius: 50%; background: rgba(100,200,200,.1); pointer-events: none; }
-.comic-brief-card-world::after { background: rgba(98,167,176,.12); }
-.comic-brief-card-style::after { background: rgba(242,184,75,.15); }
 .comic-brief-card:hover, .comic-brief-card:focus-visible { border-color: rgba(36,127,130,.28); outline: 0; box-shadow: 0 8px 20px rgba(23,32,38,.045); transform: translateY(-2px); }
 .comic-brief-card-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 13px; background: var(--cyan-soft); color: var(--cyan-deep); }
 .comic-brief-card-world .comic-brief-card-icon { background: rgba(98,167,176,.14); }
@@ -182,7 +176,7 @@
 .comic-brief-card-value { display: -webkit-box; overflow: hidden; margin-top: 8px; color: #718287; font-size: 9px; font-weight: 650; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .comic-brief-card-skeleton { cursor: default; background: linear-gradient(100deg, rgba(255,255,255,.58), rgba(236,249,247,.9), rgba(255,255,255,.58)); background-size: 220% 100%; animation: comic-brief-shimmer 1.2s ease-in-out infinite; }
 .comic-brief-card-skeleton:hover { border-color: rgba(255,255,255,.88); box-shadow: 0 4px 14px rgba(23,32,38,.025); transform: none; }
-.comic-asset-library-section { width: min(1280px, 100%); margin: 0 auto; }
+.comic-asset-library-section { margin-bottom: 0; }
 .comic-asset-library-section > header { margin-bottom: 12px; }
 .comic-asset-library-section > header small { color: var(--cyan-deep); font-size: 8px; font-weight: 900; letter-spacing: .13em; }
 .comic-asset-library-section > header h2 { margin: 2px 0 0; color: #34464c; font-size: 14px; letter-spacing: -.02em; }
@@ -361,9 +355,10 @@
   .asset-detail-copy { flex: none; order: 2; overflow: visible; padding: 4px 3px 18px; }
 }
 @media (max-width: 600px) {
-  .comic-asset-studio-page { padding: 22px 16px 80px; }
+  .comic-asset-studio-page { padding: 20px var(--app-page-gutter) 80px; }
   .asset-studio-page-head { padding-top: 66px; }
-  .asset-studio-page-head > button { top: 22px; left: 16px; }
+  .asset-studio-page-title { padding-left: 0; }
+  .asset-studio-back, .asset-studio-global-settings { top: var(--app-page-corner-top); }
   .comic-brief-section > header { align-items: start; flex-direction: column; gap: 4px; }
   .comic-brief-section > header p { text-align: left; }
   .comic-brief-card { min-height: 142px; flex-basis: min(84vw, 330px); }

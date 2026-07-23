@@ -123,14 +123,13 @@ export function SettingsClient() {
   };
 
   return (
-    <main className="settings-page">
-      <div className="settings-ambient" />
+    <main className="settings-page app-surface">
       <header className="settings-header">
-        <button type="button" className="settings-back" aria-label="返回" onClick={() => router.push(returnTo)}><Icon name="collapse" /></button>
+        <button type="button" className="settings-back app-page-corner-button" aria-label="返回" onClick={() => router.push(returnTo)}><Icon name="collapse" /></button>
       </header>
 
-      <section className="settings-shell">
-        <div className="settings-title">
+      <section className="settings-shell app-page-narrow">
+        <div className="settings-title app-page-title">
           <span><Icon name="settings" /></span>
           <div><small>GLOBAL SETTINGS</small><h1>全局设置</h1></div>
         </div>

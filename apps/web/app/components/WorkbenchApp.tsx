@@ -122,6 +122,7 @@ type StoryboardFrameRow = {
   beat?: PersistedWorkbench["fixture"]["storyboardBeats"][number];
   label: string;
 };
+
 type LeftView = "assets" | "storyboard" | "pages";
 type PageEditorMode = "edit" | "delete";
 type PageStructureAction = "merge_pages" | "split_spread" | "merge_segments" | "split_segments";
@@ -331,6 +332,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [agentScrollRequest, setAgentScrollRequest] = useState(0);
   const [leftView, setLeftView] = useState<LeftView>("assets");
   const [assetMenuId, setAssetMenuId] = useState<string | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [assetMenuPosition, setAssetMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [assetListOrder, setAssetListOrder] = useState<string[]>([]);
   const [assetRenameId, setAssetRenameId] = useState<string | null>(null);
@@ -1765,17 +1767,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const handleComicObjectDoubleClick = (target: Selection) => {
     const element = elementForSelection(target);
     if (!target.pageId || !element) return;
+    if (element.type === "image") {
+      handleCanvasSelection(target);
+      openCanvasImageViewer(target);
+      return;
+    }
     const nextTarget: Selection | undefined = element.type === "comic_frame"
       ? target
       : element.type === "speech_balloon"
         ? target
         : element.type === "text"
           ? target
-        : element.type === "image" && element.location.space === "overlay"
-          ? target
-          : element.type === "image" && element.comicFrameId
-            ? { type: "comic_frame", id: element.comicFrameId, pageId: target.pageId, label: "当前画格" }
-            : undefined;
+          : undefined;
     if (!nextTarget) return;
     closeFloatingMenus();
     setInspectorOpen(false);
@@ -2947,7 +2950,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
-    if (canvasMode !== "free" || isFloatingCanvasControl(event.target)) return;
+    if (canvasMode !== "free" || objectTarget || isFloatingCanvasControl(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     panRef.current = {
@@ -3097,7 +3100,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       return;
     }
     if (multiSelection) return;
-    if (canvasMode === "focus") setSelection(noSelection);
+    if (canvasMode === "focus") {
+      setSelectedAssetId(null);
+      setSelection(noSelection);
+    }
   };
 
   const handleWorkbenchPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
@@ -3301,6 +3307,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
   const handleCanvasSelection = (next: Selection) => {
     if (multiSelection) return;
+    setSelectedAssetId(null);
     const selectedPageIndex = next.pageId ? workingPages.findIndex((item) => item.id === next.pageId) : -1;
     if (selectedPageIndex >= 0 && selectedPageIndex !== state.currentPageIndex) setCurrentComicPage(selectedPageIndex);
     setSelection(next);
@@ -3312,6 +3319,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (element?.linkedStoryboardBeatId) setEditDraft({});
   };
   const canvasReferences = state.fixture.references.filter(isCanvasReference);
+  useEffect(() => {
+    if (selection.type === "reference_card") {
+      const reference = state.fixture.references.find((item) => item.id === selection.id);
+      setSelectedAssetId(reference?.assetId ?? reference?.localAssetId ?? null);
+    } else if (selection.type !== "none") {
+      setSelectedAssetId(null);
+    }
+  }, [selection.id, selection.type, state.fixture.references]);
   // The sidebar is the asset library. Canvas objects are merely placements
   // linking back to these assets, so removing one never removes its row here.
   const canvasAssetLibrary = [...(state.assets ?? [])].sort((left, right) => {
@@ -3339,8 +3354,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const handleActiveAssetPlacement = () => {
     if (!activeAssetMenu) return;
     if (activeAssetPlacement) {
+      setSelectedAssetId(activeAssetMenu.id);
       setSelection({ type: "reference_card", id: activeAssetPlacement.id, label: activeAssetMenu.name });
-      setLeftOpen(false);
+      setCreationSpaceOpen(false);
     } else {
       void placeLibraryAssetOnCanvas(activeAssetMenu);
     }
@@ -3657,6 +3673,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const projectSubtitle = `${workbenchMeta.comicTitle} · ${workbenchMeta.chapterTitle} · r${state.fixture.working.revision}${runtimeAdapter === "server" ? " · 已持久化" : runtimeAdapter === "demo" ? " · 离线演示" : ""}`;
+  const setCreationSpaceOpen = (open: boolean) => {
+    setLeftOpen(open);
+    if (!open) setProjectMenu(false);
+  };
 
   if (hydrated && runtimeError) {
     return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>工作台暂时无法载入</h1><p>{runtimeError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
@@ -3670,10 +3690,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     <WorkbenchShell className={`mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <header className="project-chip" data-testid="project-chip">
+        <button className="project-back app-page-corner-button" type="button" aria-label="返回漫画" onClick={() => router.push(`/comics/${comicId}`)}><Icon name="collapse" /></button>
         <button className="project-main" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label="打开项目菜单">
-          <span className="lantern-logo"><i /></span>
-          <span><strong>Lantern AI</strong><small className="project-subtitle" data-full-text={projectSubtitle} tabIndex={0}><span>{projectSubtitle}</span></small></span>
-          <Icon name="hamburger" />
+          <span className="project-main-card">
+            <span><strong>Lantern AI</strong><small className="project-subtitle" data-full-text={projectSubtitle} tabIndex={0}><span>{projectSubtitle}</span></small></span>
+            <Icon name="hamburger" />
+          </span>
         </button>
         {projectMenu ? (
           <div className="project-menu" role="menu">
@@ -3698,7 +3720,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       <CreationDrawer className={leftOpen ? "open" : "closed"} aria-label="创作空间">
         <div className="drawer-stack">
         <div className="drawer-top-card" data-tour-id="creation-space">
-        <div className="drawer-heading"><strong>创作空间</strong><button type="button" onClick={() => setLeftOpen(false)} aria-label="收起创作空间"><Icon name="collapse" /></button></div>
+        <div className="drawer-heading"><strong>创作空间</strong><button type="button" onClick={() => setCreationSpaceOpen(false)} aria-label="收起创作空间"><Icon name="collapse" /></button></div>
         <nav className="drawer-tabs" aria-label="创作空间分类">
           {([['assets', '资产'], ['storyboard', '分镜']] as Array<[LeftView, string]>).map(([value, label]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => setLeftView(value)}>{label}</button>)}
         </nav>
@@ -3711,8 +3733,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
               const thumbnail = canvasAssetThumbnail(asset);
               const kindTag = assetKindTag(asset.kind);
               const thumbnailNode = <span className="asset-row-thumbnail">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} /> : <Icon name="asset" />}</span>;
-              return <div className={`asset-row ${placement && selection.id === placement.id ? "active" : ""}`} key={asset.id}>
-                {assetRenameId === asset.id ? <form className="asset-row-rename" onSubmit={(event) => { event.preventDefault(); renameAssetInList(asset); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><input autoFocus value={assetRenameDraft} onChange={(event) => setAssetRenameDraft(event.target.value)} maxLength={120}/><button type="submit">保存</button><button type="button" aria-label="取消重命名" onClick={() => { setAssetRenameId(null); setAssetRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="asset-row-main" onClick={() => { if (!thumbnail) { setToast(`「${asset.name}」还没有可查看的图片`); return; } closeFloatingMenus(); setImageViewer({ images: [{ id: asset.id, src: thumbnail, alt: asset.name }] }); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><b>{asset.name}</b></button>
+              return <div className={`asset-row ${selectedAssetId === asset.id ? "active" : ""}`} key={asset.id}>
+                {assetRenameId === asset.id ? <form className="asset-row-rename" onSubmit={(event) => { event.preventDefault(); renameAssetInList(asset); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><input autoFocus value={assetRenameDraft} onChange={(event) => setAssetRenameDraft(event.target.value)} maxLength={120}/><button type="submit">保存</button><button type="button" aria-label="取消重命名" onClick={() => { setAssetRenameId(null); setAssetRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="asset-row-main" onClick={() => { closeFloatingMenus(); setSelectedAssetId(asset.id); setSelection(placement ? { type: "reference_card", id: placement.id, label: asset.name } : noSelection); setScope("仅图片"); }} onDoubleClick={() => { if (!thumbnail) { setToast(`「${asset.name}」还没有可查看的图片`); return; } setImageViewer({ images: [{ id: asset.id, src: thumbnail, alt: asset.name }] }); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><b>{asset.name}</b></button>
                 <button className="asset-more" type="button" aria-label={`${asset.name}更多选项`} onClick={(event) => { const workbench = event.currentTarget.closest<HTMLElement>(".workbench"); const button = event.currentTarget.getBoundingClientRect(); const workbenchRect = workbench?.getBoundingClientRect(); closeFloatingMenus("asset"); setAssetMenuPosition({ x: button.right - (workbenchRect?.left ?? 0) + 16, y: button.top - (workbenchRect?.top ?? 0) - 4 }); setAssetMenuId((id) => id === asset.id ? null : asset.id); }}><Icon name="moreVertical" /></button></>}
               </div>;
             })}
@@ -3767,7 +3789,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </section>
         </div>
       </CreationDrawer>
-      {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setLeftOpen(true)} aria-label="展开创作流"><Icon name="expand" /></button> : null}
+      {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setCreationSpaceOpen(true)} aria-label="展开创作流"><Icon name="expand" /></button> : null}
       {activeAssetMenu && assetMenuPosition ? (() => {
         const visibleInAssetSpace = isAssetVisibleInAssetSpace(activeAssetMenu);
         return <FloatingMenu className="asset-reference-menu-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }}>
@@ -3844,12 +3866,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         onWheel={handleCanvasWheel}
         onClickCapture={(event) => {
           if (canvasMode !== "free" || isFloatingCanvasControl(event.target)) return;
+          const target = event.target instanceof Element ? event.target : null;
+          if (target?.closest("[data-element-id], .reference-card, button, input, textarea, select, [role='menu']")) return;
           event.stopPropagation();
         }}
         onClick={handleStageClick}
       >
         <div className="canvas-world" style={canvasWorldStyle}>
-          {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅图片"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动图片「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放图片「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} onView={() => { closeFloatingMenus(); setImageViewer({ images: canvasReferences.map((item) => ({ id: item.id, src: item.imageSrc, alt: item.name })), initialIndex: canvasReferences.findIndex((item) => item.id === reference.id), allowNavigation: true }); }} />)}
+          {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelectedAssetId(reference.assetId ?? reference.localAssetId ?? null); setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅图片"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动图片「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放图片「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} onView={() => { closeFloatingMenus(); setImageViewer({ images: canvasReferences.map((item) => ({ id: item.id, src: item.imageSrc, alt: item.name })), initialIndex: canvasReferences.findIndex((item) => item.id === reference.id), allowNavigation: true }); }} />)}
           <div ref={!isVerticalCanvas ? pageCanvasFitStageRef : undefined} className={`page-canvas-fit-stage ${isVerticalCanvas ? "vertical" : ""}`}>
             <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : showingSpread ? "spread" : ""} ${currentDisplayGroup?.trueSpread ? "true-spread" : ""}`} style={isVerticalCanvas ? verticalStageWrapStyle : pageCanvasStageStyle}>
               <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : "滚动段 01") : showingSpread ? `PAGES ${displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0")}`}</span>
@@ -3934,12 +3958,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />对白 {String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭对白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>对白<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>文字样式<CustomSelect ariaLabel="文字样式" className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>字号<NumberStepper ariaLabel="对话字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>边框粗细<NumberStepper ariaLabel="气泡边框粗细" step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
       {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />旁白 {String(selectedNarrationNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭旁白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>文字<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>字号<NumberStepper ariaLabel="旁白字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
 
-      <div className="canvas-global-actions" aria-label="全局入口"><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setLeftOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => router.push(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
+      <div className="canvas-global-actions" aria-label="全局入口"><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => router.push(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label="Agent 对话">
         <div className="agent-head">
           <div className="agent-head-actions"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label="打开当前画布的会话列表" aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><button type="button" aria-label="收起 Agent 工作区" onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
         </div>
-        {sessionDrawerOpen ? <SessionDrawer aria-label="当前画布会话"><header><div><small>当前画布</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label="新建会话" onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder="输入新对话名称" maxLength={80}/><button type="submit">创建</button><button type="button" aria-label="取消新建会话" onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="x" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit">保存</button><button type="button" aria-label="取消重命名" onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={`管理「${conversation.title}」`} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />重命名</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="trash" />删除</button></div> : null}</SessionDrawer> : null}
+        {sessionDrawerOpen ? <SessionDrawer aria-label="当前画布会话"><header><div><small>当前画布</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label="新建会话" onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder="输入新对话名称" maxLength={80}/><button type="submit" aria-label="创建会话"><Icon name="add" /></button><button type="button" aria-label="取消新建会话" onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="x" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit" aria-label="保存会话名称"><Icon name="save" /></button><button type="button" aria-label="取消重命名" onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={`管理「${conversation.title}」`} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />重命名</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="trash" />删除</button></div> : null}</SessionDrawer> : null}
         <div ref={agentMessagesRef} className="agent-messages" data-testid="agent-messages">
           {state.messages.map((message) => {
             const candidate = message.candidateId ? state.candidates.find((item) => item.id === message.candidateId) : undefined;

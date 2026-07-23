@@ -60,7 +60,8 @@ export function ReferenceCard({
   const [position, setPosition] = useState({ x: reference.x, y: reference.y });
   const [contextMenu, setContextMenu] = useState<{ left: number; top: number; layerMenu?: { left: number; top: number } } | null>(null);
   const cardRef = useRef<HTMLElement>(null);
-  const dragRef = useRef<{ originX: number; originY: number; startX: number; startY: number; latestX: number; latestY: number; moved: boolean; viewOnClick: boolean } | null>(null);
+  const dragRef = useRef<{ originX: number; originY: number; startX: number; startY: number; latestX: number; latestY: number; moved: boolean; viewEligible: boolean } | null>(null);
+  const lastViewClickRef = useRef<{ at: number; x: number; y: number } | null>(null);
   const suppressClickRef = useRef(false);
   const lastWheelAtRef = useRef(0);
   const zoomRef = useRef(zoom);
@@ -202,7 +203,7 @@ export function ReferenceCard({
           latestX: position.x,
           latestY: position.y,
           moved: false,
-          viewOnClick: target instanceof Element && Boolean(target.closest(".reference-image")) && !target.closest("button"),
+          viewEligible: target instanceof Element && Boolean(target.closest(".reference-image")) && !target.closest("button"),
         };
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
@@ -224,13 +225,21 @@ export function ReferenceCard({
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
         if (!drag.moved) {
           setPosition({ x: drag.originX, y: drag.originY });
-          if (drag.viewOnClick) {
+          const now = performance.now();
+          const previous = lastViewClickRef.current;
+          const isDoubleClick = drag.viewEligible
+            && previous
+            && now - previous.at <= 420
+            && Math.abs(event.clientX - previous.x) <= 7
+            && Math.abs(event.clientY - previous.y) <= 7;
+          lastViewClickRef.current = isDoubleClick ? null : { at: now, x: event.clientX, y: event.clientY };
+          if (isDoubleClick) {
             suppressClickRef.current = true;
-            window.setTimeout(() => { suppressClickRef.current = false; }, 0);
             onView();
           }
           return;
         }
+        lastViewClickRef.current = null;
         suppressClickRef.current = true;
         window.setTimeout(() => { suppressClickRef.current = false; }, 0);
         onMove(drag.latestX, drag.latestY);
@@ -239,6 +248,7 @@ export function ReferenceCard({
         const drag = dragRef.current;
         if (!drag) return;
         dragRef.current = null;
+        lastViewClickRef.current = null;
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
         setPosition({ x: drag.originX, y: drag.originY });
       }}

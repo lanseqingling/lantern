@@ -39,11 +39,13 @@
 
 .workbench {
   --focus-layout-shift-x: -46px;
-  position: relative;
+  position: fixed;
+  inset: 0;
   width: 100vw;
   height: 100dvh;
   overflow: hidden;
   overflow: clip;
+  overscroll-behavior: none;
   background:
     radial-gradient(circle at 1px 1px, var(--dot) 1.2px, transparent 1.4px),
     linear-gradient(135deg, #fbfcfc 0%, #f6f8f9 55%, #f8faf9 100%);
@@ -55,36 +57,48 @@
 .ambient-amber { width: 220px; height: 220px; right: 20%; bottom: 12%; background: rgba(242, 184, 75, .1); }
 
 .project-chip {
-  position: absolute;
+  position: fixed;
   z-index: 70;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   left: 20px;
-  top: 16px;
+  top: 20px;
   width: 260px;
 }
 .project-main {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
   width: 100%;
-  min-height: 50px;
-  padding: 7px 11px 7px 8px;
-  border: 1px solid rgba(255,255,255,.9);
-  border-radius: 22px;
-  background: rgba(255,255,255,.78);
-  box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(22px);
+  height: 42px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   cursor: pointer;
   text-align: left;
 }
+.project-back { flex: none; }
+.project-main-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  height: 42px;
+  padding: 5px 10px 5px 12px;
+  border: 1px solid rgba(255,255,255,.9);
+  border-radius: 15px;
+  background: rgba(255,255,255,.78);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(22px);
+}
+.project-main-card > svg { width: 16px; height: 16px; color: #506069; }
 .project-main strong, .project-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-main strong { color: #172026; font-size: 14px; font-weight: 900; line-height: 1.15; }
+.project-main strong { color: var(--cyan-deep); font-size: 14px; font-weight: 900; line-height: 1.15; }
 .project-main small { margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 650; }
 .project-main .project-subtitle { position: relative; overflow: visible; outline: none; cursor: default; }
 .project-main .project-subtitle > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-main .project-subtitle::after { content: attr(data-full-text); position: absolute; z-index: 12; left: -8px; top: calc(100% + 9px); width: max-content; max-width: min(420px, calc(100vw - 48px)); padding: 9px 11px; border: 1px solid rgba(255,255,255,.18); border-radius: 10px; background: rgba(23,32,38,.94); box-shadow: 0 14px 30px rgba(12,26,30,.22); color: #fff; font-size: 11px; font-weight: 650; line-height: 1.45; text-overflow: clip; white-space: normal; opacity: 0; pointer-events: none; transform: translateY(-3px); transition: opacity 140ms ease, transform 140ms ease; }
 .project-main .project-subtitle:hover::after, .project-main .project-subtitle:focus-visible::after { opacity: 1; transform: translateY(0); }
-.project-main > svg { color: #506069; }
 
 .lantern-logo {
   --lantern-logo-size: 34px;
@@ -104,8 +118,27 @@
 }
 .lantern-logo::before { content: none; }
 .lantern-logo i { display: none; }
+.lantern-logo.topbar-lantern-logo {
+  --lantern-logo-size: 42px;
+  --lantern-logo-radius: 14px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.lantern-logo.topbar-lantern-logo::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid rgba(36,127,130,.22);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 66% 34%, var(--amber) 0 16%, transparent 18%),
+    linear-gradient(135deg, var(--cyan-soft), #fff);
+  box-shadow: 0 0 0 6px rgba(100,200,200,.12);
+}
 
 .project-menu {
+  grid-column: 1 / -1;
   display: grid;
   gap: 4px;
   margin-top: 8px;
@@ -340,9 +373,10 @@
   left: 0;
   right: 0;
   overflow: visible;
+  overscroll-behavior: none;
 }
 .workbench.mode-focus.left-open.agent-open .canvas-stage { --stage-shift-x: var(--focus-layout-shift-x); }
-.canvas-stage.mode-free { cursor: grab; }
+.canvas-stage.mode-free { cursor: grab; touch-action: none; }
 .canvas-stage.mode-free.is-panning { cursor: grabbing; }
 .canvas-stage.is-marquee { cursor: crosshair; }
 .canvas-stage.multi-move-ready .multi-selected { cursor: move; }

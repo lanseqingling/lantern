@@ -143,6 +143,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const dragRef = useRef<DragState | null>(null);
   const cropWheelRef = useRef<CropWheelState | null>(null);
   const suppressClick = useRef(false);
+  const lastImageClickRef = useRef<{ id: string; at: number; x: number; y: number } | null>(null);
   const [drafts, setDrafts] = useState<Record<string, ElementPatch>>({});
   const draftsRef = useRef<Record<string, ElementPatch>>({});
   const [snapGuides, setSnapGuides] = useState<SnapGuideState>(null);
@@ -525,8 +526,26 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       return <div className={`lcd-image ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(image.id) ? "multi-selected" : ""}`} data-element-id={image.id} data-page-id={unit.id} key={image.id}
         style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: image.opacity, mixBlendMode: image.blendMode }}
         onWheel={(event) => { if (frameContent && frame) zoomCropWithWheel(event, image, frame); }}
-        onClick={(event) => { event.stopPropagation(); if (!frameContent || selected || !frame) onSelect?.(imageSelection); else selectFrame(frame); }}
-        onDoubleClick={(event) => doubleClick(event, imageSelection)}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (suppressClick.current) {
+            suppressClick.current = false;
+            lastImageClickRef.current = null;
+            return;
+          }
+          onSelect?.(imageSelection);
+          const now = performance.now();
+          const previous = lastImageClickRef.current;
+          const isDoubleClick = previous
+            && previous.id === image.id
+            && now - previous.at <= 420
+            && Math.abs(event.clientX - previous.x) <= 7
+            && Math.abs(event.clientY - previous.y) <= 7;
+          lastImageClickRef.current = isDoubleClick ? null : { id: image.id, at: now, x: event.clientX, y: event.clientY };
+          if (!isDoubleClick || !onObjectDoubleClick) return;
+          event.preventDefault();
+          onObjectDoubleClick(imageSelection);
+        }}
         onContextMenu={(event) => contextFor(event, imageSelection)}
         onPointerDown={(event) => {
           if (event.button === 0 && event.detail > 1) return;

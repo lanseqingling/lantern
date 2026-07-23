@@ -194,15 +194,16 @@ export default function ComicAssetsPage() {
     setNotice(`已删除资产“${assetName}”`);
   };
 
-  return <main className="comic-asset-studio-page">
-    <header className="asset-studio-page-head">
-      <button type="button" aria-label="返回" onClick={goBack}><Icon name="collapse" /></button>
-      <div className="asset-studio-page-title">
+  return <main className="comic-asset-studio-page app-surface">
+    <header className="asset-studio-page-head app-page-wide">
+      <button type="button" className="asset-studio-back app-page-corner-button" aria-label="返回" onClick={goBack}><Icon name="collapse" /></button>
+      <button type="button" className="asset-studio-global-settings app-page-corner-button" aria-label="全局设置" onClick={() => router.push(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}/assets`)}`)}><Icon name="settings" /></button>
+      <div className="asset-studio-page-title app-page-title">
         <span><Icon name="folder" /></span>
         <div><small>ASSET SPACE</small><h1>资产空间</h1></div>
       </div>
     </header>
-    <section className="comic-brief-section" aria-labelledby="comic-brief-title">
+    <section className="comic-brief-section app-page-wide" aria-labelledby="comic-brief-title">
       <header>
         <div><small>CREATIVE BASELINE</small><h2 id="comic-brief-title">创作基线</h2></div>
       </header>
@@ -214,7 +215,7 @@ export default function ComicAssetsPage() {
         {loading ? <div className="comic-brief-card comic-brief-card-skeleton" aria-label="正在读取创作基线" /> : null}
       </div>
     </section>
-    <section className="comic-asset-library-section" aria-labelledby="comic-asset-library-title">
+    <section className="comic-asset-library-section app-page-wide" aria-labelledby="comic-asset-library-title">
       <header><small>VISUAL ASSETS</small><h2 id="comic-asset-library-title">视觉资产</h2></header>
       <div className="comic-asset-studio-layout">
         <nav className="comic-asset-filter" aria-label="资产类型">

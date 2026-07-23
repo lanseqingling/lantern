@@ -6,9 +6,7 @@ import { Icon } from "@lantern/ui";
 export function LandingClient() {
   const router = useRouter();
 
-  return <main className="landing-page">
-    <div className="landing-ambient cyan" />
-    <div className="landing-ambient amber" />
+  return <main className="landing-page app-surface app-surface--hero">
     <section className="landing-intro" aria-label="Lantern AI">
       <div className="landing-brand"><span className="lantern-logo"><i /></span><strong>Lantern <em>AI</em></strong></div>
       <h1>一盏灯，陪你打磨漫画故事</h1>

@@ -58,15 +58,9 @@ export function LibraryClient() {
   };
 
   return <>
-    <section className="comic-library" aria-label="漫画列表">
+    <section className="comic-library app-page-wide" aria-label="漫画列表">
       <button type="button" className="library-add-comic-button" aria-label="新建漫画" onClick={() => setCreating(true)}><span aria-hidden="true" /></button>
       {error ? <p className="library-error">{error}</p> : null}
-      {!loading && !error && !comics.length ? <div className="library-empty">
-        <svg className="library-empty-border" aria-hidden="true"><rect /></svg>
-        <button type="button" className="library-empty-add-button" aria-label="新建第一部漫画" onClick={() => setCreating(true)}><span aria-hidden="true" /></button>
-        <strong>还没有漫画</strong>
-        <p>新建第一部漫画，和 Agent 一起从故事企划开始。</p>
-      </div> : null}
       {comics.map((comic) => {
         const latest = comic.chapters.at(-1);
         return <article className="comic-library-card" key={comic.id}>

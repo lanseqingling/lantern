@@ -6,6 +6,7 @@ import type { ReferencePlacement } from "@lantern/shared";
 import { Icon } from "@lantern/ui";
 import { assetKindLabel, assetKindTag } from "@/app/lib/asset-kind";
 import { FloatingMenu, MenuDivider, MenuSection } from "./FloatingPrimitives";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -146,7 +147,7 @@ export function ReferenceCard({
         "--multi-move-y": `${multiMoveDelta?.y ?? 0}px`,
       } as CSSProperties}
       data-reference-id={reference.id}
-      aria-label={`${reference.name}，${kindName}，仅作为画布图片`}
+      aria-label={uiCopy.workbench.reference.cardAria(reference.name, kindName)}
       onClick={(event) => {
         event.stopPropagation();
         if (suppressClickRef.current) {
@@ -254,8 +255,8 @@ export function ReferenceCard({
       }}
     >
       <div className={`reference-image ${reference.kind}`}>
-        <img src={reference.imageSrc} alt={`${reference.name}图片`} draggable={false} loading="lazy" decoding="async" />
-        {(reference.images?.length ?? 0) > 1 ? <button type="button" className="reference-image-cycle" aria-label={`切换${reference.name}的资产图片`} title="切换资产图片" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onCycleImage(); }}><Icon name="replace" /></button> : null}
+        <img src={reference.imageSrc} alt={uiCopy.workbench.reference.imageAlt(reference.name)} draggable={false} loading="lazy" decoding="async" />
+        {(reference.images?.length ?? 0) > 1 ? <button type="button" className="reference-image-cycle" aria-label={uiCopy.workbench.reference.switchImageAria(reference.name)} title={uiCopy.workbench.imagePicker.switchAssetImageTitle} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onCycleImage(); }}><Icon name="replace" /></button> : null}
         <div className="reference-body">
           <em aria-label={kindName} title={kindName}>{kindGlyph}</em>
           <strong>{reference.name}</strong>
@@ -263,8 +264,8 @@ export function ReferenceCard({
       </div>
       {contextMenu ? createPortal(
         <FloatingMenu className="reference-context-menu" style={{ left: contextMenu.left, top: contextMenu.top }} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
-            <MenuSection className="reference-menu-section"><button type="button" onClick={() => { onReference(); setContextMenu(null); }}><span><Icon name="ai" />引用到对话</span></button></MenuSection>
-            {isUploadedReference ? <><MenuDivider className="reference-menu-divider" /><MenuSection className="reference-menu-section"><button type="button" disabled={assetSaved} onClick={(event) => { const anchor = cardRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect(); onSaveToAssets({ left: anchor.left, right: anchor.right, top: anchor.top, bottom: anchor.bottom }); setContextMenu(null); }}><span><Icon name="save" />{assetSaved ? "已关联资产" : "保存为资产"}</span></button></MenuSection></> : null}
+            <MenuSection className="reference-menu-section"><button type="button" onClick={() => { onReference(); setContextMenu(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button></MenuSection>
+            {isUploadedReference ? <><MenuDivider className="reference-menu-divider" /><MenuSection className="reference-menu-section"><button type="button" disabled={assetSaved} onClick={(event) => { const anchor = cardRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect(); onSaveToAssets({ left: anchor.left, right: anchor.right, top: anchor.top, bottom: anchor.bottom }); setContextMenu(null); }}><span><Icon name="save" />{assetSaved ? uiCopy.asset.status.linked : uiCopy.asset.action.saveToLibrary}</span></button></MenuSection></> : null}
             <MenuDivider className="reference-menu-divider" />
             <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" onClick={(event) => {
               const item = event.currentTarget.getBoundingClientRect();
@@ -280,17 +281,17 @@ export function ReferenceCard({
               const leftLeft = clampValue(left, viewportPadding, Math.max(viewportPadding, window.innerWidth - submenuWidth - viewportPadding));
               const opensRight = right + submenuWidth <= window.innerWidth - viewportPadding && score(rightLeft) <= score(leftLeft);
               setContextMenu((current) => current ? { ...current, layerMenu: { left: opensRight ? rightLeft : leftLeft, top } } : current);
-            }}><span><Icon name="layers" />层级<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></MenuSection>
+            }}><span><Icon name="layers" />{uiCopy.workbench.action.layer}<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></MenuSection>
             <MenuDivider className="reference-menu-divider" />
-            <MenuSection className="reference-menu-section reference-menu-zoom"><button type="button" onClick={() => updateZoom(zoom + 0.15)}><span><Icon name="zoomIn" />放大</span></button><button type="button" onClick={() => updateZoom(zoom - 0.15)}><span><Icon name="zoomOut" />缩小</span></button><button type="button" onClick={() => updateZoom(1)}><span><Icon name="replace" />还原</span></button></MenuSection>
+            <MenuSection className="reference-menu-section reference-menu-zoom"><button type="button" onClick={() => updateZoom(zoom + 0.15)}><span><Icon name="zoomIn" />{uiCopy.workbench.action.zoomIn}</span></button><button type="button" onClick={() => updateZoom(zoom - 0.15)}><span><Icon name="zoomOut" />{uiCopy.workbench.action.zoomOut}</span></button><button type="button" onClick={() => updateZoom(1)}><span><Icon name="replace" />{uiCopy.asset.action.restore}</span></button></MenuSection>
             <MenuDivider className="reference-menu-divider" />
-            <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" className="danger" onClick={() => { onDelete(); setContextMenu(null); }}><span><Icon name="trash" />从画布移除</span></button></MenuSection>
+            <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" className="danger" onClick={() => { onDelete(); setContextMenu(null); }}><span><Icon name="trash" />{uiCopy.common.action.removeFromCanvas}</span></button></MenuSection>
         </FloatingMenu>,
         document.body,
       ) : null}
       {contextMenu?.layerMenu ? createPortal(
         <FloatingMenu className="reference-context-menu reference-layer-menu" style={{ left: contextMenu.layerMenu.left, top: contextMenu.layerMenu.top }} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
-          <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" onClick={() => { onLayer("top"); setContextMenu(null); }}><span><Icon name="layers" />置于顶层</span></button><button type="button" onClick={() => { onLayer("up"); setContextMenu(null); }}><span><Icon name="layers" />上移一层</span></button><button type="button" onClick={() => { onLayer("down"); setContextMenu(null); }}><span><Icon name="layers" />下移一层</span></button><button type="button" onClick={() => { onLayer("bottom"); setContextMenu(null); }}><span><Icon name="layers" />置于底层</span></button></MenuSection>
+          <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" onClick={() => { onLayer("top"); setContextMenu(null); }}><span><Icon name="layers" />{uiCopy.workbench.action.moveToFront}</span></button><button type="button" onClick={() => { onLayer("up"); setContextMenu(null); }}><span><Icon name="layers" />{uiCopy.workbench.action.moveLayerUp}</span></button><button type="button" onClick={() => { onLayer("down"); setContextMenu(null); }}><span><Icon name="layers" />{uiCopy.workbench.action.moveLayerDown}</span></button><button type="button" onClick={() => { onLayer("bottom"); setContextMenu(null); }}><span><Icon name="layers" />{uiCopy.workbench.action.moveToBack}</span></button></MenuSection>
         </FloatingMenu>,
         document.body,
       ) : null}

@@ -37,7 +37,8 @@ export function useContentRouteEntryTransition() {
     if (next !== "forward" && next !== "back") return;
     window.sessionStorage.removeItem(CONTENT_ROUTE_ENTRY_KEY);
     delete document.documentElement.dataset.lanternContentRouteTransition;
-    setDirection(next);
+    const frame = window.requestAnimationFrame(() => setDirection(next));
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   return direction ? `route-page-enter route-page-enter-${direction}` : "";
@@ -47,13 +48,13 @@ export function useDelayedLoadingIndicator(loading: boolean) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (!loading) {
-      setVisible(false);
-      return;
-    }
+    if (!loading) return;
     const timer = window.setTimeout(() => setVisible(true), ROUTE_LOADING_INDICATOR_DELAY_MS);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      setVisible(false);
+    };
   }, [loading]);
 
-  return visible;
+  return loading && visible;
 }

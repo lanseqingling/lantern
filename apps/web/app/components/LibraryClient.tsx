@@ -5,15 +5,15 @@ import { useRouter } from "next/navigation";
 import { apiCreateComic, apiListComics, type ComicListItem } from "@/app/lib/api-client";
 import { navigateWithContentTransition } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 function creationStatusLabel(status: ComicListItem["status"]) {
-  return status === "completed" ? "已完成" : "创作中";
+  return status === "completed" ? uiCopy.comic.creationStatus.complete : uiCopy.comic.creationStatus.creating;
 }
 
 export function LibraryClient() {
   const router = useRouter();
   const [comics, setComics] = useState<ComicListItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -21,17 +21,16 @@ export function LibraryClient() {
   const [error, setError] = useState("");
   const [draft, setDraft] = useState({ title: "", summary: "", format: "page" as "page" | "vertical" | "four_panel" });
   const formatOptions = [
-    { value: "page", label: "页漫", detail: "适合分页阅读", icon: "page" as const },
-    { value: "vertical", label: "条漫", detail: "适合纵向滚动", icon: "vertical" as const },
-    { value: "four_panel", label: "四格", detail: "即将开放", icon: "fourPanel" as const, disabled: true },
+    { value: "page", label: uiCopy.comic.format.page, detail: uiCopy.library.form.pageFormatHint, icon: "page" as const },
+    { value: "vertical", label: uiCopy.comic.format.vertical, detail: uiCopy.library.form.verticalFormatHint, icon: "vertical" as const },
+    { value: "four_panel", label: uiCopy.comic.format.fourPanel, detail: uiCopy.common.status.comingSoon, icon: "fourPanel" as const, disabled: true },
   ];
 
   useEffect(() => {
     let alive = true;
     void apiListComics()
       .then((page) => { if (alive) { setComics(page.items); setNextCursor(page.nextCursor); } })
-      .catch(() => { if (alive) setError("漫画列表暂时无法加载"); })
-      .finally(() => { if (alive) setLoading(false); });
+      .catch(() => { if (alive) setError(uiCopy.library.error.listLoadFailed); });
     return () => { alive = false; };
   }, []);
 
@@ -43,7 +42,7 @@ export function LibraryClient() {
       setComics((current) => [...current, ...page.items]);
       setNextCursor(page.nextCursor);
     } catch {
-      setError("更多漫画暂时无法加载");
+      setError(uiCopy.library.error.moreLoadFailed);
     } finally {
       setLoadingMore(false);
     }
@@ -57,33 +56,33 @@ export function LibraryClient() {
       const created = await apiCreateComic({ ...draft, format: draft.format === "four_panel" ? "page" : draft.format, title: draft.title.trim(), summary: draft.summary.trim() });
       navigateWithContentTransition("forward", () => router.push(`/comics/${created.comic.id}`));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "创建漫画失败");
+      setError(cause instanceof Error ? cause.message : uiCopy.library.error.createFailed);
       setSubmitting(false);
     }
   };
 
   return <>
-    <section className="comic-library app-page-wide" aria-label="漫画列表">
-      <button type="button" className="library-add-comic-button" aria-label="新建漫画" onClick={() => setCreating(true)}><span aria-hidden="true" /></button>
+    <section className="comic-library app-page-wide" aria-label={uiCopy.library.navigation.listAria}>
+      <button type="button" className="library-add-comic-button" aria-label={uiCopy.library.navigation.newComicAria} onClick={() => setCreating(true)}><span aria-hidden="true" /></button>
       {error ? <p className="library-error">{error}</p> : null}
       {comics.map((comic) => {
         const latest = comic.chapters.at(-1);
         return <article className="comic-library-card" key={comic.id}>
           <button type="button" className="comic-library-open" onClick={() => navigateWithContentTransition("forward", () => router.push(`/comics/${comic.id}`))}>
-            <div className="comic-cover">{comic.coverUrl ? <img src={comic.coverUrl} alt={`${comic.title}漫画封面`} loading="lazy" decoding="async" /> : <div className="comic-cover-placeholder" aria-label="尚未设置漫画封面"><b>{comic.title.slice(0, 2)}</b></div>}{comic.isExample ? <span className="example">示例漫画</span> : <span className={`comic-status ${comic.status}`}>{creationStatusLabel(comic.status)}</span>}</div>
-            <div><small>{comic.format === "vertical" ? "条漫" : comic.format === "four_panel" ? "四格" : "页漫"}</small><h2>{comic.title}</h2><p>{comic.summary || "还没有故事简介。"}</p><strong>{latest ? `查看 ${comic.chapters.length} 话` : "先新建一话"} <span>→</span></strong></div>
+            <div className="comic-cover">{comic.coverUrl ? <img src={comic.coverUrl} alt={uiCopy.library.cover.comicAlt(comic.title)} loading="lazy" decoding="async" /> : <div className="comic-cover-placeholder" aria-label={uiCopy.library.cover.missingAria}><b>{comic.title.slice(0, 2)}</b></div>}{comic.isExample ? <span className="example">{uiCopy.library.badge.exampleComic}</span> : <span className={`comic-status ${comic.status}`}>{creationStatusLabel(comic.status)}</span>}</div>
+            <div><small>{comic.format === "vertical" ? uiCopy.comic.format.vertical : comic.format === "four_panel" ? uiCopy.comic.format.fourPanel : uiCopy.comic.format.page}</small><h2>{comic.title}</h2><p>{comic.summary || uiCopy.library.summary.empty}</p><strong>{latest ? uiCopy.library.summary.chapterCount(comic.chapters.length) : uiCopy.library.empty.chapterPrompt} <span>→</span></strong></div>
           </button>
         </article>;
       })}
-      {nextCursor ? <button type="button" className="library-load-more" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "正在加载…" : "加载更多漫画"}</button> : null}
+      {nextCursor ? <button type="button" className="library-load-more" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? uiCopy.library.progress.loadingMore : uiCopy.library.action.loadMore}</button> : null}
     </section>
     {creating ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setCreating(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="new-comic-title" onMouseDown={(event) => event.stopPropagation()}>
-      <div><small>NEW COMIC</small><h2 id="new-comic-title">开始一个新故事</h2></div>
-      <label>漫画名称<input autoFocus value={draft.title} placeholder="漫画名称" onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label>
-      <label>漫画简介<textarea value={draft.summary} placeholder="简单介绍这部漫画的故事、角色或氛围" onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} /></label>
-      <label>漫画结构<CustomSelect ariaLabel="漫画结构" className="creation-select compact" value={draft.format === "four_panel" ? "page" : draft.format} options={formatOptions} onChange={(value) => setDraft((current) => ({ ...current, format: value as typeof current.format }))} /></label>
+      <div><small>{uiCopy.eyebrow.newComic}</small><h2 id="new-comic-title">{uiCopy.library.empty.creationTitle}</h2></div>
+      <label>{uiCopy.comic.field.name}<input autoFocus value={draft.title} placeholder={uiCopy.comic.field.name} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label>
+      <label>{uiCopy.comic.field.description}<textarea value={draft.summary} placeholder={uiCopy.library.form.descriptionPlaceholder} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} /></label>
+      <label>{uiCopy.library.form.structureLabel}<CustomSelect ariaLabel={uiCopy.library.form.structureLabel} className="creation-select compact" value={draft.format === "four_panel" ? "page" : draft.format} options={formatOptions} onChange={(value) => setDraft((current) => ({ ...current, format: value as typeof current.format }))} /></label>
       {error ? <p className="creation-error">{error}</p> : null}
-      <footer><button type="button" onClick={() => setCreating(false)}>取消</button><button type="button" className="primary" disabled={!draft.title.trim() || !draft.summary.trim() || submitting} onClick={() => void createComic()}>{submitting ? "正在创建…" : "创建漫画"}</button></footer>
+      <footer><button type="button" onClick={() => setCreating(false)}>{uiCopy.common.action.cancel}</button><button type="button" className="primary" disabled={!draft.title.trim() || !draft.summary.trim() || submitting} onClick={() => void createComic()}>{submitting ? uiCopy.common.progress.creating : uiCopy.library.action.createComic}</button></footer>
     </section></div> : null}
   </>;
 }

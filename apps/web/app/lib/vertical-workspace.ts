@@ -1,10 +1,12 @@
+import { uiCopy } from "./ui-copy";
+
 export const verticalViewportModes = ["off", "phone", "phone_tall", "tablet"] as const;
 export type VerticalViewportMode = typeof verticalViewportModes[number];
 
 export const verticalViewportModeMeta: Record<Exclude<VerticalViewportMode, "off">, { label: string; width: number; height: number }> = {
-  phone: { label: "手机 9:16", width: 9, height: 16 },
-  phone_tall: { label: "长屏手机 9:20", width: 9, height: 20 },
-  tablet: { label: "平板 3:4", width: 3, height: 4 },
+  phone: { label: uiCopy.viewport.phone, width: 9, height: 16 },
+  phone_tall: { label: uiCopy.viewport.tallPhone, width: 9, height: 20 },
+  tablet: { label: uiCopy.viewport.tablet, width: 3, height: 4 },
 };
 
 export function nextVerticalViewportMode(mode: VerticalViewportMode): VerticalViewportMode {

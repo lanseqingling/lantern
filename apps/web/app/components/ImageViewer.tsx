@@ -13,6 +13,7 @@ import {
   imageViewerZoomStep,
   type ImageViewerMode,
 } from "@/app/lib/image-viewer";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 export type ImageViewerItem = {
   id: string;
@@ -166,28 +167,28 @@ export function ImageViewer({
   if (!activeImage) return null;
 
   return <div className="image-viewer-overlay" role="presentation" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <button ref={closeRef} type="button" className="image-viewer-close" aria-label="关闭图片查看器" onClick={onClose}><Icon name="x" /></button>
+    <button ref={closeRef} type="button" className="image-viewer-close" aria-label={uiCopy.imageViewer.closeAria} onClick={onClose}><Icon name="x" /></button>
     <div ref={stageRef} className="image-viewer-stage" role="dialog" aria-modal="true" aria-label={activeImage.alt} onClick={onClose} onWheel={zoomWithWheel}>
       <div className="image-viewer-image-space">
-        {loadFailed ? <div className="image-viewer-error"><Icon name="asset" /><strong>图片暂时无法显示</strong></div> : <>
+        {loadFailed ? <div className="image-viewer-error"><Icon name="asset" /><strong>{uiCopy.imageViewer.unavailable}</strong></div> : <>
           {/* Signed and local object URLs must retain their intrinsic pixel dimensions for 1:1 mode. */}
           <img key={activeImage.id} className={dragging ? "dragging" : ""} src={activeImage.src} alt={activeImage.alt} draggable={false} style={{ ...renderedSize, transform: `translate(-50%, -50%) translate(${imageOffset.x}px, ${imageOffset.y}px)` }} onClick={(event) => event.stopPropagation()} onPointerDown={beginImageDrag} onPointerMove={moveImage} onPointerUp={endImageDrag} onPointerCancel={endImageDrag} onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setLoadFailed(true)} />
         </>}
       </div>
     </div>
-    <div className="image-viewer-toolbar" role="toolbar" aria-label="图片查看工具" onClick={(event) => event.stopPropagation()}>
+    <div className="image-viewer-toolbar" role="toolbar" aria-label={uiCopy.imageViewer.toolbarAria} onClick={(event) => event.stopPropagation()}>
       {galleryEnabled ? <><div className="image-viewer-gallery-controls">
-        <button type="button" aria-label="上一张图片" disabled={safeIndex <= 0} onClick={() => setIndex(safeIndex - 1)}><Icon name="collapse" /></button>
+        <button type="button" aria-label={uiCopy.asset.image.previous} disabled={safeIndex <= 0} onClick={() => setIndex(safeIndex - 1)}><Icon name="collapse" /></button>
         <span aria-live="polite">{safeIndex + 1}/{images.length}</span>
-        <button type="button" aria-label="下一张图片" disabled={safeIndex >= images.length - 1} onClick={() => setIndex(safeIndex + 1)}><Icon name="expand" /></button>
+        <button type="button" aria-label={uiCopy.asset.image.next} disabled={safeIndex >= images.length - 1} onClick={() => setIndex(safeIndex + 1)}><Icon name="expand" /></button>
       </div><i /></> : null}
       <div className="image-viewer-zoom-controls">
-        <button type="button" aria-label="缩小图片" disabled={zoom <= imageViewerZoomMin} onClick={() => setZoom((current) => clampImageViewerZoom(current - imageViewerZoomStep))}><Icon name="zoomOut" /></button>
+        <button type="button" aria-label={uiCopy.imageViewer.zoomOutAria} disabled={zoom <= imageViewerZoomMin} onClick={() => setZoom((current) => clampImageViewerZoom(current - imageViewerZoomStep))}><Icon name="zoomOut" /></button>
         <span aria-live="polite">{Math.round(zoom * 100)}%</span>
-        <button type="button" aria-label="放大图片" disabled={zoom >= imageViewerZoomMax} onClick={() => setZoom((current) => clampImageViewerZoom(current + imageViewerZoomStep))}><Icon name="zoomIn" /></button>
+        <button type="button" aria-label={uiCopy.imageViewer.zoomInAria} disabled={zoom >= imageViewerZoomMax} onClick={() => setZoom((current) => clampImageViewerZoom(current + imageViewerZoomStep))}><Icon name="zoomIn" /></button>
       </div>
       <i />
-      <button type="button" className="image-viewer-mode" aria-label={mode === "fit" ? "按原始尺寸查看" : "适应窗口"} title={mode === "fit" ? "1:1 原始尺寸" : "适应窗口"} onClick={() => { setMode((current) => current === "fit" ? "actual" : "fit"); setZoom(1); setImageOffset({ x: 0, y: 0 }); }}>
+      <button type="button" className="image-viewer-mode" aria-label={mode === "fit" ? uiCopy.imageViewer.originalSizeAria : uiCopy.viewer.action.fitWindow} title={mode === "fit" ? uiCopy.imageViewer.originalSizeTitle : uiCopy.viewer.action.fitWindow} onClick={() => { setMode((current) => current === "fit" ? "actual" : "fit"); setZoom(1); setImageOffset({ x: 0, y: 0 }); }}>
         {mode === "fit" ? <span className="image-viewer-one-to-one" aria-hidden="true">1:1</span> : <Icon name="scan" />}
       </button>
     </div>

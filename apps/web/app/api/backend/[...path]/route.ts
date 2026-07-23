@@ -1,5 +1,6 @@
 export const runtime = "nodejs";
 import { getConfig } from "@lantern/server/config";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 async function proxy(request: Request, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
@@ -26,7 +27,7 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
     response = await fetch(upstreamUrl, init);
   } catch {
     return Response.json(
-      { error: { code: "upstream_unavailable", message: "本地服务暂时不可用。" }, requestId: crypto.randomUUID() },
+      { error: { code: "upstream_unavailable", message: uiCopy.api.error.localServiceUnavailable }, requestId: crypto.randomUUID() },
       { status: 503 },
     );
   }

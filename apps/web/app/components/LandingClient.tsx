@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@lantern/ui";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 export function LandingClient() {
   const router = useRouter();
@@ -63,18 +64,18 @@ export function LandingClient() {
   }, [enterWorkspace]);
 
   return <main className={`landing-page landing-route-transition app-surface app-surface--hero${leaving ? " is-leaving" : ""}`} aria-busy={leaving}>
-    <section className="landing-intro" aria-label="Lantern AI">
-      <div className="landing-brand"><span className="lantern-logo"><i /></span><strong>Lantern <em>AI</em></strong></div>
-      <h1>一盏灯，陪你打磨漫画故事</h1>
-      <p>续写旧作篇章，新建故事企划，打造独属于你的漫画世界</p>
-      <button type="button" className="landing-start" onClick={enterWorkspace}>开始创作</button>
+    <section className="landing-intro" aria-label={uiCopy.landing.hero.aria}>
+      <div className="landing-brand"><span className="lantern-logo"><i /></span><strong>{uiCopy.brand.wordmark.primary} <em>{uiCopy.brand.wordmark.accent}</em></strong></div>
+      <h1>{uiCopy.landing.hero.tagline}</h1>
+      <p>{uiCopy.landing.hero.subtitle}</p>
+      <button type="button" className="landing-start" onClick={enterWorkspace}>{uiCopy.landing.hero.start}</button>
     </section>
 
-    <section className="landing-composition" aria-label="漫画创作示例">
-      <article className="landing-storyboard"><img src="/landing-storyboard.png" alt="漫画分镜编辑示意图" /><div className="landing-frame-selection" aria-label="已选中最后一个画格" /><div className="landing-frame-toolbar" aria-label="画格工具栏"><button type="button" aria-label="AI 创作工具"><Icon name="ai" /></button><button type="button" aria-label="移动画格"><Icon name="move" /></button><button type="button" aria-label="裁切画格"><Icon name="crop" /></button><button type="button" aria-label="编辑画格"><Icon name="edit" /></button></div></article>
-      <aside className="landing-task-card" aria-label="创作任务卡片"><div className="landing-task-glow"><i /></div><span /><span /><em /><b /><footer><i /><i /></footer></aside>
-      <nav className="landing-tool-rail" aria-label="创作工具示例"><button type="button" className="active" aria-label="选择工具"><Icon name="select" /></button><button type="button" aria-label="移动工具"><Icon name="pan" /></button><button type="button" aria-label="添加图片"><Icon name="asset" /></button><button type="button" aria-label="编排工具"><Icon name="layout" /></button><div className="mode-toggle creative-active" aria-label="创作与预览模式"><button type="button" className="mode-star mode-active" aria-label="当前为创作模式"><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="阅读预览"><Icon name="preview" /></button></div></nav>
+    <section className="landing-composition" aria-label={uiCopy.landing.demo.comicAria}>
+      <article className="landing-storyboard"><img src="/landing-storyboard.png" alt={uiCopy.landing.demo.storyboardAlt} /><div className="landing-frame-selection" aria-label={uiCopy.landing.demo.selectedLastFrameAria} /><div className="landing-frame-toolbar" aria-label={uiCopy.landing.demo.frameToolbarAria}><button type="button" aria-label={uiCopy.landing.demo.aiToolbarAria}><Icon name="ai" /></button><button type="button" aria-label={uiCopy.workbench.action.moveFrame}><Icon name="move" /></button><button type="button" aria-label={uiCopy.landing.demo.cropFrameAria}><Icon name="crop" /></button><button type="button" aria-label={uiCopy.landing.demo.editFrameAria}><Icon name="edit" /></button></div></article>
+      <aside className="landing-task-card" aria-label={uiCopy.landing.demo.taskCardAria}><div className="landing-task-glow"><i /></div><span /><span /><em /><b /><footer><i /><i /></footer></aside>
+      <nav className="landing-tool-rail" aria-label={uiCopy.landing.demo.toolsAria}><button type="button" className="active" aria-label={uiCopy.landing.demo.selectToolAria}><Icon name="select" /></button><button type="button" aria-label={uiCopy.landing.demo.moveToolAria}><Icon name="pan" /></button><button type="button" aria-label={uiCopy.asset.action.addImage}><Icon name="asset" /></button><button type="button" aria-label={uiCopy.landing.demo.arrangeToolAria}><Icon name="layout" /></button><div className="mode-toggle creative-active" aria-label={uiCopy.landing.demo.modeSwitchAria}><button type="button" className="mode-star mode-active" aria-label={uiCopy.landing.demo.creationModeAria}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label={uiCopy.comic.action.readingPreview}><Icon name="preview" /></button></div></nav>
     </section>
-    <button type="button" className="landing-scroll-cue" onClick={enterWorkspace}><span>向下滚动，进入我的漫画</span><Icon name="chevronDown" /></button>
+    <button type="button" className="landing-scroll-cue" onClick={enterWorkspace}><span>{uiCopy.landing.hero.scrollToLibrary}</span><Icon name="chevronDown" /></button>
   </main>;
 }

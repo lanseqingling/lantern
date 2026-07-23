@@ -1,4 +1,5 @@
 import type { AssetSummary, ComicPage, ImageElement, ReferencePlacement, ResolvedResourceMap, ResourceBinding } from "@lantern/shared";
+import { uiCopy } from "./ui-copy";
 
 export type FrameImageChoice = {
   id: string;
@@ -24,10 +25,10 @@ function mediaTypeForUrl(url?: string) {
 }
 
 function pageImageKind(image: ImageElement) {
-  if (image.location.space !== "overlay") return "纸面图";
-  if (image.location.purpose === "cross_page") return "跨页图";
-  if (image.location.purpose === "cross_segment") return "跨段图";
-  return "纸面图";
+  if (image.location.space !== "overlay") return uiCopy.workbench.defaultLabel.paperImageShort;
+  if (image.location.purpose === "cross_page") return uiCopy.workbench.object.crossPageImage;
+  if (image.location.purpose === "cross_segment") return uiCopy.workbench.object.crossSegmentImage;
+  return uiCopy.workbench.defaultLabel.paperImageShort;
 }
 
 export function buildFrameImageChoices(input: {
@@ -52,7 +53,7 @@ export function buildFrameImageChoices(input: {
         id: `page:${element.id}`,
         assetId: element.assetId,
         assetVersionId: element.assetVersionId,
-        label: `当前页 · ${kind} ${String(order).padStart(2, "0")}`,
+        label: uiCopy.workbench.label.currentPageImage(kind, order),
         url: input.resolvedResources?.[element.assetVersionId]?.url,
         mediaType: resource.mediaType,
         width: resource.width,
@@ -72,7 +73,7 @@ export function buildFrameImageChoices(input: {
       id: `canvas:${placement.id}`,
       assetId,
       assetVersionId,
-      label: `画布 · ${placement.name}`,
+      label: uiCopy.workbench.label.canvasImage(placement.name),
       url: placement.imageSrc || asset?.contentUrl || version?.contentUrl,
       mediaType: mediaTypeForUrl(placement.imageSrc || asset?.contentUrl || version?.contentUrl),
       width: version?.width,

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@lantern/ui";
 import { navigateWithContentTransition, useContentRouteEntryTransition, useDelayedLoadingIndicator } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
+import { uiCopy } from "@/app/lib/ui-copy";
 import {
   apiGetGlobalSettings,
   apiUpdateGlobalSettings,
@@ -28,8 +29,8 @@ function providerLabel(draft: ModelDraft) {
 
 function secretMask(draft: ModelDraft) {
   return draft.keyConfigured
-    ? <span className="settings-secret-mask" aria-label="API Key 已配置">••••••••••••</span>
-    : <span className="settings-secret-empty">未配置</span>;
+    ? <span className="settings-secret-mask" aria-label={uiCopy.settings.apiKey.configuredAria}>••••••••••••</span>
+    : <span className="settings-secret-empty">{uiCopy.common.status.notConfigured}</span>;
 }
 
 export function SettingsClient() {
@@ -52,7 +53,7 @@ export function SettingsClient() {
         setSettings(value);
         setDrafts(value.models.map((model) => ({ ...model, apiKey: "" })));
       })
-      .catch((error) => setLoadingError(error instanceof Error ? error.message : "设置载入失败"));
+      .catch((error) => setLoadingError(error instanceof Error ? error.message : uiCopy.settings.error.loadFailed));
   }, []);
 
   const updateDraft = (capability: ModelCapability, patch: Partial<ModelDraft>) => {
@@ -115,7 +116,7 @@ export function SettingsClient() {
       });
       setNotices((current) => ({ ...current, [capability]: "" }));
     } catch (error) {
-      setNotices((current) => ({ ...current, [capability]: error instanceof Error ? error.message : "保存失败" }));
+      setNotices((current) => ({ ...current, [capability]: error instanceof Error ? error.message : uiCopy.common.status.saveFailed }));
     } finally {
       setSaving((current) => {
         const nextSaving = new Set(current);
@@ -128,21 +129,21 @@ export function SettingsClient() {
   return (
     <main className={`settings-page app-surface route-page-transition route-page-transition-fade ${entryTransition}`}>
       <header className="settings-header">
-        <button type="button" className="settings-back app-page-corner-button" aria-label="返回" onClick={() => navigateWithContentTransition("back", () => router.push(returnTo))}><Icon name="collapse" /></button>
+        <button type="button" className="settings-back app-page-corner-button" aria-label={uiCopy.common.action.back} onClick={() => navigateWithContentTransition("back", () => router.push(returnTo))}><Icon name="collapse" /></button>
       </header>
 
       <section className="settings-shell app-page-narrow">
         <div className="settings-title app-page-title">
           <span><Icon name="settings" /></span>
-          <div><small>GLOBAL SETTINGS</small><h1>全局设置</h1></div>
+          <div><small>{uiCopy.eyebrow.globalSettings}</small><h1>{uiCopy.common.navigation.globalSettings}</h1></div>
         </div>
 
-        {loadingError ? <section className="settings-error"><strong>无法载入设置</strong><p>{loadingError}</p></section> : null}
-        {!settings && !loadingError && showInitialLoading ? <div className="settings-loading">正在载入设置…</div> : null}
+        {loadingError ? <section className="settings-error"><strong>{uiCopy.settings.error.heading}</strong><p>{loadingError}</p></section> : null}
+        {!settings && !loadingError && showInitialLoading ? <div className="settings-loading">{uiCopy.settings.page.loading}</div> : null}
 
         {settings ? <>
           <section className="settings-section">
-            <div className="settings-section-heading"><h2>模型 API</h2></div>
+            <div className="settings-section-heading"><h2>{uiCopy.settings.section.modelApi}</h2></div>
             <div className="settings-model-list">
               {drafts.map((draft) => {
                 const isExpanded = expanded.has(draft.capability);
@@ -160,9 +161,9 @@ export function SettingsClient() {
                     {isExpanded ? <div className="settings-model-details">
                       {isEditing ? <div className="settings-fields">
                         <label>
-                          <span>提供方</span>
+                          <span>{uiCopy.settings.field.provider}</span>
                           <CustomSelect
-                            ariaLabel={`${draft.label}提供方`}
+                            ariaLabel={uiCopy.settings.field.providerAria(draft.label)}
                             className="settings-provider-select"
                             value={draft.providerId}
                             options={draft.providerOptions.map((provider) => ({ value: provider.id, label: provider.label, disabled: draft.environmentOverride }))}
@@ -170,31 +171,31 @@ export function SettingsClient() {
                           />
                         </label>
                         <label>
-                          <span>模型</span>
+                          <span>{uiCopy.settings.field.model}</span>
                           <input value={draft.model} disabled={draft.environmentOverride} onChange={(event) => updateDraft(draft.capability, { model: event.target.value })} />
                         </label>
                         <label className="settings-field-wide">
-                          <span>API 地址</span>
+                          <span>{uiCopy.settings.field.apiUrl}</span>
                           <input type="url" value={draft.baseUrl} disabled={draft.environmentOverride} onChange={(event) => updateDraft(draft.capability, { baseUrl: event.target.value })} />
                         </label>
                         <label className="settings-field-wide">
-                          <span>API Key</span>
-                          <input type="password" autoComplete="new-password" placeholder="输入 API Key" value={draft.apiKey} disabled={draft.environmentOverride} onChange={(event) => updateDraft(draft.capability, { apiKey: event.target.value })} />
+                          <span>{uiCopy.settings.apiKey.label}</span>
+                          <input type="password" autoComplete="new-password" placeholder={uiCopy.settings.apiKey.placeholder} value={draft.apiKey} disabled={draft.environmentOverride} onChange={(event) => updateDraft(draft.capability, { apiKey: event.target.value })} />
                         </label>
                       </div> : <dl className="settings-model-values">
-                        <div><dt>提供方</dt><dd>{providerLabel(draft)}</dd></div>
-                        <div><dt>模型</dt><dd>{draft.model}</dd></div>
-                        <div><dt>API 地址</dt><dd title={draft.baseUrl}>{draft.baseUrl}</dd></div>
-                        <div><dt>API Key</dt><dd>{secretMask(draft)}</dd></div>
+                        <div><dt>{uiCopy.settings.field.provider}</dt><dd>{providerLabel(draft)}</dd></div>
+                        <div><dt>{uiCopy.settings.field.model}</dt><dd>{draft.model}</dd></div>
+                        <div><dt>{uiCopy.settings.field.apiUrl}</dt><dd title={draft.baseUrl}>{draft.baseUrl}</dd></div>
+                        <div><dt>{uiCopy.settings.apiKey.label}</dt><dd>{secretMask(draft)}</dd></div>
                       </dl>}
 
-                      {draft.environmentOverride ? <p className="settings-managed-note">这项配置由启动环境变量管理。</p> : null}
+                      {draft.environmentOverride ? <p className="settings-managed-note">{uiCopy.settings.apiKey.managedByEnvironment}</p> : null}
                       <footer className="settings-model-actions">
                         <span>{notices[draft.capability]}</span>
                         {isEditing ? <div>
-                          <button type="button" disabled={isSaving} onClick={() => cancelEditing(draft.capability)}>取消</button>
-                          <button type="button" className="primary" disabled={isSaving || !draft.model.trim() || !draft.baseUrl.trim()} onClick={() => void saveModel(draft.capability)}><Icon name="save" />{isSaving ? "保存中…" : "保存"}</button>
-                        </div> : <button type="button" disabled={draft.environmentOverride} onClick={() => beginEditing(draft.capability)}><Icon name="edit" />修改</button>}
+                          <button type="button" disabled={isSaving} onClick={() => cancelEditing(draft.capability)}>{uiCopy.common.action.cancel}</button>
+                          <button type="button" className="primary" disabled={isSaving || !draft.model.trim() || !draft.baseUrl.trim()} onClick={() => void saveModel(draft.capability)}><Icon name="save" />{isSaving ? uiCopy.common.progress.saving : uiCopy.common.action.save}</button>
+                        </div> : <button type="button" disabled={draft.environmentOverride} onClick={() => beginEditing(draft.capability)}><Icon name="edit" />{uiCopy.common.action.edit}</button>}
                       </footer>
                     </div> : null}
                   </article>
@@ -204,11 +205,11 @@ export function SettingsClient() {
           </section>
 
           <section className="settings-section settings-runtime">
-            <div className="settings-section-heading"><h2>本地运行</h2></div>
+            <div className="settings-section-heading"><h2>{uiCopy.settings.section.localRuntime}</h2></div>
             <dl>
-              <div><dt>数据目录</dt><dd title={settings.runtime.dataDirectory}>{settings.runtime.dataDirectory}</dd></div>
-              <div><dt>本地端口</dt><dd>Web {settings.runtime.webPort} · API {settings.runtime.apiPort}</dd></div>
-              <div><dt>对象存储</dt><dd>{settings.runtime.objectStorage}</dd></div>
+              <div><dt>{uiCopy.settings.runtime.dataDirectory}</dt><dd title={settings.runtime.dataDirectory}>{settings.runtime.dataDirectory}</dd></div>
+              <div><dt>{uiCopy.settings.runtime.localPorts}</dt><dd>Web {settings.runtime.webPort} · API {settings.runtime.apiPort}</dd></div>
+              <div><dt>{uiCopy.settings.runtime.objectStorage}</dt><dd>{settings.runtime.objectStorage}</dd></div>
             </dl>
           </section>
         </> : null}

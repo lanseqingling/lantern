@@ -1,5 +1,6 @@
 import { normalizeStoryboardBeats, type AssetSummary, type Candidate, type WorkbenchFixture } from "@lantern/shared";
 import { createInitialFixture } from "@lantern/demo-runtime";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 export type Selection = {
   type: "none" | "presentation_unit" | "comic_frame" | "image" | "text" | "speech_balloon" | "reference_card" | "storyboard_beat";
@@ -54,7 +55,7 @@ export const defaultMessages: AgentMessage[] = [
     id: "agent-initial-guide",
     role: "agent",
     kind: "plain",
-    text: "可以直接和我讨论漫画内容；选择画格后可以创建或编辑该格的分镜条目，也可以直接描述要创建的角色或场景图片。",
+    text: uiCopy.workbench.chat.initialGuide,
   },
 ];
 

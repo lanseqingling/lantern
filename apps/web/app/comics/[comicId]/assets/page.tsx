@@ -7,6 +7,7 @@ import { AssetCreateDialog } from "@/app/components/AssetCreateDialog";
 import { AssetDetailDialog } from "@/app/components/AssetDetailDialog";
 import { ComicBriefDialog } from "@/app/components/ComicBriefDialog";
 import { assetKindLabel, assetKindTag } from "@/app/lib/asset-kind";
+import { uiCopy } from "@/app/lib/ui-copy";
 import { navigateWithContentTransition, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { apiCreateComicAsset, apiDeleteAsset, apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
 
@@ -15,13 +16,13 @@ type BriefId = "story" | "world" | "style";
 type AssetCreateKind = "character" | "scene" | "prop" | "reference_image";
 
 const filters: Array<{ id: AssetFilter; label: string; kinds?: ComicAssetListItem["kind"][] }> = [
-  { id: "all", label: "全部" },
-  { id: "character", label: "角色", kinds: ["character"] },
-  { id: "scene", label: "场景", kinds: ["scene"] },
-  { id: "prop", label: "道具", kinds: ["prop"] },
+  { id: "all", label: uiCopy.asset.page.allFilter },
+  { id: "character", label: uiCopy.asset.kind.character, kinds: ["character"] },
+  { id: "scene", label: uiCopy.asset.kind.scene, kinds: ["scene"] },
+  { id: "prop", label: uiCopy.asset.kind.prop, kinds: ["prop"] },
   // Image assets only arrive here through an explicit user upload/add.
   // Page-owned generated frame images are intentionally absent.
-  { id: "reference", label: "图片", kinds: ["reference_image"] },
+  { id: "reference", label: uiCopy.asset.kind.image, kinds: ["reference_image"] },
 ];
 
 const filterIcons = { all: "assetAll", character: "user", scene: "scene", prop: "prop", reference: "referenceImage" } as const;
@@ -59,7 +60,7 @@ export default function ComicAssetsPage() {
     let canceled = false;
     void Promise.all([apiGetComic(comicId), apiListComicAssets(comicId), apiGetComicVisualStyle(comicId)])
       .then(([nextComic, items, nextVisualStyle]) => { if (!canceled) { setComic(nextComic); setAssets(items); setVisualStyle(nextVisualStyle); setError(""); } })
-      .catch((reason) => { if (!canceled) setError(reason instanceof Error ? reason.message : "资产暂时无法读取。"); })
+      .catch((reason) => { if (!canceled) setError(reason instanceof Error ? reason.message : uiCopy.toast.assetSpace.loadFailed); })
       .finally(() => { if (!canceled) setLoading(false); });
     return () => { canceled = true; };
   }, [comicId]);
@@ -73,7 +74,7 @@ export default function ComicAssetsPage() {
     let canceled = false;
     void apiGetAssetDetail(selectedId)
       .then((result) => { if (!canceled) setDetailResult({ assetId: selectedId, requestKey: detailRequestKey, detail: result, error: "" }); })
-      .catch((reason) => { if (!canceled) setDetailResult({ assetId: selectedId, requestKey: detailRequestKey, detail: null, error: reason instanceof Error ? reason.message : "资产详情暂时无法读取。" }); });
+      .catch((reason) => { if (!canceled) setDetailResult({ assetId: selectedId, requestKey: detailRequestKey, detail: null, error: reason instanceof Error ? reason.message : uiCopy.asset.error.detailLoadFailed }); });
     return () => { canceled = true; };
   }, [selectedId, detailRequestKey]);
   const currentDetailResult = detailResult?.assetId === selectedId && detailResult.requestKey === detailRequestKey ? detailResult : null;
@@ -81,7 +82,7 @@ export default function ComicAssetsPage() {
 
   const navigate = (href: string, direction: "forward" | "back" = "forward") => navigateWithContentTransition(direction, () => router.push(href));
   const goBack = () => navigate(returnToWorkbench ? `/comics/${comicId}/chapters/${chapterId}` : `/comics/${comicId}`, "back");
-  const addLabel = ({ all: "添加资产", character: "添加角色", scene: "添加场景", prop: "添加道具", reference: "添加图片" } as const)[filter];
+  const addLabel = ({ all: uiCopy.asset.create.title, character: uiCopy.asset.action.addCharacter, scene: uiCopy.asset.action.addScene, prop: uiCopy.asset.action.addProp, reference: uiCopy.asset.action.addImage } as const)[filter];
   const initialCreateKind: AssetCreateKind = "character";
   const openAssetCreate = (trigger: HTMLButtonElement) => {
     setCreateAssetReturnFocus(trigger);
@@ -108,12 +109,12 @@ export default function ComicAssetsPage() {
       updatedAt: detail.root.updatedAt,
     }, ...current]);
     closeAssetCreate();
-    setNotice(`已创建资产“${detail.root.name}”`);
+    setNotice(uiCopy.toast.assetSpace.created(detail.root.name));
   };
 
   const continueAssetWithAI = async (input: { kind: AssetCreateKind; name: string; description: string }) => {
     const targetChapterId = chapterId ?? comic?.chapters.at(-1)?.id;
-    if (!targetChapterId) throw new Error("请先新建一话，再交给 AI 创建资产。");
+    if (!targetChapterId) throw new Error(uiCopy.asset.create.chapterRequired);
     const query = new URLSearchParams({
       assetCreate: input.kind === "reference_image" ? "reference" : input.kind,
       assetDraft: JSON.stringify(input),
@@ -142,18 +143,18 @@ export default function ComicAssetsPage() {
     try {
       const workbench = await apiLoadWorkbench(chapterId);
       await apiImportAssetToCanvasList(workbench.ids.projectId, asset.id);
-      setNotice(`已将「${asset.name}」导入当前画布资产列表`);
+      setNotice(uiCopy.toast.assetSpace.importedToCanvas(asset.name));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "导入画布资产列表失败，请稍后重试。");
+      setError(reason instanceof Error ? reason.message : uiCopy.toast.assetSpace.importFailed);
     } finally {
       setAdding(false);
     }
   };
 
   const briefs = comic ? [
-    { id: "style" as const, icon: "ai" as const, eyebrow: "VISUAL STYLE", title: "视觉风格", description: "统一管理线条、色彩、光影、构图规则和风格图片。", value: comic.styleSummary, placeholder: "描述线条、色彩、媒介质感、镜头语言和希望避免的风格。", maxLength: 4000 },
-    { id: "story" as const, icon: "storyboard" as const, eyebrow: "STORY CORE", title: "故事核心", description: "这部漫画最重要的故事承诺与核心冲突。", value: comic.summary, placeholder: "用一两段话说明主角、目标、冲突与故事吸引力。", maxLength: 2000, required: true },
-    { id: "world" as const, icon: "context" as const, eyebrow: "WORLD", title: "世界设定", description: "跨章节保持一致的时代背景、规则与长期冲突。", value: comic.worldSummary, placeholder: "补充世界规则、时代背景、地域、组织或超自然机制。", maxLength: 4000 },
+    { id: "style" as const, icon: "ai" as const, eyebrow: uiCopy.asset.eyebrow.visualStyle, title: uiCopy.asset.baseline.visualStyle.title, description: uiCopy.asset.baseline.visualStyle.description, value: comic.styleSummary, placeholder: uiCopy.asset.baseline.visualStyle.placeholder, maxLength: 4000 },
+    { id: "story" as const, icon: "storyboard" as const, eyebrow: uiCopy.asset.eyebrow.storyCore, title: uiCopy.asset.baseline.storyCore.title, description: uiCopy.asset.baseline.storyCore.description, value: comic.summary, placeholder: uiCopy.asset.baseline.storyCore.placeholder, maxLength: 2000, required: true },
+    { id: "world" as const, icon: "context" as const, eyebrow: uiCopy.asset.eyebrow.world, title: uiCopy.asset.baseline.worldSetting.title, description: uiCopy.asset.baseline.worldSetting.description, value: comic.worldSummary, placeholder: uiCopy.asset.baseline.worldSetting.placeholder, maxLength: 4000 },
   ] : [];
   const activeBrief = briefs.find((brief) => brief.id === editingBrief);
 
@@ -168,22 +169,22 @@ export default function ComicAssetsPage() {
     const updated = await apiUpdateComic(comicId, input);
     setComic((current) => current ? { ...current, summary: updated.summary, worldSummary: updated.worldSummary, styleSummary: updated.styleSummary } : current);
     closeBrief();
-    setNotice(`已更新「${activeBrief.title}」`);
+    setNotice(uiCopy.toast.assetSpace.briefUpdated(activeBrief.title));
   };
 
   const uploadVisualStyleReference = async (file: File) => {
     setVisualStyle(await apiUploadComicVisualStyleImage(comicId, file));
-    setNotice("视觉风格图片已上传");
+    setNotice(uiCopy.toast.assetSpace.visualStyleImageUploaded);
   };
 
   const renameVisualStyleReference = async (imageId: string, label: string) => {
-    if (!visualStyle.assetId) throw new Error("视觉风格图片不存在。");
+    if (!visualStyle.assetId) throw new Error(uiCopy.asset.error.visualStyleImageMissing);
     const detail = await apiRenameAssetImage(visualStyle.assetId, imageId, label);
     setVisualStyle({ assetId: detail.root.id, images: detail.root.images });
   };
 
   const deleteVisualStyleReference = async (imageId: string) => {
-    if (!visualStyle.assetId) throw new Error("视觉风格图片不存在。");
+    if (!visualStyle.assetId) throw new Error(uiCopy.asset.error.visualStyleImageMissing);
     const detail = await apiDeleteAssetImage(visualStyle.assetId, imageId);
     setVisualStyle({ assetId: detail.root.id, images: detail.root.images });
   };
@@ -204,7 +205,7 @@ export default function ComicAssetsPage() {
     if (entryId === rootId) {
       setAssets((current) => current.map((asset) => asset.id === entryId ? { ...asset, name: updated.name, description: updated.description, updatedAt: updated.updatedAt } : asset));
     }
-    setNotice(`已更新「${updated.name}」的资产资料`);
+    setNotice(uiCopy.toast.assetSpace.detailsUpdated(updated.name));
   };
 
   const applyImageMutation = (nextDetail: ComicAssetDetail) => {
@@ -223,44 +224,44 @@ export default function ComicAssetsPage() {
   const renameImage = async (entryId: string, imageId: string, label: string) => applyImageMutation(await apiRenameAssetImage(entryId, imageId, label));
   const deleteImage = async (entryId: string, imageId: string) => applyImageMutation(await apiDeleteAssetImage(entryId, imageId));
   const deleteAsset = async (assetId: string) => {
-    const assetName = currentDetailResult?.detail?.root.name ?? "资产";
+    const assetName = currentDetailResult?.detail?.root.name ?? uiCopy.asset.label.asset;
     const deleted = await apiDeleteAsset(assetId);
     setAssets((current) => current.filter((asset) => asset.id !== deleted.id));
     setDetailResult(null);
     closeAssetDetail();
-    setNotice(`已删除资产“${assetName}”`);
+    setNotice(uiCopy.toast.assetSpace.deleted(assetName));
   };
 
   return <main className={`comic-asset-studio-page app-surface route-page-transition ${entryTransition}`}>
     <header className="asset-studio-page-head app-page-wide">
-      <button type="button" className="asset-studio-back app-page-corner-button" aria-label="返回" onClick={goBack}><Icon name="collapse" /></button>
-      <button type="button" className="asset-studio-global-settings app-page-corner-button" aria-label="全局设置" onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}/assets`)}`)}><Icon name="settings" /></button>
+      <button type="button" className="asset-studio-back app-page-corner-button" aria-label={uiCopy.common.action.back} onClick={goBack}><Icon name="collapse" /></button>
+      <button type="button" className="asset-studio-global-settings app-page-corner-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}/assets`)}`)}><Icon name="settings" /></button>
       <div className="asset-studio-page-title app-page-title">
         <span><Icon name="folder" /></span>
-        <div><small>ASSET SPACE</small><h1>资产空间</h1></div>
+        <div><small>{uiCopy.asset.eyebrow.space}</small><h1>{uiCopy.asset.navigation.space}</h1></div>
       </div>
     </header>
     <section className="comic-brief-section app-page-wide" aria-labelledby="comic-brief-title">
       <header>
-        <div><small>CREATIVE BASELINE</small><h2 id="comic-brief-title">创作基线</h2></div>
+        <div><small>{uiCopy.asset.eyebrow.creativeBaseline}</small><h2 id="comic-brief-title">{uiCopy.asset.page.baselineTitle}</h2></div>
       </header>
       <div className="comic-brief-rail">
         {briefs.map((brief) => <button type="button" className={`comic-brief-card comic-brief-card-${brief.id}`} key={brief.id} aria-haspopup="dialog" onClick={(event) => { setBriefReturnFocus(event.currentTarget); setEditingBrief(brief.id); }}>
           <span className="comic-brief-card-icon"><Icon name={brief.icon} /></span>
           <span className="comic-brief-card-copy"><small>{brief.eyebrow}</small><b>{brief.title}</b><span className="comic-brief-card-value">{brief.value || brief.placeholder}</span></span>
         </button>)}
-        {loading ? <div className="comic-brief-card comic-brief-card-skeleton" aria-label="正在读取创作基线" /> : null}
+        {loading ? <div className="comic-brief-card comic-brief-card-skeleton" aria-label={uiCopy.asset.page.baselineLoadingAria} /> : null}
       </div>
     </section>
     <section className="comic-asset-library-section app-page-wide" aria-labelledby="comic-asset-library-title">
-      <header><small>VISUAL ASSETS</small><h2 id="comic-asset-library-title">视觉资产</h2></header>
+      <header><small>{uiCopy.brand.visualAssets}</small><h2 id="comic-asset-library-title">{uiCopy.asset.page.visualAssetsTitle}</h2></header>
       <div className="comic-asset-studio-layout">
-        <nav className="comic-asset-filter" aria-label="资产类型">
+        <nav className="comic-asset-filter" aria-label={uiCopy.asset.label.type}>
           {filters.map((item) => <button type="button" key={item.id} className={filter === item.id ? "active" : ""} onClick={() => setFilterState({ query: requestedFilter, value: item.id })}><span><Icon name={filterIcons[item.id]} /></span>{item.label}</button>)}
         </nav>
         <div className="comic-asset-content" aria-live="polite">
-          {loading ? <div className="comic-asset-loading">正在整理资产…</div> : null}
-          {!loading && !error ? <div className="comic-asset-grid"><button type="button" className="comic-asset-add-card" onClick={(event) => openAssetCreate(event.currentTarget)}><span className="comic-asset-add-card-content"><span><Icon name="add" /></span><b>{addLabel}</b><small>填写资料并按需上传图片</small></span></button>{visibleAssets.map((asset) => <article className="comic-asset-card" key={asset.id}><button type="button" className="asset-card-open" aria-haspopup="dialog" aria-expanded={selectedId === asset.id} onClick={(event) => openAssetDetail(asset.id, event.currentTarget)}><span className="comic-asset-image">{asset.contentUrl ? <img src={asset.contentUrl} alt={`${asset.name}资产封面`} loading="lazy" decoding="async" /> : <i>{assetKindTag(asset.kind)}</i>}{asset.variantCount ? <em>{asset.variantCount + 1} 形态</em> : null}</span><span className="comic-asset-meta"><b>{asset.name}</b><small><i>{assetKindTag(asset.kind)}</i>{assetKindLabel(asset.kind)}</small></span></button>{returnToWorkbench ? <button type="button" className="asset-card-add" data-tooltip="导入当前画布列表" aria-label={`将${asset.name}导入当前画布列表`} disabled={adding} onClick={() => void importToCanvasList(asset)}><Icon name="add" /></button> : null}</article>)}</div> : null}
+          {loading ? <div className="comic-asset-loading">{uiCopy.asset.page.organizing}</div> : null}
+          {!loading && !error ? <div className="comic-asset-grid"><button type="button" className="comic-asset-add-card" onClick={(event) => openAssetCreate(event.currentTarget)}><span className="comic-asset-add-card-content"><span><Icon name="add" /></span><b>{addLabel}</b><small>{uiCopy.asset.page.visualAssetsHint}</small></span></button>{visibleAssets.map((asset) => <article className="comic-asset-card" key={asset.id}><button type="button" className="asset-card-open" aria-haspopup="dialog" aria-expanded={selectedId === asset.id} onClick={(event) => openAssetDetail(asset.id, event.currentTarget)}><span className="comic-asset-image">{asset.contentUrl ? <img src={asset.contentUrl} alt={uiCopy.asset.image.coverAlt(asset.name)} loading="lazy" decoding="async" /> : <i>{assetKindTag(asset.kind)}</i>}{asset.variantCount ? <em>{asset.variantCount + 1} {uiCopy.asset.label.variant}</em> : null}</span><span className="comic-asset-meta"><b>{asset.name}</b><small><i>{assetKindTag(asset.kind)}</i>{assetKindLabel(asset.kind)}</small></span></button>{returnToWorkbench ? <button type="button" className="asset-card-add" data-tooltip={uiCopy.asset.action.importToCanvasList} aria-label={uiCopy.asset.aria.importToCanvasList(asset.name)} disabled={adding} onClick={() => void importToCanvasList(asset)}><Icon name="add" /></button> : null}</article>)}</div> : null}
         </div>
       </div>
     </section>

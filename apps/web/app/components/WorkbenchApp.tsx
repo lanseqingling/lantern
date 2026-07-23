@@ -75,6 +75,7 @@ import {
   apiSaveCanvasAssetToLibrary,
   type RuntimeIds,
 } from "@/app/lib/api-client";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 type HistoryEntry = { fixture: PersistedWorkbench["fixture"]; label: string; kind: "working" | "placement" };
 type ActiveTask = ActiveTaskLike;
@@ -140,10 +141,10 @@ type ComposerReference = {
   dialogueText?: string;
 };
 
-const noSelection: Selection = { type: "none", label: "未选择对象" };
+const noSelection: Selection = { type: "none", label: uiCopy.workbench.selection.none };
 
 function referenceMention(reference: NonNullable<AgentMessage["explicitReferences"]>[number]) {
-  const fallback = reference.objectType === "canvas_element" ? "当前对象" : reference.objectType === "storyboard_beat" ? "单格画面" : "资产";
+  const fallback = reference.objectType === "canvas_element" ? uiCopy.workbench.defaultLabel.currentObject : reference.objectType === "storyboard_beat" ? uiCopy.workbench.creationSpace.frameSectionTitle : uiCopy.asset.label.asset;
   const label = (reference.label?.trim() || fallback).split("·")[0].replace(/\s+/g, "");
   return `@${label}`;
 }
@@ -160,7 +161,7 @@ function NumberStepper({ ariaLabel, value, step = 1, onChange, onAdjust }: { ari
     const [whole = "", ...fraction] = cleaned.split(".");
     return fraction.length ? `${whole}.${fraction.join("")}` : whole;
   };
-  return <div className="font-size-stepper"><input type="text" inputMode={decimal ? "decimal" : "numeric"} aria-label={ariaLabel} value={value} onChange={(event) => onChange(sanitize(event.target.value))} /><span><button type="button" aria-label={`${ariaLabel}增加${step}`} onClick={() => onAdjust(step)}>＋</button><button type="button" aria-label={`${ariaLabel}减少${step}`} onClick={() => onAdjust(-step)}>−</button></span></div>;
+  return <div className="font-size-stepper"><input type="text" inputMode={decimal ? "decimal" : "numeric"} aria-label={ariaLabel} value={value} onChange={(event) => onChange(sanitize(event.target.value))} /><span><button type="button" aria-label={uiCopy.workbench.aria.increment(ariaLabel, step)} onClick={() => onAdjust(step)}>＋</button><button type="button" aria-label={uiCopy.workbench.aria.decrement(ariaLabel, step)} onClick={() => onAdjust(-step)}>−</button></span></div>;
 }
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 // Keep new references clear of the left creation drawer while still close enough
@@ -171,25 +172,25 @@ const verticalWheelResetMs = 220;
 const verticalWheelLockMs = 320;
 const verticalNavigatorHideMs = 700;
 const canvasAssetSaveTypeOptions: Array<{ value: CanvasAssetSaveKind; label: string }> = [
-  { value: "character", label: "角色" },
-  { value: "scene", label: "场景" },
-  { value: "prop", label: "道具" },
-  { value: "reference_image", label: "图片" },
+  { value: "character", label: uiCopy.asset.kind.character },
+  { value: "scene", label: uiCopy.asset.kind.scene },
+  { value: "prop", label: uiCopy.asset.kind.prop },
+  { value: "reference_image", label: uiCopy.asset.kind.image },
 ];
 const canvasAssetThumbnail = (asset: AssetSummary) => asset.images?.find((image) => image.isPrimary && image.contentUrl)?.contentUrl
   ?? asset.images?.find((image) => image.contentUrl)?.contentUrl
   ?? asset.contentUrl
   ?? asset.versions?.find((version) => version.contentUrl)?.contentUrl;
 const balloonStyleOptions = [
-  { value: "normal", label: "对话气泡" },
-  { value: "thought", label: "无尾气泡" },
-  { value: "cut_corner", label: "切角对白" },
-  { value: "caption_box", label: "方框对白" },
-  { value: "thought_balloon", label: "思考气泡", disabled: true },
-  { value: "burst_balloon", label: "喊叫气泡", disabled: true },
-  { value: "whisper_balloon", label: "低语气泡", disabled: true },
-  { value: "broadcast_balloon", label: "电子气泡", disabled: true },
-  { value: "wavy_balloon", label: "颤抖气泡", disabled: true },
+  { value: "normal", label: uiCopy.workbench.balloonStyle.dialogue },
+  { value: "thought", label: uiCopy.workbench.balloonStyle.noTail },
+  { value: "cut_corner", label: uiCopy.workbench.balloonStyle.cutCorner },
+  { value: "caption_box", label: uiCopy.workbench.balloonStyle.box },
+  { value: "thought_balloon", label: uiCopy.workbench.balloonStyle.thought, disabled: true },
+  { value: "burst_balloon", label: uiCopy.workbench.balloonStyle.shout, disabled: true },
+  { value: "whisper_balloon", label: uiCopy.workbench.balloonStyle.whisper, disabled: true },
+  { value: "broadcast_balloon", label: uiCopy.workbench.balloonStyle.electronic, disabled: true },
+  { value: "wavy_balloon", label: uiCopy.workbench.balloonStyle.tremble, disabled: true },
 ];
 
 function AspectRatioGlyph({ ratio }: { ratio: VerticalSegmentAspectRatio }) {
@@ -205,13 +206,13 @@ function DeviceViewportGlyph({ mode }: { mode: VerticalViewportMode }) {
 
 function defaultComicPageName(page: ComicPage, index: number) {
   const number = String(index + 1).padStart(2, "0");
-  return page.kind === "vertical_segment" ? `滚动段 ${number}` : page.kind === "four_panel_unit" ? `四格 ${number}` : `Page ${number}`;
+  return page.kind === "vertical_segment" ? uiCopy.workbench.label.segment(number) : page.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanel(number) : uiCopy.workbench.label.page(number);
 }
 
 function presentationUnitNumberLabel(unit: PresentationUnit, fallbackIndex: number) {
   const numbers = unit.surfaces.map((surface) => surface.pageNumber).filter((number): number is number => typeof number === "number").sort((a, b) => a - b);
   const range = numbers.length > 1 ? `${String(numbers[0]).padStart(2, "0")}–${String(numbers.at(-1)).padStart(2, "0")}` : String(numbers[0] ?? fallbackIndex + 1).padStart(2, "0");
-  return unit.kind === "vertical_segment" ? `滚动段 ${range}` : unit.kind === "four_panel_unit" ? `四格 ${range}` : `Page ${range}`;
+  return unit.kind === "vertical_segment" ? uiCopy.workbench.label.segment(range) : unit.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanel(range) : uiCopy.workbench.label.page(range);
 }
 
 function closestVerticalSegmentRatio(width: number, height: number): VerticalSegmentAspectRatio {
@@ -245,7 +246,7 @@ function repairSelectionForState(current: Selection, nextState: PersistedWorkben
   if (found) return current;
   const page = pages[nextState.currentPageIndex] ?? pages[0];
   const firstFrame = page?.elements.find((element) => element.type === "comic_frame");
-  return firstFrame ? { type: "comic_frame", id: firstFrame.id, pageId: page.id, label: "格子 1" } : noSelection;
+  return firstFrame ? { type: "comic_frame", id: firstFrame.id, pageId: page.id, label: uiCopy.workbench.label.frame(1) } : noSelection;
 }
 
 function overlapArea(a: DOMRect | { left: number; top: number; right: number; bottom: number }, b: { left: number; top: number; right: number; bottom: number }) {
@@ -277,8 +278,8 @@ function frameImageCandidateAssetVersionId(candidate: Candidate) {
 }
 
 function projectFrameImageCandidate(fixture: PersistedWorkbench["fixture"], candidate: Candidate) {
-  if (candidate.kind !== "frame_image" || !candidate.commands?.length) throw new Error("这个候选没有可预览的单格画面");
-  if (candidate.baseRevision !== fixture.working.revision) throw new Error("候选基于旧工作稿，无法继续预览");
+  if (candidate.kind !== "frame_image" || !candidate.commands?.length) throw new Error(uiCopy.workbench.candidate.noFramePreview);
+  if (candidate.baseRevision !== fixture.working.revision) throw new Error(uiCopy.workbench.candidate.stalePreview);
   return applyWorkspaceChangeSet(
     { working: fixture.working, storyboardBeats: fixture.storyboardBeats },
     {
@@ -320,9 +321,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [runtimeError, setRuntimeError] = useState("");
   const showInitialLoading = useDelayedLoadingIndicator(!hydrated && !runtimeError);
   const [runtimeIds, setRuntimeIds] = useState<RuntimeIds | null>(null);
-  const [workbenchMeta, setWorkbenchMeta] = useState({ comicTitle: "正在载入", chapterTitle: "当前一话" });
+  const [workbenchMeta, setWorkbenchMeta] = useState<{ comicTitle: string; chapterTitle: string }>({ comicTitle: uiCopy.workbench.defaultLabel.loading, chapterTitle: uiCopy.workbench.defaultLabel.currentChapter });
   const [selection, setSelection] = useState<Selection>(noSelection);
-  const [scope, setScope] = useState("当前一话");
+  const [scope, setScope] = useState<string>(uiCopy.workbench.defaultLabel.currentChapter);
   const [composer, setComposer] = useState("");
   const [explicitReferences, setExplicitReferences] = useState<ComposerReference[]>([]);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
@@ -553,26 +554,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   useEffect(() => {
     if (!hydrated || !assetCreateIntent) return;
-    let copy = assetCreateIntent === "character" ? "创建一个角色" : assetCreateIntent === "scene" ? "创建一个场景" : assetCreateIntent === "prop" ? "创建一个道具" : assetCreateIntent === "reference" ? "我想添加一张图片" : "创建一个新资产";
+    let copy: string = assetCreateIntent === "character" ? uiCopy.asset.create.intent.character : assetCreateIntent === "scene" ? uiCopy.asset.create.intent.scene : assetCreateIntent === "prop" ? uiCopy.asset.create.intent.prop : assetCreateIntent === "reference" ? uiCopy.asset.create.intent.reference : uiCopy.asset.create.intent.asset;
     if (assetCreateDraft) {
       try {
         const draft = JSON.parse(assetCreateDraft) as { kind?: string; name?: string; description?: string };
-        const kind = draft.kind === "character" ? "角色" : draft.kind === "scene" ? "场景" : draft.kind === "prop" ? "道具" : draft.kind === "reference_image" ? "图片" : "资产";
-        copy = [
-          `创建一个${kind}：`,
-          draft.name?.trim() ? `名称：${draft.name.trim()}` : "",
-          draft.description?.trim() ? `描述：${draft.description.trim()}` : "",
-        ].filter(Boolean).join("\n");
+        const kind = draft.kind === "character" ? uiCopy.asset.kind.character : draft.kind === "scene" ? uiCopy.asset.kind.scene : draft.kind === "prop" ? uiCopy.asset.kind.prop : draft.kind === "reference_image" ? uiCopy.asset.kind.image : uiCopy.asset.label.asset;
+      copy = uiCopy.asset.create.agentPrompt(kind, draft.name?.trim(), draft.description?.trim());
       } catch {
         // Keep the intent-only draft when a stale route parameter cannot be parsed.
       }
     }
     const timer = window.setTimeout(() => {
       setComposer(copy);
-      setScope("当前漫画资产");
+      setScope(uiCopy.workbench.scope.currentComicAssets);
       setAgentOpen(true);
       setLeftView("assets");
-      setToast("已准备好创建资产，补充描述后发送给 Agent。");
+      setToast(uiCopy.toast.workbench.assetCreation.readyForAgent);
       const params = new URLSearchParams(window.location.search);
       params.delete("assetCreate");
       params.delete("assetDraft");
@@ -601,7 +598,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const refreshContextDebug = async () => {
     if (runtimeAdapter !== "server" || !runtimeIds) {
-      setContextDebugError("当前处于离线演示模式，无法读取服务端上下文。");
+      setContextDebugError(uiCopy.workbench.contextDebug.offline);
       return;
     }
     setContextDebugLoading(true);
@@ -623,7 +620,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setContextDebugSnapshot(snapshot);
       setContextDebugText(JSON.stringify(snapshot, null, 2));
     } catch (error) {
-      setContextDebugError(error instanceof Error ? error.message : "读取当前上下文失败");
+      setContextDebugError(error instanceof Error ? error.message : uiCopy.workbench.contextDebug.loadFailed);
     } finally {
       setContextDebugLoading(false);
     }
@@ -683,11 +680,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (!file || importingArchive) return;
     setProjectMenu(false);
     if (runtimeAdapter !== "server" || !runtimeIds) {
-      setToast("演示模式暂不支持导入完整 LCD 资源");
+      setToast(uiCopy.toast.workbench.archive.demoImportUnsupported);
       return;
     }
     if (activeTaskRef.current?.status === "running") {
-      setToast("请先等待或停止当前 Agent 任务，再导入完整 LCD 资源");
+      setToast(uiCopy.toast.workbench.archive.stopTaskBeforeImport);
       return;
     }
     setImportingArchive(true);
@@ -700,9 +697,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setFrameImageCandidatePreview(null);
       setMultiSelection(null);
       await refreshServerWorkbench(runtimeIds.conversationId, true);
-      setToast(`已导入完整 LCD 资源 · r${result.revision}`);
+      setToast(uiCopy.toast.workbench.archive.imported(result.revision));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "完整 LCD 资源导入失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.archive.importFailed);
     } finally {
       setImportingArchive(false);
     }
@@ -757,7 +754,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       } catch (error) {
         if (canceled) return;
         setRuntimeAdapter("server");
-        setRuntimeError(error instanceof Error ? error.message : "无法连接 Lantern API");
+        setRuntimeError(error instanceof Error ? error.message : uiCopy.workbench.error.apiUnavailable);
       } finally {
         if (!canceled) setHydrated(true);
       }
@@ -823,7 +820,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         pageIndex,
         beat: frame.linkedStoryboardBeatId === "unassigned" ? undefined : beatById.get(frame.linkedStoryboardBeatId),
       })))
-      .map((row, index) => ({ ...row, label: `画格 ${String(index + 1).padStart(2, "0")}` }));
+      .map((row, index) => ({ ...row, label: uiCopy.workbench.label.frame(index + 1) }));
   }, [state.fixture.storyboardBeats, workingPages]);
   const page = workingPages[state.currentPageIndex] ?? workingPages[0];
   const previewCandidate = frameImageCandidatePreview
@@ -954,13 +951,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const storyboardBeats = debugArray(modelInput.storyboardBeats);
     const pages = debugArray(debugRecord(snapshot.resolvedWorkspace).pages);
     return [
-      { id: "raw" as const, label: "原始 JSON", detail: "完整可复制快照", value: snapshot },
-      { id: "input" as const, label: "输入与焦点", detail: `当前指令 · ${debugRecord(modelInput.task).type ?? "未指定"}`, value: { clientInput: snapshot.clientInput, modelTask: modelInput.task, focus: contextIndex.focus } },
-      { id: "world" as const, label: "世界观背景", detail: indexWorld.summary ? "漫画级长期设定" : "尚未填写", value: Object.keys(indexWorld).length ? indexWorld : { summary: debugRecord(modelInput.comic).worldSummary ?? "" } },
-      { id: "assets" as const, label: "角色与场景", detail: `${assets.length} 个上下文资产`, value: Object.keys(indexAssets).length ? indexAssets : { assets } },
-      { id: "storyboard" as const, label: "分镜条目", detail: `${storyboardBeats.length} 个实际送入模型`, value: Object.keys(indexStoryboard).length ? indexStoryboard : { storyboardBeats, omittedContext: modelInput.omittedContext } },
-      { id: "page" as const, label: "当前页面", detail: `${pages.length} 页工作稿`, value: Object.keys(indexLayout).length ? indexLayout : { pages } },
-      { id: "activity" as const, label: "任务与会话", detail: "候选、任务、最近消息", value: Object.keys(indexActivity).length ? indexActivity : { tasks: debugRecord(snapshot.resolvedWorkspace).taskHistory, conversation: snapshot.conversation } },
+      { id: "raw" as const, label: uiCopy.workbench.contextDebug.section.rawJson, detail: uiCopy.workbench.contextDebug.snapshotLabel, value: snapshot },
+      { id: "input" as const, label: uiCopy.workbench.contextDebug.section.inputAndFocus, detail: uiCopy.workbench.contextDebug.currentInstruction(String(debugRecord(modelInput.task).type ?? "")), value: { clientInput: snapshot.clientInput, modelTask: modelInput.task, focus: contextIndex.focus } },
+      { id: "world" as const, label: uiCopy.workbench.contextDebug.section.worldBackground, detail: indexWorld.summary ? uiCopy.workbench.contextDebug.longTermSetting : uiCopy.workbench.contextDebug.emptySetting, value: Object.keys(indexWorld).length ? indexWorld : { summary: debugRecord(modelInput.comic).worldSummary ?? "" } },
+      { id: "assets" as const, label: uiCopy.workbench.contextDebug.section.castAndScenes, detail: uiCopy.workbench.contextDebug.assetCount(assets.length), value: Object.keys(indexAssets).length ? indexAssets : { assets } },
+      { id: "storyboard" as const, label: uiCopy.workbench.frameEditor.storyboardTitle, detail: uiCopy.workbench.contextDebug.storyboardCount(storyboardBeats.length), value: Object.keys(indexStoryboard).length ? indexStoryboard : { storyboardBeats, omittedContext: modelInput.omittedContext } },
+      { id: "page" as const, label: uiCopy.workbench.scope.currentPage, detail: uiCopy.workbench.contextDebug.pageCount(pages.length), value: Object.keys(indexLayout).length ? indexLayout : { pages } },
+      { id: "activity" as const, label: uiCopy.workbench.contextDebug.section.tasksAndSessions, detail: uiCopy.workbench.contextDebug.recentActivity, value: Object.keys(indexActivity).length ? indexActivity : { tasks: debugRecord(snapshot.resolvedWorkspace).taskHistory, conversation: snapshot.conversation } },
     ];
   }, [contextDebugSnapshot]);
   const pageThumbSrc = (comicPage: ComicPage) => {
@@ -1143,7 +1140,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const switchConversation = async (conversationId: string) => {
     if (activeTask?.status === "running") {
-      setToast("请先停止当前任务，再切换对话");
+      setToast(uiCopy.toast.workbench.session.stopTaskBeforeSwitch);
       return;
     }
     try {
@@ -1151,16 +1148,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setAgentScrollRequest((request) => request + 1);
       setSessionDrawerOpen(false);
       setResolvedCardIds(new Set());
-      setToast("已切换对话");
+      setToast(uiCopy.toast.workbench.session.switched);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "对话切换失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.session.switchFailed);
     }
   };
 
   const createConversation = async () => {
     const title = sessionTitleDraft.trim();
     if (!title) {
-      setToast("请先填写对话名称");
+      setToast(uiCopy.toast.workbench.session.createNameRequired);
       return;
     }
     if (runtimeAdapter !== "server" || !runtimeIds) {
@@ -1170,7 +1167,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setSessionDrawerOpen(false);
       setSessionCreateOpen(false);
       setSessionTitleDraft("");
-      setToast("已创建新的离线对话");
+      setToast(uiCopy.toast.workbench.session.offlineCreated);
       return;
     }
     try {
@@ -1181,16 +1178,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setSessionCreateOpen(false);
       setSessionTitleDraft("");
       setResolvedCardIds(new Set());
-      setToast("新对话已创建");
+      setToast(uiCopy.toast.workbench.session.created);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "创建对话失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.session.createFailed);
     }
   };
 
   const renameConversation = async (conversationId: string) => {
     const title = sessionRenameDraft.trim();
     if (!title) {
-      setToast("请填写对话名称");
+      setToast(uiCopy.toast.workbench.session.renameNameRequired);
       return;
     }
     try {
@@ -1203,22 +1200,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setSessionRenameId(null);
       setSessionMenuId(null);
       setSessionRenameDraft("");
-      setToast("对话已重命名");
+      setToast(uiCopy.toast.workbench.session.renamed);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "重命名失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.common.renameFailed);
     }
   };
 
   const deleteConversation = async (conversationId: string) => {
     if (activeTask?.status === "running") {
-      setToast("请先停止当前任务，再删除对话");
+      setToast(uiCopy.toast.workbench.session.stopTaskBeforeDelete);
       return;
     }
     try {
       if (runtimeAdapter === "server" && runtimeIds) {
         const isCurrent = conversationId === runtimeIds.conversationId;
         const next = state.conversations?.find((conversation) => conversation.id !== conversationId);
-        const replacement = isCurrent && !next ? await apiCreateConversation(runtimeIds.projectId, "新的创作对话") : undefined;
+        const replacement = isCurrent && !next ? await apiCreateConversation(runtimeIds.projectId, uiCopy.workbench.chat.newConversationTitle) : undefined;
         await apiUpdateConversation(conversationId, { archived: true });
         await refreshServerWorkbench(isCurrent ? (next?.id ?? replacement?.id) : undefined);
         if (isCurrent) setAgentScrollRequest((request) => request + 1);
@@ -1227,9 +1224,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       }
       setSessionRenameId(null);
       setSessionMenuId(null);
-      setToast("对话已删除");
+      setToast(uiCopy.toast.workbench.session.deleted);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "删除对话失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.session.deleteFailed);
     }
   };
 
@@ -1240,12 +1237,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         await apiCancelTask(activeTask.id);
         await refreshServerWorkbench();
       } catch (error) {
-        setToast(error instanceof Error ? error.message : "取消失败");
+        setToast(error instanceof Error ? error.message : uiCopy.toast.common.cancelFailed);
       }
       return;
     }
     setActiveTask({ ...activeTask, status: "canceled" });
-    addMessage({ role: "agent", kind: "canceled", text: "任务已取消，没有产生可应用结果。" });
+    addMessage({ role: "agent", kind: "canceled", text: uiCopy.workbench.task.cancelledMessage });
   };
 
   const pushHistory = (fixture: PersistedWorkbench["fixture"], label: string, kind: HistoryEntry["kind"]) => {
@@ -1255,7 +1252,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const commitOperations = (operations: WorkspaceOperation[], label: string, source: WorkspaceChangeSet["source"], candidateId?: string, nextPageIndex?: number, onApplied?: () => void, options?: { recordHistory?: boolean; resolvedResources?: PersistedWorkbench["fixture"]["working"]["resolvedResources"] }) => {
     if (restoringSnapshot) {
-      setToast("正在回到上次保存，请稍候");
+      setToast(uiCopy.toast.workbench.draft.restoring);
       return false;
     }
     const currentState = stateRef.current;
@@ -1274,7 +1271,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         },
       );
     } catch (error) {
-      setToast(error instanceof Error && error.message.includes("REVISION_CONFLICT") ? "工作稿已变化，请重新操作" : error instanceof Error ? error.message : "变更未应用，旧内容保持不变");
+      setToast(error instanceof Error && error.message.includes("REVISION_CONFLICT") ? uiCopy.toast.workbench.draft.revisionConflict : error instanceof Error ? error.message : uiCopy.toast.workbench.draft.changeNotApplied);
       return false;
     }
     const changeSet = {
@@ -1303,7 +1300,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     onApplied?.();
 
     if (runtimeAdapter === "server" && runtimeIds) {
-      setToast(`${label} · 正在持久化`);
+      setToast(uiCopy.toast.workbench.draft.persisting(label));
       const generation = serverCommitGenerationRef.current;
       serverPendingCommitCountRef.current += 1;
       const persist = serverCommitQueueRef.current.then(async () => {
@@ -1317,20 +1314,20 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           stateRef.current = next;
           return next;
         });
-        if (!serverPendingCommitCountRef.current) setToast(`${label} · 工作稿 r${persisted.working.revision}`);
+        if (!serverPendingCommitCountRef.current) setToast(uiCopy.toast.workbench.draft.persisted(label, persisted.working.revision));
       }).catch(async (error) => {
         if (generation !== serverCommitGenerationRef.current) return;
         serverCommitGenerationRef.current += 1;
         serverPendingCommitCountRef.current = 0;
         setHistory([]);
         setFuture([]);
-        setToast(error instanceof Error ? `${error.message}，已重新载入工作稿` : "持久化失败，已重新载入工作稿");
+        setToast(error instanceof Error ? uiCopy.toast.workbench.draft.reloadedAfterError(error.message) : uiCopy.toast.workbench.draft.persistenceFailed);
         await refreshServerWorkbench(undefined, true).catch(() => undefined);
       });
       serverCommitQueueRef.current = persist.then(() => undefined);
       return true;
     }
-    setToast(`${label} · 工作稿 r${result.working.revision}`);
+    setToast(uiCopy.toast.workbench.draft.persisted(label, result.working.revision));
     return true;
   };
 
@@ -1347,7 +1344,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const plan = planCapabilities(requests);
       return commitOperations(plan.commands, label, "manual", undefined, nextPageIndex);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "编辑能力输入无效");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.draft.invalidCapabilityInput);
       return false;
     }
   };
@@ -1382,7 +1379,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setEditingStoryboardTarget(null);
     setEditDraft(editImmediately && next.type === "speech_balloon" ? { dialogue: "" } : {});
     setInspectorOpen(editImmediately);
-    setScope(next.type === "speech_balloon" ? "当前气泡" : next.type === "text" ? "当前旁白" : next.type === "image" ? "格内图片裁切" : "当前漫画格");
+    setScope(next.type === "speech_balloon" ? uiCopy.workbench.scope.balloon : next.type === "text" ? uiCopy.workbench.scope.narration : next.type === "image" ? uiCopy.workbench.scope.frameImageCrop : uiCopy.workbench.scope.comicFrame);
   };
 
   const createFrameAt = (unitId: string, position: { x: number; y: number }) => {
@@ -1391,9 +1388,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const command = plan.commands.find((operation) => operation.type === "add_frame");
       if (!command || command.type !== "add_frame") return;
       setComicContextMenu(null);
-      commitOperations(plan.commands, "新增画格", "manual", undefined, undefined, () => selectCreatedObject({ type: "comic_frame", id: command.frame.id, pageId: unitId, label: "新画格" }));
+      commitOperations(plan.commands, uiCopy.workbench.action.addFrame, "manual", undefined, undefined, () => selectCreatedObject({ type: "comic_frame", id: command.frame.id, pageId: unitId, label: uiCopy.workbench.defaultLabel.newFrame }));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法新增画格");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.addFrameFailed);
     }
   };
 
@@ -1404,15 +1401,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const command = plan.commands.find((operation) => operation.type === "add_frame");
       if (!command || command.type !== "add_frame") return;
       setComicContextMenu(null);
-      commitOperations(plan.commands, "复制画格", "manual", undefined, undefined, () => selectCreatedObject({ type: "comic_frame", id: command.frame.id, pageId: target.pageId, label: command.frame.name ?? "画格副本" }));
+      commitOperations(plan.commands, uiCopy.workbench.action.duplicateFrame, "manual", undefined, undefined, () => selectCreatedObject({ type: "comic_frame", id: command.frame.id, pageId: target.pageId, label: command.frame.name ?? uiCopy.workbench.defaultLabel.frameCopy }));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法复制画格");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.duplicateFrameFailed);
     }
   };
 
   const deleteFrame = (target: Selection) => {
     if (!target.pageId || !target.id) return;
-    if (commitCapability("delete_frame", { unitId: target.pageId, frameId: target.id }, "删除画格")) {
+    if (commitCapability("delete_frame", { unitId: target.pageId, frameId: target.id }, uiCopy.workbench.action.deleteFrame)) {
       setComicDeleteTarget(null);
       setComicContextMenu(null);
       setSelection(noSelection);
@@ -1423,12 +1420,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const removeFrameImage = (target: Selection) => {
     const { frame, image } = frameAndImageForSelection(target);
     if (!target.pageId || !image) return;
-    const label = image.location.space === "frame" ? "移除格内图片" : image.location.purpose === "cross_page" ? "移除跨页图片" : image.location.purpose === "cross_segment" ? "移除跨段图片" : "移除纸面图片";
+    const label = image.location.space === "frame" ? uiCopy.workbench.operation.removeFrameImage : image.location.purpose === "cross_page" ? uiCopy.workbench.operation.removeCrossPageImage : image.location.purpose === "cross_segment" ? uiCopy.workbench.operation.removeCrossSegmentImage : uiCopy.workbench.operation.removePaperImage;
     if (commitCapability("remove_frame_image", { unitId: target.pageId, frameId: image.location.space === "frame" ? image.location.frameId : undefined, layerId: image.layerId, elementId: image.id }, label)) {
       setComicDeleteTarget(null);
       setComicContextMenu(null);
-      if (frame) selectCreatedObject({ type: "comic_frame", id: frame.id, pageId: target.pageId, label: "当前画格" });
-      else selectCreatedObject({ type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: "当前页面" });
+      if (frame) selectCreatedObject({ type: "comic_frame", id: frame.id, pageId: target.pageId, label: uiCopy.workbench.scope.currentFrame });
+      else selectCreatedObject({ type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: uiCopy.workbench.scope.currentPage });
     }
   };
 
@@ -1437,7 +1434,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const targetElement = elementForSelection(target);
     if (targetElement?.type === "image" && targetElement.location.space === "overlay" && !placement) {
       setComicContextMenu(null);
-      setToast("该图片需要先删除，再重新放入");
+      setToast(uiCopy.toast.workbench.editing.replaceImageFirst);
       return;
     }
     setComicContextMenu(null);
@@ -1464,15 +1461,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const added = plan.commands.find((operation) => (operation.type === "add_layer_element" || operation.type === "add_overlay_element") && operation.element.kind === "image");
       const elementId = added && (added.type === "add_layer_element" || added.type === "add_overlay_element") ? added.element.id : image?.id;
       setFrameImageTarget(null);
-      const label = frameImageTarget?.placement === "cross_page" ? "放入跨页图片" : frameImageTarget?.placement === "cross_segment" ? "放入跨段图片" : image ? "更换图片" : frame ? "放入格内图片" : "放入纸面图片";
+      const label = frameImageTarget?.placement === "cross_page" ? uiCopy.workbench.imagePicker.placeCrossPage : frameImageTarget?.placement === "cross_segment" ? uiCopy.workbench.imagePicker.placeCrossSegment : image ? uiCopy.asset.action.changeImage : frame ? uiCopy.workbench.action.placeFrameImage : uiCopy.workbench.imagePicker.placePaper;
       commitOperations(plan.commands, label, "manual", undefined, undefined, () => {
         if (choice.url && runtimeAdapter !== "server") {
           setState((current) => ({ ...current, fixture: { ...current.fixture, working: { ...current.fixture.working, resolvedResources: { ...current.fixture.working.resolvedResources, [choice.assetVersionId]: { url: choice.url! } } } } }));
         }
-        if (elementId) selectCreatedObject({ type: "image", id: elementId, pageId: target.pageId, label: frameImageTarget?.placement === "cross_page" ? "跨页图片" : frameImageTarget?.placement === "cross_segment" ? "跨段图片" : frame ? "格内主图" : "纸面图片" });
+        if (elementId) selectCreatedObject({ type: "image", id: elementId, pageId: target.pageId, label: frameImageTarget?.placement === "cross_page" ? uiCopy.workbench.object.crossPageImage : frameImageTarget?.placement === "cross_segment" ? uiCopy.workbench.object.crossSegmentImage : frame ? uiCopy.workbench.defaultLabel.framePrimaryImage : uiCopy.workbench.defaultLabel.paperImage });
       });
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法放入图片");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.placeImageFailed);
     }
   };
 
@@ -1481,7 +1478,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (!target.pageId || !element || element.type !== "image") return;
     const frameId = element.location.space === "frame" ? element.location.frameId : undefined;
     const capability = purpose === "cross_page" ? "convert_image_to_cross_page" : "convert_image_to_cross_segment";
-    if (commitCapability(capability, { unitId: target.pageId, frameId, layerId: element.location.layerId, elementId: element.id }, purpose === "cross_page" ? "设为跨页图片" : "设为跨段图片")) {
+    if (commitCapability(capability, { unitId: target.pageId, frameId, layerId: element.location.layerId, elementId: element.id }, purpose === "cross_page" ? uiCopy.workbench.action.placeCrossPageImage : uiCopy.workbench.action.placeCrossSegmentImage)) {
       setComicContextMenu(null);
     }
   };
@@ -1490,7 +1487,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const element = elementForSelection(target);
     if (!target.pageId || element?.type !== "speech_balloon") return;
     const frameId = element.location.space === "frame" ? element.location.frameId : undefined;
-    if (commitCapability("convert_balloon_to_cross_page", { unitId: target.pageId, frameId, layerId: element.layerId, elementId: element.id }, "设为跨页对白")) {
+    if (commitCapability("convert_balloon_to_cross_page", { unitId: target.pageId, frameId, layerId: element.layerId, elementId: element.id }, uiCopy.workbench.action.placeCrossPageBalloon)) {
       setComicContextMenu(null);
       setObjectInteractionMode("move");
     }
@@ -1504,9 +1501,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setCreationMode(null);
       setCreationPointer(null);
       setComicContextMenu(null);
-      commitOperations(plan.commands, "新增对白", "manual", undefined, undefined, () => selectCreatedObject({ type: "speech_balloon", id: command.element.id, pageId: unitId, label: "新对白" }, true));
+      commitOperations(plan.commands, uiCopy.workbench.action.addDialogue, "manual", undefined, undefined, () => selectCreatedObject({ type: "speech_balloon", id: command.element.id, pageId: unitId, label: uiCopy.workbench.defaultLabel.newDialogue }, true));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法新增对白");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.addDialogueFailed);
     }
   };
 
@@ -1518,9 +1515,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setCreationMode(null);
       setCreationPointer(null);
       setComicContextMenu(null);
-      commitOperations(plan.commands, "新增纸面对白", "manual", undefined, undefined, () => selectCreatedObject({ type: "speech_balloon", id: command.element.id, pageId: unitId, label: "纸面对白" }, true));
+      commitOperations(plan.commands, uiCopy.workbench.action.addPaperDialogue, "manual", undefined, undefined, () => selectCreatedObject({ type: "speech_balloon", id: command.element.id, pageId: unitId, label: uiCopy.workbench.defaultLabel.paperDialogue }, true));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法新增纸面对白");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.addPaperDialogueFailed);
     }
   };
 
@@ -1533,9 +1530,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setCreationPointer(null);
       setComicContextMenu(null);
       const order = (workingPages.find((page) => page.id === unitId)?.elements.filter((element) => element.type === "text" && element.content.role === "narration").length ?? 0) + 1;
-      commitOperations(plan.commands, "新增旁白", "manual", undefined, undefined, () => selectCreatedObject({ type: "text", id: command.element.id, pageId: unitId, label: `旁白 ${String(order).padStart(2, "0")}` }, true));
+      commitOperations(plan.commands, uiCopy.workbench.operation.addNarration, "manual", undefined, undefined, () => selectCreatedObject({ type: "text", id: command.element.id, pageId: unitId, label: uiCopy.workbench.label.narration(order) }, true));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法新增旁白");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.addNarrationFailed);
     }
   };
 
@@ -1556,19 +1553,19 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const command = plan.commands.find((operation) => (operation.type === "add_layer_element" || operation.type === "add_overlay_element") && operation.element.kind === "balloon");
       if (!command || (command.type !== "add_layer_element" && command.type !== "add_overlay_element")) return;
       setComicContextMenu(null);
-      commitOperations(plan.commands, "复制对白", "manual", undefined, undefined, () => selectCreatedObject({ type: "speech_balloon", id: command.element.id, pageId: target.pageId, label: "对白副本" }));
+      commitOperations(plan.commands, uiCopy.workbench.action.duplicateDialogue, "manual", undefined, undefined, () => selectCreatedObject({ type: "speech_balloon", id: command.element.id, pageId: target.pageId, label: uiCopy.workbench.defaultLabel.dialogueCopy }));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法复制对白");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.duplicateDialogueFailed);
     }
   };
 
   const deleteDialogueBalloon = (target: Selection) => {
     const element = elementForSelection(target);
     if (!target.pageId || element?.type !== "speech_balloon") return;
-    if (commitCapability("delete_dialogue_balloon", { unitId: target.pageId, frameId: element.location.space === "frame" ? element.location.frameId : undefined, layerId: element.layerId, elementId: element.id }, "删除对白")) {
+    if (commitCapability("delete_dialogue_balloon", { unitId: target.pageId, frameId: element.location.space === "frame" ? element.location.frameId : undefined, layerId: element.layerId, elementId: element.id }, uiCopy.workbench.action.deleteDialogue)) {
       setComicDeleteTarget(null);
       setComicContextMenu(null);
-      setSelection(element.comicFrameId ? { type: "comic_frame", id: element.comicFrameId, pageId: target.pageId, label: "当前画格" } : { type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: "当前页面" });
+      setSelection(element.comicFrameId ? { type: "comic_frame", id: element.comicFrameId, pageId: target.pageId, label: uiCopy.workbench.scope.currentFrame } : { type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: uiCopy.workbench.scope.currentPage });
       setInspectorOpen(false);
     }
   };
@@ -1582,19 +1579,19 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       if (!command || command.type !== "add_overlay_element") return;
       setComicContextMenu(null);
       const order = (workingPages.find((page) => page.id === target.pageId)?.elements.filter((item) => item.type === "text" && item.content.role === "narration").length ?? 0) + 1;
-      commitOperations(plan.commands, "复制旁白", "manual", undefined, undefined, () => selectCreatedObject({ type: "text", id: command.element.id, pageId: target.pageId, label: `旁白 ${String(order).padStart(2, "0")}` }));
+      commitOperations(plan.commands, uiCopy.workbench.action.duplicateNarration, "manual", undefined, undefined, () => selectCreatedObject({ type: "text", id: command.element.id, pageId: target.pageId, label: uiCopy.workbench.label.narration(order) }));
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法复制旁白");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.duplicateNarrationFailed);
     }
   };
 
   const deleteNarration = (target: Selection) => {
     const element = elementForSelection(target);
     if (!target.pageId || element?.type !== "text" || element.location.space !== "overlay") return;
-    if (commitCapability("delete_narration", { unitId: target.pageId, layerId: element.layerId, elementId: element.id }, "删除旁白")) {
+    if (commitCapability("delete_narration", { unitId: target.pageId, layerId: element.layerId, elementId: element.id }, uiCopy.workbench.action.deleteNarration)) {
       setComicDeleteTarget(null);
       setComicContextMenu(null);
-      setSelection({ type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: "当前页面" });
+      setSelection({ type: "presentation_unit", id: target.pageId, pageId: target.pageId, label: uiCopy.workbench.scope.currentPage });
       setInspectorOpen(false);
     }
   };
@@ -1602,10 +1599,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const promoteSelectionToOverlay = (target: Selection) => {
     const element = elementForSelection(target);
     if (!target.pageId || !element || element.type === "comic_frame" || element.location.space !== "frame") return;
-    if (commitCapability("promote_element_to_overlay", { unitId: target.pageId, frameId: element.location.frameId, layerId: element.location.layerId, elementId: element.id }, "设为破格")) {
+    if (commitCapability("promote_element_to_overlay", { unitId: target.pageId, frameId: element.location.frameId, layerId: element.location.layerId, elementId: element.id }, uiCopy.workbench.action.enableBreakout)) {
       setComicContextMenu(null);
       setObjectInteractionMode("move");
-      setToast("已设为破格 · 对象仍随原画格移动");
+      setToast(uiCopy.toast.workbench.layout.breakoutEnabled);
     }
   };
 
@@ -1615,28 +1612,28 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const crossPurpose = element.location.space === "overlay" && (element.location.purpose === "cross_page" || element.location.purpose === "cross_segment") ? element.location.purpose : undefined;
     if (element.location.space === "overlay" && element.location.anchor.type === "unit" && !crossPurpose) return;
     const frameId = element.location.space === "frame" ? element.location.frameId : undefined;
-    const label = crossPurpose === "cross_page" ? "取消跨页" : crossPurpose === "cross_segment" ? "取消跨段" : element.type === "image" ? "转为纸面图片" : "转为纸面对白";
+    const label = crossPurpose === "cross_page" ? uiCopy.workbench.action.cancelCrossPage : crossPurpose === "cross_segment" ? uiCopy.workbench.action.cancelCrossSegment : element.type === "image" ? uiCopy.workbench.action.convertToPaperImage : uiCopy.workbench.action.convertToPaperDialogue;
     if (commitCapability("convert_element_to_page", { unitId: target.pageId, frameId, layerId: element.location.layerId, elementId: element.id }, label)) {
       setComicContextMenu(null);
       setObjectInteractionMode("move");
-      setToast(crossPurpose === "cross_page" ? `已取消跨页 · ${element.type === "image" ? "图片" : "对白"}已归入单一纸面` : crossPurpose === "cross_segment" ? "已取消跨段 · 图片已归入单一滚动段" : element.type === "image" ? "已转为纸面图片 · 使用独立图片编号" : "已转为纸面对白");
+      setToast(crossPurpose === "cross_page" ? uiCopy.toast.workbench.layout.crossPageCanceled(element.type === "image" ? uiCopy.asset.kind.image : uiCopy.workbench.object.dialogue) : crossPurpose === "cross_segment" ? uiCopy.toast.workbench.layout.crossSegmentCanceled : element.type === "image" ? uiCopy.toast.workbench.layout.convertedToPaperImage : uiCopy.toast.workbench.layout.convertedToPaperDialogue);
     }
   };
 
   const returnSelectionToFrame = (target: Selection) => {
     const element = elementForSelection(target);
     if (!target.pageId || !element || element.type === "comic_frame" || element.location.space !== "overlay" || element.location.anchor.type !== "frame") return;
-    if (commitCapability("return_element_to_frame", { unitId: target.pageId, frameId: element.location.anchor.frameId, layerId: element.location.layerId, elementId: element.id }, "收回画格")) {
+    if (commitCapability("return_element_to_frame", { unitId: target.pageId, frameId: element.location.anchor.frameId, layerId: element.location.layerId, elementId: element.id }, uiCopy.workbench.action.returnToFrame)) {
       setComicContextMenu(null);
       setObjectInteractionMode("select");
-      setToast("已收回画格 · 恢复画格裁切");
+      setToast(uiCopy.toast.workbench.layout.returnedToFrame);
     }
   };
 
   const changeOverlayElementLayer = (target: Selection, position: "front" | "back") => {
     const element = elementForSelection(target);
     if (!target.pageId || !element || element.type === "comic_frame" || element.location.space !== "overlay") return;
-    if (commitCapability("reorder_overlay_element", { unitId: target.pageId, layerId: element.location.layerId, elementId: element.id, position }, position === "front" ? "对象置于顶层" : "对象置于底层")) setComicContextMenu(null);
+    if (commitCapability("reorder_overlay_element", { unitId: target.pageId, layerId: element.location.layerId, elementId: element.id, position }, position === "front" ? uiCopy.workbench.operation.moveObjectToFront : uiCopy.workbench.operation.moveObjectToBack)) setComicContextMenu(null);
   };
 
   const toggleFrameOverlap = (target: Selection) => {
@@ -1649,9 +1646,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (next === "allow") {
       requests.push({ id: "reorder_frame", input: { unitId: unit.id, frameId: frame.id, zIndex: Math.max(0, ...unit.frames.map((item) => item.zIndex), ...unit.overlayLayers.map((item) => item.zIndex)) + 1 } });
     }
-    if (commitCapabilities(requests, next === "allow" ? "允许画格重叠并置于顶层" : "禁止画格重叠")) {
+    if (commitCapabilities(requests, next === "allow" ? uiCopy.workbench.operation.allowFrameOverlap : uiCopy.workbench.operation.forbidFrameOverlap)) {
       setComicContextMenu(null);
-      setToast(next === "allow" ? "已允许叠格 · 当前画格已置于顶层" : "已恢复画格不可重叠");
+      setToast(next === "allow" ? uiCopy.toast.workbench.layout.overlapEnabled : uiCopy.toast.workbench.layout.overlapDisabled);
     }
   };
 
@@ -1661,10 +1658,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const frame = unit?.frames.find((item) => item.id === target.id);
     if (!unit || !frame) return;
     const enabled = frame.surfaceScope !== "unit";
-    if (commitCapability("set_frame_cross_page", { unitId: unit.id, frameId: frame.id, enabled }, enabled ? "设为跨页格" : "取消画格跨页")) {
+    if (commitCapability("set_frame_cross_page", { unitId: unit.id, frameId: frame.id, enabled }, enabled ? uiCopy.workbench.action.enableCrossPageFrame : uiCopy.workbench.operation.cancelFrameCrossPage)) {
       setComicContextMenu(null);
       setObjectInteractionMode(enabled ? "move" : "select");
-      setToast(enabled ? "已设为跨页格 · 可跨越双页中缝移动和缩放" : "已取消跨页 · 画格已归入单一纸面");
+      setToast(enabled ? uiCopy.toast.workbench.layout.crossPageFrameEnabled : uiCopy.toast.workbench.layout.crossPageFrameDisabled);
     }
   };
 
@@ -1673,10 +1670,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const frame = state.fixture.working.document.units.find((item) => item.id === target.pageId)?.frames.find((item) => item.id === target.id);
     if (!frame) return;
     const enabled = !frame.bleedEdges?.[edge];
-    const edgeLabel = { top: "上", right: "右", bottom: "下", left: "左" }[edge];
-    if (commitCapability("update_frame_bleed", { unitId: target.pageId, frameId: target.id, edge, enabled }, `${enabled ? "开启" : "取消"}${edgeLabel}边出血`)) {
+    const edgeLabel = { top: uiCopy.workbench.direction.top, right: uiCopy.workbench.direction.right, bottom: uiCopy.workbench.direction.bottom, left: uiCopy.workbench.direction.left }[edge];
+    if (commitCapability("update_frame_bleed", { unitId: target.pageId, frameId: target.id, edge, enabled }, uiCopy.workbench.operation.toggleFrameBleed(enabled, edgeLabel))) {
       setComicContextMenu(null);
-      setToast(enabled ? `已延伸至${edgeLabel}侧页边` : `已恢复${edgeLabel}侧边框`);
+      setToast(enabled ? uiCopy.toast.workbench.layout.bleedEnabled(edgeLabel) : uiCopy.toast.workbench.layout.bleedDisabled(edgeLabel));
     }
   };
 
@@ -1703,16 +1700,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (element?.type !== "image" || downloadingCanvasImageId) return;
     const contentUrl = state.fixture.working.resolvedResources?.[element.assetVersionId]?.url;
     if (!contentUrl) {
-      setToast("当前图片资源不可下载");
+      setToast(uiCopy.toast.workbench.image.downloadUnavailable);
       return;
     }
     setDownloadingCanvasImageId(element.id);
     try {
-      await apiDownloadImage(contentUrl, element.name?.trim() || target.label || "漫画图片");
+      await apiDownloadImage(contentUrl, element.name?.trim() || target.label || uiCopy.workbench.defaultLabel.comicImage);
       setComicContextMenu(null);
-      setToast("图片已开始下载");
+      setToast(uiCopy.toast.workbench.image.downloadStarted);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "图片下载失败，请稍后重试");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.image.downloadFailed);
     } finally {
       setDownloadingCanvasImageId(null);
     }
@@ -1723,12 +1720,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (element?.type !== "image") return;
     const contentUrl = state.fixture.working.resolvedResources?.[element.assetVersionId]?.url;
     if (!contentUrl) {
-      setToast("当前图片资源不可查看");
+      setToast(uiCopy.toast.workbench.image.viewUnavailable);
       return;
     }
     setComicContextMenu(null);
     setImageViewer({
-      images: [{ id: element.id, src: contentUrl, alt: element.name?.trim() || target.label || "漫画图片" }],
+      images: [{ id: element.id, src: contentUrl, alt: element.name?.trim() || target.label || uiCopy.workbench.defaultLabel.comicImage }],
     });
   };
 
@@ -1736,7 +1733,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const element = elementForSelection(target);
     if (element?.type !== "image" || addingCanvasImageAssetId) return;
     if (state.assets?.some((asset) => asset.id === element.assetId)) {
-      setToast("该图片已添加到资产列表");
+      setToast(uiCopy.toast.workbench.image.alreadyInAssetList);
       return;
     }
     setAddingCanvasImageAssetId(element.assetId);
@@ -1747,14 +1744,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       } else {
         const resource = state.fixture.working.document.resources.find((item) => item.assetId === element.assetId && item.assetVersionId === element.assetVersionId);
         const contentUrl = state.fixture.working.resolvedResources?.[element.assetVersionId]?.url;
-        const name = element.name?.trim() || target.label || "漫画图片";
+        const name = element.name?.trim() || target.label || uiCopy.workbench.defaultLabel.comicImage;
         setState((current) => current.assets?.some((asset) => asset.id === element.assetId) ? current : {
           ...current,
           assets: [...(current.assets ?? []), {
             id: element.assetId,
             kind: "reference_image",
             name,
-            description: "从漫画画布恢复的图片资产",
+            description: uiCopy.workbench.defaultDescription.restoredCanvasAsset,
             versionId: element.assetVersionId,
             contentUrl,
             versions: [{ id: element.assetVersionId, version: 1, contentUrl, width: resource?.width, height: resource?.height }],
@@ -1763,9 +1760,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         });
       }
       setComicContextMenu(null);
-      setToast("已添加到资产列表");
+      setToast(uiCopy.toast.workbench.image.addedToAssetList);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "添加到资产列表失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.image.addToAssetListFailed);
     } finally {
       setAddingCanvasImageAssetId(null);
     }
@@ -1778,7 +1775,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (!unit || !frame) return;
     const levels = [...unit.frames.map((item) => item.zIndex), ...unit.overlayLayers.map((item) => item.zIndex)];
     const zIndex = direction === "forward" ? Math.max(0, ...levels) + 1 : Math.min(0, ...levels) - 1;
-    if (commitCapability("reorder_frame", { unitId: unit.id, frameId: frame.id, zIndex }, direction === "forward" ? "画格置于顶层" : "画格置于底层")) setComicContextMenu(null);
+    if (commitCapability("reorder_frame", { unitId: unit.id, frameId: frame.id, zIndex }, direction === "forward" ? uiCopy.workbench.operation.moveFrameToFront : uiCopy.workbench.operation.moveFrameToBack)) setComicContextMenu(null);
   };
 
   const handleComicContextAction = (target: Selection, point: ComicContextPoint) => {
@@ -1797,14 +1794,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         setInspectorOpen(false);
         if (objectInteractionMode === "crop") {
           setObjectInteractionMode("select");
-          setSelection({ type: "comic_frame", id: frame.id, pageId: target.pageId, label: `画格 ${String(frame.readingOrder).padStart(2, "0")}` });
-          setToast("已退出裁切模式");
+          setSelection({ type: "comic_frame", id: frame.id, pageId: target.pageId, label: uiCopy.workbench.label.frame(frame.readingOrder) });
+          setToast(uiCopy.toast.workbench.mode.cropExited);
         } else {
           setSelection(cropImage
-            ? { type: "image", id: cropImage.id, pageId: target.pageId, label: "格内主图" }
-            : { type: "comic_frame", id: frame.id, pageId: target.pageId, label: `画格 ${String(frame.readingOrder).padStart(2, "0")}` });
+            ? { type: "image", id: cropImage.id, pageId: target.pageId, label: uiCopy.workbench.defaultLabel.framePrimaryImage }
+            : { type: "comic_frame", id: frame.id, pageId: target.pageId, label: uiCopy.workbench.label.frame(frame.readingOrder) });
           setObjectInteractionMode("crop");
-          setToast(cropImage ? "已进入裁切模式：拖动图片调整取景，拖动画格四角调整角度" : "已进入画格四角编辑：拖动顶点调整边线角度");
+          setToast(cropImage ? uiCopy.toast.workbench.mode.cropEntered : uiCopy.toast.workbench.mode.cornerEditEntered);
         }
         return;
       }
@@ -1839,7 +1836,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setSelection(nextTarget);
     const shouldExit = objectInteractionMode === "move" && selection.id === nextTarget.id && selection.pageId === nextTarget.pageId;
     setObjectInteractionMode(shouldExit ? "select" : "move");
-    setToast(shouldExit ? "已退出移动模式" : "已进入移动模式：拖动对象调整位置");
+    setToast(shouldExit ? uiCopy.toast.workbench.mode.moveExited : uiCopy.toast.workbench.mode.moveEntered);
   };
 
   const openSelectionManagement = (button: HTMLButtonElement) => {
@@ -1923,7 +1920,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const current = stateRef.current;
     if (entry.kind === "working") {
       const plan = planCapabilities([{ id: "restore_workspace_version", input: { document: entry.fixture.working.document, storyboardBeats: entry.fixture.storyboardBeats } }]);
-      if (!commitOperations(plan.commands, `撤销：${entry.label}`, "undo", undefined, undefined, undefined, { recordHistory: false, resolvedResources: entry.fixture.working.resolvedResources })) return;
+      if (!commitOperations(plan.commands, uiCopy.workbench.operation.undo(entry.label), "undo", undefined, undefined, undefined, { recordHistory: false, resolvedResources: entry.fixture.working.resolvedResources })) return;
     } else {
       const next = { ...current, fixture: { ...current.fixture, references: structuredClone(entry.fixture.references) } };
       stateRef.current = next;
@@ -1931,7 +1928,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     setFuture((entries) => [...entries, { fixture: structuredClone(current.fixture), label: entry.label, kind: entry.kind }]);
     setHistory((entries) => entries.slice(0, -1));
-    setToast(`已撤销：${entry.label}`);
+    setToast(uiCopy.toast.workbench.history.undone(entry.label));
   };
 
   const redo = () => {
@@ -1940,7 +1937,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const current = stateRef.current;
     if (entry.kind === "working") {
       const plan = planCapabilities([{ id: "restore_workspace_version", input: { document: entry.fixture.working.document, storyboardBeats: entry.fixture.storyboardBeats } }]);
-      if (!commitOperations(plan.commands, `重做：${entry.label}`, "redo", undefined, undefined, undefined, { recordHistory: false, resolvedResources: entry.fixture.working.resolvedResources })) return;
+      if (!commitOperations(plan.commands, uiCopy.workbench.operation.redo(entry.label), "redo", undefined, undefined, undefined, { recordHistory: false, resolvedResources: entry.fixture.working.resolvedResources })) return;
     } else {
       const next = { ...current, fixture: { ...current.fixture, references: structuredClone(entry.fixture.references) } };
       stateRef.current = next;
@@ -1948,15 +1945,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     setHistory((entries) => [...entries, { fixture: structuredClone(current.fixture), label: entry.label, kind: entry.kind }]);
     setFuture((entries) => entries.slice(0, -1));
-    setToast(`已重做：${entry.label}`);
+    setToast(uiCopy.toast.workbench.history.redone(entry.label));
   };
 
   const runTask = (name = "storyboard", option?: string, explicitInstruction?: string, explicitScope?: string, explicitSelection?: Selection) => {
     if (name !== "storyboard" && name !== "frame_image_generate" && name !== "asset_image_generate") {
-      setToast("这个 Agent 任务当前未开放");
+      setToast(uiCopy.toast.workbench.agent.taskUnavailable);
       return;
     }
-    const label = name === "asset_image_generate" ? "创建角色或场景资产" : name === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目";
+    const label = name === "asset_image_generate" ? uiCopy.workbench.taskLabel.generateAssetImage : name === "frame_image_generate" ? uiCopy.workbench.action.generateFrameImage : uiCopy.workbench.action.editStoryboard;
     const taskScope = explicitScope ?? scope;
     const instruction = explicitInstruction ?? option ?? [...state.messages].reverse().find((message) => message.role === "user")?.text ?? label;
     const currentSelection = explicitSelection ?? selection;
@@ -1965,15 +1962,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       ? createComicPageViews(currentState.fixture.working.document).find((item) => item.id === currentSelection.pageId)?.elements.find((item) => item.id === currentSelection.id)
       : undefined;
     if (activeTask?.status === "running") {
-      setToast("当前会话已有任务运行中，请先等待或取消");
+      setToast(uiCopy.toast.workbench.agent.taskAlreadyRunning);
       return;
     }
     if (name === "storyboard" && currentTargetElement?.type !== "comic_frame") {
-      setToast("请先选择当前工作稿中的漫画格");
+      setToast(uiCopy.toast.workbench.agent.selectCurrentFrame);
       return;
     }
     if (runtimeAdapter !== "server" || !runtimeIds) {
-      setToast("离线演示不连接 Agent 服务");
+      setToast(uiCopy.toast.workbench.agent.demoOffline);
       return;
     }
     const task: ActiveTask = { id: uid("task-pending"), name, label, scope: taskScope, progress: 3, status: "running", selection: currentSelection };
@@ -1986,7 +1983,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }).then(() => refreshServerWorkbench()).catch((error) => {
       setActiveTask(null);
       if (error instanceof LanternApiError && error.code === "provider_not_configured") setModelSettingsPromptOpen(true);
-      setToast(error instanceof Error ? error.message : "任务创建失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.agent.taskCreateFailed);
     });
   };
 
@@ -1997,16 +1994,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const message = composer.trim();
     const attachments = composerAttachments;
     if (attachments.some((attachment) => attachment.status === "uploading")) {
-      setToast("图片仍在上传，请稍候");
+      setToast(uiCopy.toast.workbench.agent.imageUploading);
       return;
     }
     if (runtimeAdapter === "server" && attachments.some((attachment) => attachment.status !== "ready" || !attachment.assetId || !attachment.versionId)) {
-      setToast("有图片上传失败，请移除后重新添加");
+      setToast(uiCopy.toast.workbench.agent.imageUploadFailed);
       return;
     }
     const interactionSelection = selection;
     if (!message && !attachments.length) return;
-    const userText = message || `上传了 ${attachments.length} 张图片作为本轮参考。`;
+    const userText = message || uiCopy.workbench.chat.uploadedReferences(attachments.length);
     const sentReferences = resolvedExplicitReferences();
     const visiblePageIds = visiblePageIdsForAgent();
     addMessage({ role: "user", kind: "plain", text: userText, attachments, explicitReferences: sentReferences });
@@ -2036,7 +2033,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           const nextActiveTask: ActiveTask = {
             id: result.task.id,
             name: taskType,
-            label: taskType === "asset_image_generate" ? "创建角色或场景" : taskType === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
+            label: taskType === "asset_image_generate" ? uiCopy.workbench.taskLabel.generateAssetImage : taskType === "frame_image_generate" ? uiCopy.workbench.action.generateFrameImage : uiCopy.workbench.action.editStoryboard,
             scope: interactionSelection.label ?? result.task.scope,
             progress: result.task.progress,
             status: "running",
@@ -2056,29 +2053,29 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       }).catch((error) => {
         void refreshServerWorkbench().catch(() => undefined);
         if (error instanceof LanternApiError && error.code === "provider_not_configured") setModelSettingsPromptOpen(true);
-        setToast(error instanceof Error ? error.message : "Agent 暂时不可用");
+        setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.agent.unavailable);
       }).finally(() => {
         setStreamingTurn((current) => current?.id === streamingId ? null : current);
       });
       return;
     }
-    addMessage({ role: "agent", kind: "plain", text: "离线演示只提供画布操作；连接本地服务后可使用创作对话。" });
+    addMessage({ role: "agent", kind: "plain", text: uiCopy.workbench.chat.offlineDemo });
   };
 
   const applyCandidate = (candidate: Candidate, expectedFrameTarget?: { unitId: string; frameId: string }) => {
     if (candidate.status !== "available") {
-      setToast("这个候选已经终结，不能重复应用");
+      setToast(uiCopy.toast.workbench.candidate.cannotApplyEnded);
       return;
     }
     if (runtimeAdapter === "server") {
       void apiApplyCandidate(candidate.id, state.fixture.working.revision, expectedFrameTarget)
         .then(() => refreshServerWorkbench())
-        .catch((error) => { void refreshServerWorkbench().catch(() => undefined); setToast(error instanceof Error ? error.message : "候选应用失败"); });
+        .catch((error) => { void refreshServerWorkbench().catch(() => undefined); setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.candidate.applyFailed); });
       return;
     }
     if (candidate.baseRevision !== state.fixture.working.revision) {
       setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? { ...item, status: "stale" } : item) }));
-      setToast("候选基于旧工作稿，需要重新生成");
+      setToast(uiCopy.toast.workbench.candidate.stale);
       return;
     }
     let operations: WorkspaceOperation[];
@@ -2087,24 +2084,24 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     } else if (candidate.document) {
       operations = [{ type: "replace_chapter_presentation", document: candidate.document }];
     } else {
-      setToast("这个候选没有可应用内容");
+      setToast(uiCopy.toast.workbench.candidate.noApplicableContent);
       return;
     }
-    if (commitOperations(operations, `应用候选「${candidate.title}」`, "candidate", candidate.id)) {
+    if (commitOperations(operations, uiCopy.workbench.operation.applyCandidate(candidate.title), "candidate", candidate.id)) {
       setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? { ...item, status: "applied" } : item) }));
-      addMessage({ role: "agent", kind: "plain", text: `「${candidate.title}」已作为一次原子变更进入工作稿。如需回退，请使用底部撤销。` });
+      addMessage({ role: "agent", kind: "plain", text: uiCopy.workbench.candidate.appliedMessage(candidate.title) });
     }
   };
 
   const startFrameImageCandidatePreview = (candidate: Candidate) => {
     if (candidate.status !== "available") {
-      setToast("这个候选已经终结，不能继续预览");
+      setToast(uiCopy.toast.workbench.candidate.cannotPreviewEnded);
       return;
     }
     const target = frameImageCandidateTarget(candidate);
     const targetPageIndex = resolveReadingUnitIndex(state.fixture.working.document, target?.pageId);
     if (!target || targetPageIndex < 0) {
-      setToast("候选目标已不在当前工作稿中");
+      setToast(uiCopy.toast.workbench.candidate.targetMissing);
       return;
     }
     const targetUnit = state.fixture.working.document.units.find((unit) => unit.id === target.pageId)!;
@@ -2114,13 +2111,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       state.currentPageIndex,
       targetPageIndex,
     )) {
-      setToast(`这个候选属于 ${targetPageLabel}，请切换到目标页后再预览`);
+      setToast(uiCopy.toast.workbench.candidate.wrongPage(targetPageLabel));
       return;
     }
     try {
       projectFrameImageCandidate(state.fixture, candidate);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "候选图片暂时无法预览");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.candidate.previewFailed);
       return;
     }
     const previous = frameImageCandidatePreview;
@@ -2156,12 +2153,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const candidate = state.candidates.find((item) => item.id === frameImageCandidatePreview.candidateId);
     if (!candidate || candidate.status !== "available") {
       setFrameImageCandidatePreview(null);
-      setToast("这个候选已经终结，不能重复应用");
+      setToast(uiCopy.toast.workbench.candidate.cannotApplyEnded);
       return;
     }
     const target = frameImageCandidateTarget(candidate);
     if (!target?.id || !target.pageId || target.id !== frameImageCandidatePreview.target.id || target.pageId !== frameImageCandidatePreview.target.pageId) {
-      setToast("预览目标已经变化，请重新打开这个候选");
+      setToast(uiCopy.toast.workbench.candidate.previewTargetChanged);
       return;
     }
     setFrameImageCandidatePreview(null);
@@ -2192,7 +2189,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter === "server") {
       void apiDiscardCandidate(candidateId)
         .then(() => refreshServerWorkbench())
-        .catch((error) => setToast(error instanceof Error ? error.message : "候选丢弃失败"));
+        .catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.candidate.discardFailed));
       return;
     }
     setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidateId ? { ...item, status: "discarded" } : item) }));
@@ -2206,8 +2203,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           return apiSaveSnapshot(runtimeIds.chapterId, revision).then(() => revision);
         })
         .then((revision) => refreshServerWorkbench().then(() => revision))
-        .then((revision) => setToast(`一话已保存 · 快照 r${revision}`))
-        .catch((error) => setToast(error instanceof Error ? error.message : "保存失败"));
+        .then((revision) => setToast(uiCopy.toast.workbench.snapshot.saved(revision)))
+        .catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.common.saveFailed));
       setProjectMenu(false);
       return;
     }
@@ -2218,9 +2215,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       stateRef.current = next;
       setState(next);
       setProjectMenu(false);
-      setToast(`一话已保存 · 快照 r${snapshot.sourceWorkingRevision}`);
+      setToast(uiCopy.toast.workbench.snapshot.saved(snapshot.sourceWorkingRevision));
     } catch {
-      setToast("工作稿已变化，请重新保存");
+      setToast(uiCopy.toast.workbench.snapshot.draftChanged);
     }
   };
 
@@ -2235,14 +2232,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         .then(async () => {
           const before = stateRef.current;
           const result = await apiRestoreSnapshot(runtimeIds.chapterId, before.fixture.working.revision);
-          pushHistory(before.fixture, "回到上次保存", "working");
+          pushHistory(before.fixture, uiCopy.workbench.action.returnToSaved, "working");
           const next = { ...before, fixture: { ...before.fixture, ...result } };
           stateRef.current = next;
           setState(next);
           setSelection((current) => repairSelectionForState(current, next));
-          setToast(`已回到保存版本 r${snapshot.sourceWorkingRevision}`);
+          setToast(uiCopy.toast.workbench.snapshot.restored(snapshot.sourceWorkingRevision));
         })
-        .catch((error) => setToast(error instanceof Error ? error.message : "无法回到上次保存"))
+        .catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.snapshot.restoreFailed))
         .finally(() => {
           serverPendingCommitCountRef.current = Math.max(0, serverPendingCommitCountRef.current - 1);
           setRestoringSnapshot(false);
@@ -2251,7 +2248,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     const current = stateRef.current;
     const plan = planCapabilities([{ id: "restore_workspace_version", input: { document: snapshot.document, storyboardBeats: current.fixture.storyboardBeats } }]);
-    commitOperations(plan.commands, "回到上次保存", "undo", undefined, undefined, undefined, { resolvedResources: snapshot.resolvedResources });
+    commitOperations(plan.commands, uiCopy.workbench.action.returnToSaved, "undo", undefined, undefined, undefined, { resolvedResources: snapshot.resolvedResources });
   };
 
   const updateReference = (id: string, patch: Partial<ReferencePlacement>, label: string) => {
@@ -2268,7 +2265,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         collapsed: patch.collapsed,
         pinned: patch.pinned,
       }).then(() => setToast(label)).catch((error) => {
-        setToast(error instanceof Error ? error.message : "图片卡保存失败");
+        setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.image.cardSaveFailed);
         void refreshServerWorkbench().catch(() => undefined);
       });
       return;
@@ -2288,13 +2285,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }));
     if (runtimeAdapter === "server") {
       void apiUpdatePlacement(reference.id, { assetVersionId: next.versionId })
-        .then(() => setToast(`已切换为「${next.label}」`))
+        .then(() => setToast(uiCopy.toast.workbench.image.assetImageSwitched(next.label)))
         .catch((error) => {
-          setToast(error instanceof Error ? error.message : "资产图片切换失败");
+          setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.image.assetImageSwitchFailed);
           void refreshServerWorkbench().catch(() => undefined);
         });
     } else {
-      setToast(`已切换为「${next.label}」`);
+      setToast(uiCopy.toast.workbench.image.assetImageSwitched(next.label));
     }
   };
 
@@ -2302,13 +2299,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter === "server") {
       setState((current) => ({ ...current, fixture: { ...current.fixture, references: current.fixture.references.filter((item) => item.id !== id) } }));
       setSelection(noSelection);
-      void apiDeletePlacement(id).then(() => setToast("画布对象已删除；资产库内容保持不变")).catch((error) => {
-        setToast(error instanceof Error ? error.message : "删除画布对象失败");
+      void apiDeletePlacement(id).then(() => setToast(uiCopy.toast.workbench.canvas.objectDeleted)).catch((error) => {
+        setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.canvas.objectDeleteFailed);
         void refreshServerWorkbench().catch(() => undefined);
       });
       return;
     }
-    commitPlacement(state.fixture.references.filter((item) => item.id !== id), "删除画布对象");
+    commitPlacement(state.fixture.references.filter((item) => item.id !== id), uiCopy.workbench.operation.deleteCanvasObject);
     setSelection(noSelection);
   };
 
@@ -2319,14 +2316,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter === "server") {
       setState((current) => ({ ...current, fixture: { ...current.fixture, references: nextReferences } }));
       void Promise.all(nextReferences.filter((item) => selectedIds.has(item.id)).map((item) => apiUpdatePlacement(item.id, { x: item.x, y: item.y })))
-        .then(() => setToast(`已移动 ${ids.length} 个画布元素`))
+        .then(() => setToast(uiCopy.toast.workbench.canvas.elementsMoved(ids.length)))
         .catch((error) => {
-          setToast(error instanceof Error ? error.message : "批量移动画布元素失败");
+          setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.canvas.moveElementsFailed);
           void refreshServerWorkbench().catch(() => undefined);
         });
       return;
     }
-    commitPlacement(nextReferences, `已移动 ${ids.length} 个画布元素`);
+    commitPlacement(nextReferences, uiCopy.workbench.operation.moveCanvasElements(ids.length));
   };
 
   const removeReferences = (ids: string[]) => {
@@ -2336,14 +2333,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter === "server") {
       setState((current) => ({ ...current, fixture: { ...current.fixture, references: nextReferences } }));
       void Promise.all(ids.map((id) => apiDeletePlacement(id)))
-        .then(() => setToast(`已从画布移除 ${ids.length} 个元素；资产库内容保持不变`))
+        .then(() => setToast(uiCopy.toast.workbench.canvas.elementsRemoved(ids.length)))
         .catch((error) => {
-          setToast(error instanceof Error ? error.message : "批量移除画布元素失败");
+          setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.canvas.removeElementsFailed);
           void refreshServerWorkbench().catch(() => undefined);
         });
       return;
     }
-    commitPlacement(nextReferences, `已从画布移除 ${ids.length} 个元素`);
+    commitPlacement(nextReferences, uiCopy.workbench.operation.removeCanvasElements(ids.length));
   };
 
   const changeReferenceLayer = (reference: ReferencePlacement, action: "up" | "down" | "top" | "bottom") => {
@@ -2352,7 +2349,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const next = action === "top" ? Math.max(...levels, 10) + 1
       : action === "bottom" ? Math.max(0, Math.min(...levels, 10) - 1)
         : action === "up" ? current + 1 : Math.max(0, current - 1);
-    updateReference(reference.id, { zIndex: next }, action === "top" ? "已置于顶层" : action === "bottom" ? "已置于底层" : action === "up" ? "已上移一层" : "已下移一层");
+    updateReference(reference.id, { zIndex: next }, action === "top" ? uiCopy.workbench.operation.movedToFront : action === "bottom" ? uiCopy.workbench.operation.movedToBack : action === "up" ? uiCopy.workbench.operation.movedLayerUp : uiCopy.workbench.operation.movedLayerDown);
   };
 
   const addComposerReference = (reference: ComposerReference) => {
@@ -2362,7 +2359,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const addAssetReference = (asset: AssetSummary) => {
     if (!asset.versionId) {
-      setToast("这个资产还没有可引用的版本。");
+      setToast(uiCopy.toast.workbench.reference.assetVersionMissing);
       return;
     }
     addComposerReference({
@@ -2379,7 +2376,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const addCanvasAssetReference = (reference: ReferencePlacement) => {
     const asset = state.assets?.find((item) => item.id === reference.assetId || item.name === reference.name);
     if (asset) addAssetReference(asset);
-    else setToast("这个画布图片还没有可引用的资产版本。");
+    else setToast(uiCopy.toast.workbench.reference.canvasAssetVersionMissing);
   };
 
   const addSelectionReference = (targetSelection: Selection = selection) => {
@@ -2401,12 +2398,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         id: `dialogue:${targetElement.id}`,
         objectType: "canvas_element",
         objectId: targetElement.id,
-        label: `对白 ${String(balloonNumber || 1).padStart(2, "0")}`,
+        label: uiCopy.workbench.label.dialogue(balloonNumber || 1),
         kind: "speech_balloon",
         balloonNumber: balloonNumber || 1,
         dialogueText: targetElement.content.text,
       });
-      setScope("当前气泡");
+      setScope(uiCopy.workbench.scope.balloon);
       setAgentOpen(true);
       return;
     }
@@ -2422,11 +2419,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         id: `comic-frame:${frame.id}`,
         objectType: "canvas_element",
         objectId: frame.id,
-        label: `画格 ${String(frame.readingOrder).padStart(2, "0")} · 格内成稿`,
+        label: uiCopy.workbench.label.frameFinal(frame.readingOrder),
         kind: "comic_frame",
         imageUrl,
       });
-      setScope("当前画格");
+      setScope(uiCopy.workbench.scope.currentFrame);
       setAgentOpen(true);
       return;
     }
@@ -2446,18 +2443,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         commitCapabilities(capabilitiesForElementPatch(selection.pageId, balloon.id, {
           content: { ...balloon.content, text: value },
           style: { ...balloon.style, fontSize, strokeWidth },
-        }), "编辑对白与气泡样式");
+        }), uiCopy.workbench.operation.editBalloon);
       }
     } else if (selection.type === "text" && selectedElement?.type === "text" && selection.pageId) {
       const content = editDraft.narration ?? selectedElement.content.text;
       const parsedSize = Number(editDraft.fontSize ?? selectedElement.style.fontSize);
       const fontSize = Number.isFinite(parsedSize) ? clampValue(parsedSize, 6, 240) : selectedElement.style.fontSize;
-      commitCapabilities(capabilitiesForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, text: content }, style: { ...selectedElement.style, fontSize } }), "编辑旁白");
+      commitCapabilities(capabilitiesForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, text: content }, style: { ...selectedElement.style, fontSize } }), uiCopy.workbench.operation.editNarration);
     } else if (editingStoryboardTarget) {
       const title = (editDraft.title ?? editingStoryboardBeat?.title ?? "").trim();
       const description = (editDraft.description ?? editingStoryboardBeat?.description ?? "").trim();
       if (!title) {
-        setToast("请先填写单格标题");
+        setToast(uiCopy.toast.workbench.editing.frameTitleRequired);
         return;
       }
       if (editingStoryboardBeatId) {
@@ -2466,7 +2463,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           ...(editDraft.description !== undefined ? { description: editDraft.description.trim() } : {}),
         };
         if (Object.keys(patch).length) {
-          commitCapability("update_storyboard_beat", { storyboardBeatId: editingStoryboardBeatId, patch }, "编辑单格画面");
+          commitCapability("update_storyboard_beat", { storyboardBeatId: editingStoryboardBeatId, patch }, uiCopy.workbench.action.editFrameImage);
         }
       } else {
         commitCapability("create_frame_storyboard_beat", {
@@ -2474,7 +2471,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           frameId: editingStoryboardTarget.frameId,
           title,
           description,
-        }, "创建单格画面");
+        }, uiCopy.workbench.action.createStoryboard);
       }
     }
     setEditDraft({});
@@ -2511,7 +2508,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (!editingStoryboardTarget || !editingStoryboardFrame) return;
     const parsedWidth = Number(editDraft.frameBorderWidth ?? editingStoryboardFrame.border.width);
     if (!Number.isFinite(parsedWidth)) {
-      setToast("请输入有效的边框粗细");
+      setToast(uiCopy.toast.workbench.editing.invalidBorderWidth);
       return;
     }
     const width = clampValue(parsedWidth, 0, 24);
@@ -2519,7 +2516,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       unitId: editingStoryboardTarget.unitId,
       frameId: editingStoryboardTarget.frameId,
       width,
-    }, "调整画格边框")) {
+    }, uiCopy.workbench.operation.adjustFrameBorder)) {
       setEditDraft((draft) => ({ ...draft, frameBorderWidth: String(width) }));
     }
   };
@@ -2542,51 +2539,51 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       layerId: selectedElement.layerId,
       elementId: selectedElement.id,
       crop: next,
-    }, "调整图片裁切");
+    }, uiCopy.workbench.operation.adjustImageCrop);
   };
 
   const beginCrop = () => {
     if (selection.type === "speech_balloon") {
       setInspectorOpen(false);
       setObjectInteractionMode("crop");
-      setToast("已进入气泡旋转模式：拖动右下角编辑点旋转");
+      setToast(uiCopy.toast.workbench.mode.balloonRotationEntered);
       return;
     }
     if (selection.type === "text") {
       setInspectorOpen(false);
       setObjectInteractionMode("crop");
-      setToast("已进入旁白旋转模式：拖动右下角编辑点旋转");
+      setToast(uiCopy.toast.workbench.mode.narrationRotationEntered);
       return;
     }
     const { frame, image: frameImage } = frameAndImageForSelection(selection);
     const image = selectedElement?.type === "image" && selectedElement.location.space === "frame" ? selectedElement : frameImage;
     if (!frame || !selection.pageId) {
-      setToast("当前对象不支持裁切或四角编辑");
+      setToast(uiCopy.toast.workbench.mode.cropUnsupported);
       return;
     }
     setSelection(image
-      ? { type: "image", id: image.id, pageId: selection.pageId, label: `${selection.label} · 格内图片裁切` }
+      ? { type: "image", id: image.id, pageId: selection.pageId, label: uiCopy.workbench.label.frameCrop(selection.label) }
       : { type: "comic_frame", id: frame.id, pageId: selection.pageId, label: selection.label });
     setInspectorOpen(false);
     setObjectInteractionMode("crop");
-    setToast(image ? "已进入裁切模式：拖动图片调整取景，拖动画格四角调整角度" : "已进入画格四角编辑：拖动顶点调整边线角度");
+    setToast(image ? uiCopy.toast.workbench.mode.cropEntered : uiCopy.toast.workbench.mode.cornerEditEntered);
   };
 
   const resetFrameShape = () => {
     if (!selection.pageId) return;
     const { frame } = frameAndImageForSelection(selection);
     if (!frame || frame.shape.kind === "rect") return;
-    commitCapability("reshape_frame", { unitId: selection.pageId, frameId: frame.id, geometry: frame.geometry, shape: { kind: "rect" } }, "重置画格角度");
+    commitCapability("reshape_frame", { unitId: selection.pageId, frameId: frame.id, geometry: frame.geometry, shape: { kind: "rect" } }, uiCopy.workbench.frameEditor.resetRotation);
   };
 
   const endCrop = () => {
     const image = selectedElement?.type === "image" ? selectedElement : undefined;
     if (image?.comicFrameId && selection.pageId) {
-      setSelection({ type: "comic_frame", id: image.comicFrameId, pageId: selection.pageId, label: "当前画格" });
-      setScope("当前漫画格");
+      setSelection({ type: "comic_frame", id: image.comicFrameId, pageId: selection.pageId, label: uiCopy.workbench.scope.currentFrame });
+      setScope(uiCopy.workbench.scope.comicFrame);
     }
     setObjectInteractionMode("select");
-    setToast("已退出裁切模式");
+    setToast(uiCopy.toast.workbench.mode.cropExited);
   };
 
   const openStoryboardEditorForFrame = (unitId: string, frameId: string, label: string) => {
@@ -2606,7 +2603,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const openStoryboardRowEditor = (row: StoryboardFrameRow) => {
     setCurrentComicPage(row.pageIndex);
     setSelection({ type: "comic_frame", id: row.frame.id, pageId: row.page.id, label: row.label });
-    setScope("当前漫画格");
+    setScope(uiCopy.workbench.scope.comicFrame);
     setStoryboardMenuFrameId(null);
     openStoryboardEditorForFrame(row.page.id, row.frame.id, row.label);
   };
@@ -2628,18 +2625,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       openStoryboardEditorForFrame(selection.pageId, frameId, selection.label);
       return;
     }
-    setToast("请选择一个画格");
+    setToast(uiCopy.toast.workbench.editing.selectFrame);
   };
 
   const updateBalloonShape = (shape: SpeechBalloonElement["content"]["shape"]) => {
     if (selection.type !== "speech_balloon" || selectedElement?.type !== "speech_balloon" || !selection.pageId) return;
-    commitCapabilities(capabilitiesForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, shape } }), "调整对白气泡样式");
+    commitCapabilities(capabilitiesForElementPatch(selection.pageId, selectedElement.id, { content: { ...selectedElement.content, shape } }), uiCopy.workbench.operation.adjustBalloonStyle);
   };
 
   const handleAgentUpload = async (file?: File) => {
     if (!file) return;
     if (composerAttachments.length >= 3) {
-      setToast("一轮对话最多添加 3 张图片");
+      setToast(uiCopy.toast.workbench.agent.attachmentLimit);
       return;
     }
     const imageUrl = URL.createObjectURL(file);
@@ -2652,7 +2649,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setComposerAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, ...uploaded, status: "ready" } : item));
     } catch (error) {
       setComposerAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, status: "failed" } : item));
-      setToast(error instanceof Error ? error.message : "图片附件上传失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.agent.attachmentUploadFailed);
     }
   };
 
@@ -2675,23 +2672,23 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         });
         try {
           await refreshServerWorkbench();
-          setToast("图片已加入当前画布与资产列表");
+          setToast(uiCopy.toast.workbench.asset.imageAddedToCanvasAndList);
         } catch (error) {
           // Upload has already succeeded. Avoid presenting a stale-workbench
           // refresh failure as an upload failure, which encourages duplicate
           // retries and makes a canvas-only image look incorrectly imported.
-          setToast(error instanceof Error ? `图片已保存，刷新列表失败：${error.message}` : "图片已保存，刷新列表失败，请刷新页面");
+          setToast(error instanceof Error ? uiCopy.toast.workbench.asset.imageSavedRefreshFailed(error.message) : uiCopy.toast.workbench.asset.imageSavedRefreshFallback);
         }
         return;
       }
       const asset = await saveUploadedImage(file);
       const assetId = `asset-${asset.id}`;
-      const name = file.name.replace(/\.[^.]+$/, "") || "上传图片";
+      const name = file.name.replace(/\.[^.]+$/, "") || uiCopy.workbench.operation.uploadImage;
       const reference: ReferencePlacement = {
         id: uid("reference-upload"),
         kind: "reference_image",
         name,
-        detail: "手动上传 · 画布图片",
+        detail: uiCopy.workbench.operation.uploadedCanvasImageDetail,
         imageSrc: asset.url,
         assetId,
         assetVersionId: asset.id,
@@ -2707,22 +2704,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         id: assetId,
         kind: "reference_image",
         name,
-        description: "手动上传图片",
+        description: uiCopy.workbench.defaultDescription.uploadedImage,
         versionId: asset.id,
         contentUrl: asset.url,
         versions: [{ id: asset.id, version: 1, contentUrl: asset.url, createdAt: asset.createdAt }],
         libraryStatus: "canvas_only",
       };
-      pushHistory(state.fixture, "上传图片到资产列表与画布", "placement");
+      pushHistory(state.fixture, uiCopy.workbench.operation.uploadToCanvasAndAssets, "placement");
       setState((current) => ({
         ...current,
         assets: [...(current.assets ?? []).filter((item) => item.id !== summary.id), summary],
         fixture: { ...current.fixture, references: [...current.fixture.references, reference] },
       }));
       setSelection({ type: "reference_card", id: reference.id, label: reference.name });
-      setToast("图片已加入资产列表与画布");
+      setToast(uiCopy.toast.workbench.asset.imageAddedToCanvasAndList);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "图片保存失败，请重试");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.asset.imageSaveFailed);
     }
   };
 
@@ -2730,16 +2727,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const x = canvasReferenceDropX;
     const y = 150 + canvasReferences.length * 34;
     if (!asset.contentUrl) {
-      setToast("这个资产还没有确认图片，请先生成或上传一个版本");
+      setToast(uiCopy.toast.workbench.asset.confirmedImageMissing);
       return;
     }
     if (runtimeAdapter === "server" && runtimeIds) {
       try {
         await apiPlaceAsset(runtimeIds.projectId, asset.id, x, y);
         await refreshServerWorkbench();
-        setToast(`「${asset.name}」已放到画布图片层`);
+        setToast(uiCopy.toast.workbench.asset.placedOnCanvas(asset.name));
       } catch (error) {
-        setToast(error instanceof Error ? error.message : "资产放置失败");
+        setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.asset.placementFailed);
       }
       return;
     }
@@ -2757,7 +2754,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       collapsed: false,
       pinned: false,
     };
-    commitPlacement([...state.fixture.references, reference], `把「${asset.name}」放到画布图片层`);
+    commitPlacement([...state.fixture.references, reference], uiCopy.workbench.operation.placeAssetOnCanvas(asset.name));
   };
 
   const openSaveAssetForm = (asset: AssetSummary, position?: { x: number; y: number }) => {
@@ -2772,7 +2769,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const openReferenceSaveAssetForm = (reference: ReferencePlacement, anchor: { left: number; right: number; top: number; bottom: number }) => {
     const asset = state.assets?.find((item) => item.id === reference.assetId || item.id === reference.localAssetId);
     if (!asset) {
-      setToast("这张图片尚未写入画布资产列表，暂时无法保存到资产空间。");
+      setToast(uiCopy.toast.workbench.asset.imageNotInCanvasList);
       return;
     }
     const workbenchRect = document.querySelector<HTMLElement>(".workbench")?.getBoundingClientRect();
@@ -2799,7 +2796,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter !== "server") {
       setState((current) => ({ ...current, assets: current.assets?.map((item) => item.id === asset.id ? { ...item, name, kind: assetSaveDraft.kind, libraryStatus: "library" } : item) }));
       setAssetSaveFormId(null);
-      setToast("已保存到资产空间");
+      setToast(uiCopy.toast.workbench.asset.savedToSpace);
       return;
     }
     setAssetSaveSubmitting(true);
@@ -2808,7 +2805,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setAssetSaveFormId(null);
       navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&filter=${assetSaveDraft.kind === "reference_image" ? "reference" : assetSaveDraft.kind}`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "保存到资产空间失败");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.asset.saveToSpaceFailed);
     } finally {
       setAssetSaveSubmitting(false);
     }
@@ -2819,13 +2816,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter === "server" && asset.canvasListItemId) {
       void apiUpdateCanvasAssetListItem(asset.canvasListItemId, { pinned: true }).then(() => {
         setState((current) => ({ ...current, assets: current.assets?.map((item) => item.id === asset.id ? { ...item, pinned: true } : item) }));
-        setToast(`已置顶「${asset.name}」`);
-      }).catch((error) => setToast(error instanceof Error ? error.message : "置顶失败"));
+        setToast(uiCopy.toast.workbench.asset.pinned(asset.name));
+      }).catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.asset.pinFailed));
       return;
     }
     setAssetListOrder((current) => [asset.id, ...current.filter((id) => id !== asset.id)]);
     setState((current) => ({ ...current, assets: current.assets?.map((item) => item.id === asset.id ? { ...item, pinned: true } : item) }));
-    setToast(`已置顶「${asset.name}」`);
+    setToast(uiCopy.toast.workbench.asset.pinned(asset.name));
   };
 
   const removeAssetFromList = (asset: AssetSummary) => {
@@ -2833,12 +2830,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (runtimeAdapter === "server" && asset.canvasListItemId) {
       void apiUpdateCanvasAssetListItem(asset.canvasListItemId, { hidden: true }).then(() => {
         setState((current) => ({ ...current, assets: current.assets?.filter((item) => item.id !== asset.id) }));
-        setToast(`已从列表移除「${asset.name}」`);
-      }).catch((error) => setToast(error instanceof Error ? error.message : "从列表移除失败"));
+        setToast(uiCopy.toast.workbench.asset.removedFromList(asset.name));
+      }).catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.asset.removeFromListFailed));
       return;
     }
     setState((current) => ({ ...current, assets: current.assets?.filter((item) => item.id !== asset.id) }));
-    setToast(`已从列表移除「${asset.name}」`);
+    setToast(uiCopy.toast.workbench.asset.removedFromList(asset.name));
   };
 
   const renameAssetInList = (asset: AssetSummary) => {
@@ -2849,8 +2846,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         setState((current) => ({ ...current, assets: current.assets?.map((item) => item.id === asset.id ? { ...item, name: displayName } : item) }));
         setAssetRenameId(null);
         setAssetRenameDraft("");
-        setToast(`已修改当前画布中的名称为「${displayName}」`);
-      }).catch((error) => setToast(error instanceof Error ? error.message : "重命名失败"));
+        setToast(uiCopy.toast.workbench.asset.renamed(displayName));
+      }).catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.common.renameFailed));
       return;
     }
     setState((current) => ({ ...current, assets: current.assets?.map((item) => item.id === asset.id ? { ...item, name: displayName } : item) }));
@@ -2860,7 +2857,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const applyAssetCandidate = async (candidate: Candidate) => {
     if (runtimeAdapter !== "server") {
-      setToast("离线演示不连接 Agent 服务");
+      setToast(uiCopy.toast.workbench.agent.demoOffline);
       return;
     }
     await apiApplyCandidate(candidate.id, state.fixture.working.revision);
@@ -2882,9 +2879,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (mode === "focus") {
       setCanvasOffset({ x: 0, y: 0 });
       setCanvasScale(1);
-      setToast("聚焦模式 · 页面回到画面中心");
+      setToast(uiCopy.toast.workbench.mode.focusCanvas);
     } else {
-      setToast("自由模式 · 拖动画布查看图片和页面");
+      setToast(uiCopy.toast.workbench.mode.freeCanvas);
     }
   };
 
@@ -2892,7 +2889,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const next = nextVerticalViewportMode(verticalViewportMode);
     setVerticalViewportMode(next);
     if (next !== "off" && canvasMode !== "focus") switchCanvasMode("focus");
-    setToast(next === "off" ? "设备视区已关闭" : `设备视区 · ${verticalViewportModeMeta[next].label}`);
+    setToast(next === "off" ? uiCopy.toast.workbench.mode.viewportDisabled : uiCopy.toast.workbench.mode.viewportEnabled(verticalViewportModeMeta[next].label));
   };
 
   const commitMultiMove = (deltaX: number, deltaY: number) => {
@@ -2928,7 +2925,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       };
       requests.push(...capabilitiesForElementPatch(item.pageId, item.id, { geometry }));
     });
-    if (requests.length) commitCapabilities(requests, `已移动 ${multiSelection.comic.length} 个漫画元素`);
+    if (requests.length) commitCapabilities(requests, uiCopy.workbench.operation.moveComicElements(multiSelection.comic.length));
   };
 
   const finishMarqueeSelection = (selectionBox: MarqueeState) => {
@@ -2948,9 +2945,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const balloonOrder = new Map(workingPages.flatMap((comicPage) => comicPage.elements.filter((element): element is SpeechBalloonElement => element.type === "speech_balloon")).map((element, index) => [element.id, index + 1]));
     const comic = workingPages.flatMap((comicPage) => comicPage.elements.flatMap((element): Selection[] => {
       if (!hitElementKeys.has(`${comicPage.id}:${element.id}`)) return [];
-      if (element.type === "comic_frame") return [{ type: "comic_frame", id: element.id, pageId: comicPage.id, label: `画格 ${String(element.readingOrder).padStart(2, "0")}` }];
-      if (element.type === "image") return [{ type: "image", id: element.id, pageId: comicPage.id, label: element.name ?? "画格图片" }];
-      if (element.type === "speech_balloon") return [{ type: "speech_balloon", id: element.id, pageId: comicPage.id, label: `对白 ${String(balloonOrder.get(element.id) ?? 1).padStart(2, "0")}` }];
+      if (element.type === "comic_frame") return [{ type: "comic_frame", id: element.id, pageId: comicPage.id, label: uiCopy.workbench.label.frame(element.readingOrder) }];
+      if (element.type === "image") return [{ type: "image", id: element.id, pageId: comicPage.id, label: element.name ?? uiCopy.workbench.defaultLabel.frameImage }];
+      if (element.type === "speech_balloon") return [{ type: "speech_balloon", id: element.id, pageId: comicPage.id, label: uiCopy.workbench.label.dialogue(balloonOrder.get(element.id) ?? 1) }];
       return [];
     }));
     const canvasIds = Array.from(stage.querySelectorAll<HTMLElement>(".reference-card[data-reference-id]"))
@@ -2965,7 +2962,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setInspectorOpen(false);
     setObjectInteractionMode("select");
     setMultiSelection({ comic, canvasIds, comicActive: comic.length > 0, canvasActive: canvasIds.length > 0, moveActive: false });
-    setToast("已进入多选模式");
+    setToast(uiCopy.toast.workbench.mode.multiSelectEntered);
   };
 
   const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
@@ -3171,14 +3168,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const addBlankComicPage = () => {
     const pageIndex = state.fixture.working.document.units.length;
-    if (commitCapability("create_page", {}, "新增空白页", pageIndex)) setSelection(noSelection);
+    if (commitCapability("create_page", {}, uiCopy.workbench.operation.addBlankPage, pageIndex)) setSelection(noSelection);
   };
 
   const insertBlankComicPage = (unitId: string, side: "before" | "after") => {
     const targetIndex = workingPages.findIndex((page) => page.id === unitId);
     if (targetIndex < 0) return;
     const nextPageIndex = targetIndex + (side === "after" ? 1 : 0);
-    if (commitCapability("create_page", { relativeToUnitId: unitId, side }, side === "before" ? "向前插入一页" : "向后插入一页", nextPageIndex)) {
+    if (commitCapability("create_page", { relativeToUnitId: unitId, side }, side === "before" ? uiCopy.workbench.action.insertPageBefore : uiCopy.workbench.action.insertPageAfter, nextPageIndex)) {
       setSelection(noSelection);
       setPageMenuId(null);
     }
@@ -3187,7 +3184,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const duplicateComicPage = (unitId: string) => {
     const pageIndex = workingPages.findIndex((page) => page.id === unitId);
     if (pageIndex < 0) return;
-    if (commitCapability("duplicate_presentation_unit", { unitId }, "复制当前页", pageIndex + 1)) {
+    if (commitCapability("duplicate_presentation_unit", { unitId }, uiCopy.workbench.action.duplicateCurrentPage, pageIndex + 1)) {
       setSelection(noSelection);
       setPageMenuId(null);
     }
@@ -3197,7 +3194,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const pageIndex = workingPages.findIndex((page) => page.id === unitId);
     const nextPageIndex = pageIndex + (direction === "up" ? -1 : 1);
     if (pageIndex < 0 || nextPageIndex < 0 || nextPageIndex >= workingPages.length) return;
-    if (commitCapability("move_presentation_unit", { unitId, direction }, direction === "up" ? "上移一页" : "下移一页", nextPageIndex)) {
+    if (commitCapability("move_presentation_unit", { unitId, direction }, direction === "up" ? uiCopy.workbench.action.movePageUp : uiCopy.workbench.action.movePageDown, nextPageIndex)) {
       setPageMenuId(null);
     }
   };
@@ -3205,7 +3202,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const addVerticalSegment = (aspectRatio: VerticalSegmentAspectRatio) => {
     setVerticalSegmentMenuPosition(null);
     const pageIndex = state.fixture.working.document.units.length;
-    if (commitCapability("create_vertical_segment", { aspectRatio }, `新增滚动段 ${aspectRatio}`, pageIndex)) setSelection(noSelection);
+    if (commitCapability("create_vertical_segment", { aspectRatio }, uiCopy.workbench.operation.addVerticalSegment(aspectRatio), pageIndex)) setSelection(noSelection);
   };
 
   const openVerticalSegmentMenu = (button: HTMLButtonElement) => {
@@ -3236,7 +3233,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     : undefined;
   const pageEditError = pageEditDraft.aspectRatioChanged && activePageEditorUnit?.kind === "vertical_segment" && pageEditTargetHeight !== undefined
     && activePageEditorUnit.frames.some((frame) => frame.geometry.y + frame.geometry.height > pageEditTargetHeight)
-    ? "页面下方空间不足，现有画格会被裁切，无法应用该比例"
+    ? uiCopy.workbench.pageFlow.ratioWouldCrop
     : "";
 
   const openPageMenu = (button: HTMLButtonElement, unitId: string) => {
@@ -3277,7 +3274,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       name: pageEditDraft.name,
       ...(activePageEditorUnit.kind === "vertical_segment" && activePageEditorUnit.surfaces.length === 1 && pageEditDraft.aspectRatioChanged ? { aspectRatio: pageEditDraft.aspectRatio } : {}),
     };
-    if (commitCapability("update_presentation_unit", input, `编辑「${activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)}」`, activePageEditorIndex)) {
+    if (commitCapability("update_presentation_unit", input, uiCopy.workbench.operation.editUnit(activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)), activePageEditorIndex)) {
       setPageEditor(null);
     }
   };
@@ -3285,7 +3282,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const deletePage = () => {
     if (!activePageEditorPage || activePageEditorIndex < 0) return;
     const nextPageIndex = Math.min(activePageEditorIndex, currentPages.length - 2);
-    if (commitCapability("delete_presentation_unit", { unitId: activePageEditorPage.id }, `删除「${activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)}」`, nextPageIndex)) {
+    if (commitCapability("delete_presentation_unit", { unitId: activePageEditorPage.id }, uiCopy.workbench.operation.deleteUnit(activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)), nextPageIndex)) {
       setSelection(noSelection);
       setPageEditor(null);
     }
@@ -3307,13 +3304,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
             : { id: "split_vertical_segments", input: { unitId: unit.id } };
       const plan = planCapabilities([request]);
       const firstAdded = plan.commands.find((command) => command.type === "add_presentation_unit");
-      const label = pageStructureConfirm.action === "merge_pages" ? "合并为真正双页" : pageStructureConfirm.action === "split_spread" ? "拆分真正双页" : pageStructureConfirm.action === "merge_segments" ? "合并滚动段" : "拆分滚动段";
+      const label = pageStructureConfirm.action === "merge_pages" ? uiCopy.workbench.operation.mergeSpread : pageStructureConfirm.action === "split_spread" ? uiCopy.workbench.operation.splitSpread : pageStructureConfirm.action === "merge_segments" ? uiCopy.workbench.operation.mergeSegments : uiCopy.workbench.action.splitSegment;
       setPageStructureConfirm(null);
       commitOperations(plan.commands, label, "manual", undefined, index, () => {
         if (firstAdded?.type === "add_presentation_unit") setSelection({ type: "presentation_unit", id: firstAdded.unit.id, pageId: firstAdded.unit.id, label });
       });
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "无法改变页面结构");
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.layout.pageStructureFailed);
       setPageStructureConfirm(null);
     }
   };
@@ -3346,7 +3343,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const turnCanvasPage = (direction: -1 | 1) => {
     const nextPageIndex = displayGroups[currentDisplayGroupIndex + direction]?.unitIndices[0];
     if (nextPageIndex === undefined) {
-      setToast(direction < 0 ? "已经是第一页" : "已经是最后一页");
+      setToast(direction < 0 ? uiCopy.toast.common.firstPage : uiCopy.toast.common.lastPage);
       return;
     }
     closeFloatingMenus();
@@ -3367,18 +3364,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setEditingStoryboardTarget(null);
     setInspectorOpen(false);
     const element = workingPages.find((item) => item.id === next.pageId)?.elements.find((item) => item.id === next.id);
-    setScope(next.type === "presentation_unit" ? "当前页" : next.type === "reference_card" ? "仅图片" : next.type === "comic_frame" ? "当前漫画格" : next.type === "image" ? "格内图片裁切" : next.type === "speech_balloon" ? "当前气泡" : next.type === "text" ? "当前旁白" : "当前格");
+    setScope(next.type === "presentation_unit" ? uiCopy.workbench.scope.currentPage : next.type === "reference_card" ? uiCopy.workbench.scope.imageOnly : next.type === "comic_frame" ? uiCopy.workbench.scope.comicFrame : next.type === "image" ? uiCopy.workbench.scope.frameImageCrop : next.type === "speech_balloon" ? uiCopy.workbench.scope.balloon : next.type === "text" ? uiCopy.workbench.scope.narration : uiCopy.workbench.scope.currentFrame);
     if (element?.linkedStoryboardBeatId) setEditDraft({});
   };
   const canvasReferences = state.fixture.references.filter(isCanvasReference);
-  useEffect(() => {
-    if (selection.type === "reference_card") {
-      const reference = state.fixture.references.find((item) => item.id === selection.id);
-      setSelectedAssetId(reference?.assetId ?? reference?.localAssetId ?? null);
-    } else if (selection.type !== "none") {
-      setSelectedAssetId(null);
-    }
-  }, [selection.id, selection.type, state.fixture.references]);
+  const selectedReference = selection.type === "reference_card"
+    ? state.fixture.references.find((item) => item.id === selection.id)
+    : undefined;
+  const highlightedAssetId = selection.type === "reference_card"
+    ? selectedReference?.assetId ?? selectedReference?.localAssetId ?? null
+    : selection.type === "none"
+      ? selectedAssetId
+      : null;
   // The sidebar is the asset library. Canvas objects are merely placements
   // linking back to these assets, so removing one never removes its row here.
   const canvasAssetLibrary = [...(state.assets ?? [])].sort((left, right) => {
@@ -3417,7 +3414,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const activeAssetSave = canvasAssetLibrary.find((asset) => asset.id === assetSaveFormId);
   const activeStoryboardRow = storyboardFrameRows.find((row) => row.frame.id === storyboardMenuFrameId);
   const previewDisabled = currentPages.length === 0 || !state.fixture.snapshot || modeSwitching;
-  const previewTitle = !state.fixture.snapshot ? "请先保存当前一话，再进入阅读预览" : undefined;
+  const previewTitle = !state.fixture.snapshot ? uiCopy.workbench.toolbar.previewDisabledTitle : undefined;
   const goToPreview = () => {
     if (previewDisabled) return;
     setProjectMenu(false);
@@ -3439,45 +3436,45 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     : element.type === "text"
       ? undefined
     : element.type === "comic_frame"
-      ? element.surfaceScope === "unit" ? "跨页" : undefined
+      ? element.surfaceScope === "unit" ? uiCopy.workbench.object.crossPage : undefined
     : element.location.space === "frame"
-      ? "格内"
+      ? uiCopy.workbench.object.insideFrame
       : element.location.purpose === "cross_page"
-        ? "跨页"
+        ? uiCopy.workbench.object.crossPage
         : element.location.purpose === "cross_segment"
-          ? "跨段"
+          ? uiCopy.workbench.object.crossSegment
       : element.location.anchor.type === "frame"
-        ? "破格"
-        : "纸面";
+        ? uiCopy.workbench.object.breakout
+        : uiCopy.workbench.object.paper;
   const contextObjectNumber = (elements: CanvasElement[], id?: string) => String(Math.max(1, elements.findIndex((element) => element.id === id) + 1)).padStart(2, "0");
   const comicContextHeader = (() => {
-    if (!comicContextMenu) return { icon: "layout" as IconName, label: "对象" };
+    if (!comicContextMenu) return { icon: "layout" as IconName, label: uiCopy.workbench.defaultLabel.object };
     const target = comicContextMenu.target;
     if (target.type === "presentation_unit") return {
       icon: (contextTargetPage?.kind === "vertical_segment" ? "pages" : "pageSingle") as IconName,
-      label: contextTargetUnit ? presentationUnitNumberLabel(contextTargetUnit, contextTargetPageIndex) : `${contextTargetPage?.kind === "vertical_segment" ? "滚动段" : "Page"} ${String(Math.max(1, contextTargetPageIndex + 1)).padStart(2, "0")}`,
+      label: contextTargetUnit ? presentationUnitNumberLabel(contextTargetUnit, contextTargetPageIndex) : contextTargetPage?.kind === "vertical_segment" ? uiCopy.workbench.label.segment(String(Math.max(1, contextTargetPageIndex + 1)).padStart(2, "0")) : uiCopy.workbench.label.page(String(Math.max(1, contextTargetPageIndex + 1)).padStart(2, "0")),
     };
     if (target.type === "comic_frame") return {
       icon: "layout" as IconName,
-      label: `${contextTargetFrameData?.frame?.surfaceScope === "unit" ? "跨页格" : "画格"} ${String(contextTargetFrameData?.frame?.readingOrder ?? 1).padStart(2, "0")}`,
+      label: `${contextTargetFrameData?.frame?.surfaceScope === "unit" ? uiCopy.workbench.object.crossPageFrame : uiCopy.workbench.object.frame} ${String(contextTargetFrameData?.frame?.readingOrder ?? 1).padStart(2, "0")}`,
     };
     if (target.type === "image") {
       const frameId = contextTargetElement?.type === "image" ? contextTargetElement.comicFrameId : undefined;
       const isOverlayImage = contextTargetElement?.type === "image" && contextTargetElement.location.space === "overlay";
       const overlayPurpose = contextTargetElement?.type === "image" && contextTargetElement.location.space === "overlay" ? contextTargetElement.location.purpose : undefined;
       const siblingImages = contextTargetPage?.elements.filter((element) => element.type === "image" && (isOverlayImage ? element.location.space === "overlay" && element.location.purpose === overlayPurpose : element.comicFrameId === frameId && element.location.space === "frame")) ?? [];
-      const imageLabel = overlayPurpose === "cross_page" ? "跨页图" : overlayPurpose === "cross_segment" ? "跨段图" : isOverlayImage ? "图" : "主图";
+      const imageLabel = overlayPurpose === "cross_page" ? uiCopy.workbench.object.crossPageImage : overlayPurpose === "cross_segment" ? uiCopy.workbench.object.crossSegmentImage : isOverlayImage ? uiCopy.workbench.object.image : uiCopy.asset.image.primary;
       return { icon: "asset" as IconName, label: `${imageLabel} ${contextObjectNumber(siblingImages, target.id)}` };
     }
     if (target.type === "speech_balloon") {
       const isCrossPage = contextTargetElement?.type === "speech_balloon" && contextTargetElement.location.space === "overlay" && contextTargetElement.location.purpose === "cross_page";
       const siblingBalloons = contextTargetPage?.elements.filter((element) => element.type === "speech_balloon" && (isCrossPage ? element.location.space === "overlay" && element.location.purpose === "cross_page" : !(element.location.space === "overlay" && element.location.purpose === "cross_page"))) ?? [];
-      const balloonLabel = isCrossPage ? "跨页泡" : "对白";
+      const balloonLabel = isCrossPage ? uiCopy.workbench.object.crossPageBalloon : uiCopy.workbench.object.dialogue;
       return { icon: "message" as IconName, label: `${balloonLabel} ${contextObjectNumber(siblingBalloons, target.id)}` };
     }
     if (target.type === "text") {
       const siblingNarrations = contextTargetPage?.elements.filter((element) => element.type === "text" && element.content.role === "narration") ?? [];
-      return { icon: "text" as IconName, label: `旁白 ${contextObjectNumber(siblingNarrations, target.id)}` };
+      return { icon: "text" as IconName, label: uiCopy.workbench.label.narration(contextObjectNumber(siblingNarrations, target.id)) };
     }
     return { icon: "layout" as IconName, label: target.label };
   })();
@@ -3486,8 +3483,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const contextImageAlreadyInAssetList = contextTargetElement?.type === "image" && Boolean(state.assets?.some((asset) => asset.id === contextTargetElement.assetId));
   const contextBalloonPurpose = contextTargetElement?.type === "speech_balloon" && contextTargetElement.location.space === "overlay" ? contextTargetElement.location.purpose : undefined;
   const contextImageReplaceLabel = contextTargetElement?.type === "image"
-    ? "更换格内图片"
-    : "更换图片";
+    ? uiCopy.workbench.action.replaceFrameImage
+    : uiCopy.asset.action.changeImage;
   const comicContextMenuStyle: CSSProperties | undefined = comicContextMenu ? (() => {
     const width = 196;
     const height = 390;
@@ -3511,18 +3508,18 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     ? comicDeleteData?.comicPage?.elements.filter((element) => element.type !== "comic_frame" && element.comicFrameId === comicDeleteData.frame?.id).length ?? 0
     : 0;
   const comicDeleteTitle = comicDeleteTarget?.kind === "image"
-    ? `移除“${comicDeleteSelection?.label}”？`
-    : `删除“${comicDeleteSelection?.label}”？`;
+    ? uiCopy.workbench.dialog.removeTitle(comicDeleteSelection?.label ?? "")
+    : uiCopy.workbench.dialog.deleteTitle(comicDeleteSelection?.label ?? "");
   const comicDeleteLocation = comicDeleteSelection ? objectLocationLabel(elementForSelection(comicDeleteSelection)) : undefined;
   const comicDeleteDescription = comicDeleteTarget?.kind === "frame"
     ? comicDeleteElementCount
-      ? `画格中的 ${comicDeleteElementCount} 个图片或对白元素会从页面移除。关联分镜会保留为未编排内容。`
-      : "这是一个空画格。关联分镜会保留为未编排内容。"
+      ? uiCopy.workbench.dialog.frameDeleteDescription(comicDeleteElementCount)
+      : uiCopy.workbench.dialog.emptyFrameDeleteDescription
     : comicDeleteTarget?.kind === "image"
-      ? `${comicDeleteLocation === "跨页" ? "跨页图片会从当前双页中移除" : comicDeleteLocation === "跨段" ? "跨段图片会从当前复合滚动段中移除" : comicDeleteLocation === "纸面" ? "图片会从当前纸面中移除" : "图片会从当前画格中移除"}，资产库中的原图和其他引用保持不变。`
+      ? uiCopy.workbench.dialog.imageDeleteDescription(comicDeleteLocation === uiCopy.workbench.object.crossPage ? "cross_page" : comicDeleteLocation === uiCopy.workbench.object.crossSegment ? "cross_segment" : comicDeleteLocation === uiCopy.workbench.object.paper ? "paper" : "frame")
       : comicDeleteTarget?.kind === "narration"
-        ? "旁白文字会从当前页面中移除。该操作可以撤销。"
-      : `对白文字和对应气泡会从${comicDeleteLocation === "纸面" ? "纸面" : "画格"}中移除。`;
+        ? uiCopy.workbench.dialog.narrationDeleteDescription
+      : uiCopy.workbench.dialog.balloonDeleteDescription(comicDeleteLocation === uiCopy.workbench.object.paper ? uiCopy.workbench.object.paper : uiCopy.workbench.object.frame);
   const confirmComicDelete = () => {
     if (!comicDeleteTarget) return;
     if (comicDeleteTarget.kind === "frame") deleteFrame(comicDeleteTarget.selection);
@@ -3570,7 +3567,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     width: verticalNavigatorPaperSize.width,
     height: verticalNavigatorPaperSize.height,
   };
-  const verticalViewportLabel = activeVerticalViewport ? `设备视区：${activeVerticalViewport.label}` : "设备视区已关闭";
+  const verticalViewportLabel = activeVerticalViewport ? uiCopy.workbench.label.viewport(activeVerticalViewport.label) : uiCopy.viewport.disabled;
   const activeMultiComicIds = new Set(multiSelection?.comicActive ? multiSelection.comic.flatMap((item) => item.id ? [item.id] : []) : []);
   const activeMultiCanvasIds = new Set(multiSelection?.canvasActive ? multiSelection.canvasIds : []);
   const multiComicActive = Boolean(multiSelection?.comicActive && multiSelection.comic.length);
@@ -3621,7 +3618,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const resolveAgentCard = (messageId: string) => {
     setResolvedCardIds((current) => new Set(current).add(messageId));
     if (runtimeAdapter === "server") {
-      void apiResolveAgentMessage(messageId).catch((error) => setToast(error instanceof Error ? error.message : "卡片状态保存失败"));
+      void apiResolveAgentMessage(messageId).catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.message.cardStateSaveFailed));
     }
   };
 
@@ -3633,7 +3630,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         return refreshServerWorkbench();
       }).catch((error) => {
         setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
-        setToast(error instanceof Error ? error.message : "重试失败");
+        setToast(error instanceof Error ? error.message : uiCopy.toast.common.retryFailed);
       });
       return;
     }
@@ -3645,7 +3642,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       }).catch((error) => {
         setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
         void refreshServerWorkbench().catch(() => undefined);
-        setToast(error instanceof Error ? error.message : "重试失败");
+        setToast(error instanceof Error ? error.message : uiCopy.toast.common.retryFailed);
       });
       return;
     }
@@ -3656,10 +3653,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (resolved && message.kind === "failed") return null;
     if (message.kind === "task") {
       const runningHere = activeTask?.status === "running" && (!message.taskId || message.taskId === activeTask.id);
-      const stageLabel = activeTask?.stage === "preparing" ? "正在准备上下文" : activeTask?.stage === "queued" ? "等待生成资源" : activeTask?.stage === "validating" ? "正在校验结果" : activeTask?.stage === "saving" ? "正在保存候选" : "模型生成中";
-      return runningHere ? <div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{stageLabel}</small></span><button type="button" className="task-cancel-trigger" aria-label="取消任务" onClick={() => setTaskCancelConfirmOpen(true)}><Icon name="x" /></button></div> : <div className="muted-card">{message.text}</div>;
+      const stageLabel = activeTask?.stage === "preparing" ? uiCopy.workbench.taskStage.preparing : activeTask?.stage === "queued" ? uiCopy.workbench.taskStage.queued : activeTask?.stage === "validating" ? uiCopy.workbench.taskStage.validating : activeTask?.stage === "saving" ? uiCopy.workbench.taskStage.saving : uiCopy.workbench.taskStage.generating;
+      return runningHere ? <div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{stageLabel}</small></span><button type="button" className="task-cancel-trigger" aria-label={uiCopy.workbench.task.cancelAria} onClick={() => setTaskCancelConfirmOpen(true)}><Icon name="x" /></button></div> : <div className="muted-card">{message.text}</div>;
     }
-    if (message.kind === "failed") return <div className="failed-card"><strong>生成失败</strong><p>{message.text}</p><div className="card-actions failed-card-actions"><button type="button" className="failed-retry" onClick={() => retryAgentTask(message)}>重试</button><button type="button" className="failed-close" onClick={() => resolveAgentCard(message.id)}>关闭</button></div></div>;
+    if (message.kind === "failed") return <div className="failed-card"><strong>{uiCopy.workbench.task.failed}</strong><p>{message.text}</p><div className="card-actions failed-card-actions"><button type="button" className="failed-retry" onClick={() => retryAgentTask(message)}>{uiCopy.common.action.retry}</button><button type="button" className="failed-close" onClick={() => resolveAgentCard(message.id)}>{uiCopy.common.action.close}</button></div></div>;
     if (message.kind === "canceled") return <div className="muted-card">{message.text}</div>;
     if (message.kind === "question") return <div className="agent-inline-question"><p>{message.text}</p>{!resolved && message.options?.length ? <div>{message.options.map((option) => <button type="button" key={option} onClick={() => { resolveAgentCard(message.id); setComposer(option); }}>{option}</button>)}</div> : null}</div>;
     if (message.kind === "candidate" && candidate) {
@@ -3677,7 +3674,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         ? `${frameImagePageLabel} · ${candidate.targetLabel}`
         : candidate.targetLabel;
       const candidateCardTitle = isStoryboard
-        ? `编辑分镜条目 · ${candidate.targetLabel}`
+        ? uiCopy.workbench.candidate.editStoryboard(candidate.targetLabel)
         : isFrameImage && frameImagePageLabel
           ? `${candidate.title.split("·")[0].trim()} · ${frameImageTargetLabel}`
           : candidate.title;
@@ -3701,102 +3698,102 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         ? () => navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&asset=${encodeURIComponent(candidate.metadata?.outputAssetId ?? "")}`)
         : undefined;
       const candidateStatusLabel = candidate.status === "available"
-        ? isStoryboard ? "待应用" : candidate.targetLabel
+        ? isStoryboard ? uiCopy.workbench.candidate.pending : candidate.targetLabel
         : candidate.status === "applied" && isAsset
-          ? "已保存"
+          ? uiCopy.workbench.candidate.saved
           : candidate.status === "applied"
-            ? "已应用"
+            ? uiCopy.workbench.candidate.applied
             : candidate.status === "reverted"
-              ? "已回退"
+              ? uiCopy.workbench.candidate.reverted
               : candidate.status === "stale"
-                ? "已过期"
-                : "已丢弃";
+                ? uiCopy.workbench.candidate.expired
+                : uiCopy.workbench.candidate.discarded;
       const toggleTerminal = terminalStartsCollapsed ? toggleTerminalCandidate : toggleCollapsedTerminalCandidate;
       const showSavedAssetView = isAsset && candidate.status === "applied" && openSavedAsset;
       return <div className={`candidate-card ${candidate.status} ${terminalCollapsed ? "terminal-collapsed compact" : ""}`}>
         <div className="candidate-title"><strong>{candidateCardTitle}</strong><span>{candidateStatusLabel}</span></div>
-        {!terminalCollapsed && (candidate.metadata?.previewUrl || candidate.metadata?.imageSrc) ? <button type="button" className="candidate-result-preview-button" aria-label={`查看${candidate.title}图片`} onClick={() => setImageViewer({ images: [{ id: candidate.id, src: candidate.metadata?.previewUrl ?? candidate.metadata?.imageSrc ?? "", alt: `${candidate.title}预览` }] })}><img className="candidate-result-preview" src={candidate.metadata.previewUrl ?? candidate.metadata.imageSrc} alt={`${candidate.title}预览`} /></button> : null}
+        {!terminalCollapsed && (candidate.metadata?.previewUrl || candidate.metadata?.imageSrc) ? <button type="button" className="candidate-result-preview-button" aria-label={uiCopy.workbench.aria.candidateImage(candidate.title)} onClick={() => setImageViewer({ images: [{ id: candidate.id, src: candidate.metadata?.previewUrl ?? candidate.metadata?.imageSrc ?? "", alt: uiCopy.workbench.aria.candidatePreview(candidate.title) }] })}><img className="candidate-result-preview" src={candidate.metadata.previewUrl ?? candidate.metadata.imageSrc} alt={uiCopy.workbench.aria.candidatePreview(candidate.title)} /></button> : null}
         {!terminalCollapsed && candidate.metadata?.storyboardTitle ? <strong className="candidate-storyboard-title">{candidate.metadata.storyboardTitle}</strong> : null}
         {!terminalCollapsed && candidate.metadata?.storyboardDescription ? <p className="candidate-storyboard-description">{candidate.metadata.storyboardDescription}</p> : null}
         {!terminalCollapsed ? <p>{candidate.changeSummary}</p> : null}
-        {candidate.status === "available" ? <div className="candidate-actions"><button type="button" className="candidate-primary-action" onClick={() => { if (isFrameImage) startFrameImageCandidatePreview(candidate); else if (isAsset) void applyAssetCandidate(candidate); else applyCandidate(candidate); }}>{isFrameImage ? "预览" : isAsset ? "保存到资产" : "应用"}</button><button type="button" className="candidate-secondary-action" onClick={() => discardCandidate(candidate.id)}>丢弃</button></div> : terminalCandidate ? <div className="terminal-candidate-actions">{showSavedAssetView ? <button type="button" className="saved-asset-view" onClick={openSavedAsset}>查看</button> : null}<button type="button" className="terminal-candidate-toggle" aria-expanded={!terminalCollapsed} onClick={toggleTerminal}>{terminalCollapsed ? "展开" : "收起"}<Icon name={terminalCollapsed ? "chevronDown" : "chevronUp"} /></button></div> : null}
+        {candidate.status === "available" ? <div className="candidate-actions"><button type="button" className="candidate-primary-action" onClick={() => { if (isFrameImage) startFrameImageCandidatePreview(candidate); else if (isAsset) void applyAssetCandidate(candidate); else applyCandidate(candidate); }}>{isFrameImage ? uiCopy.common.action.preview : isAsset ? uiCopy.workbench.candidate.saveToAsset : uiCopy.workbench.candidate.apply}</button><button type="button" className="candidate-secondary-action" onClick={() => discardCandidate(candidate.id)}>{uiCopy.common.action.discard}</button></div> : terminalCandidate ? <div className="terminal-candidate-actions">{showSavedAssetView ? <button type="button" className="saved-asset-view" onClick={openSavedAsset}>{uiCopy.common.action.view}</button> : null}<button type="button" className="terminal-candidate-toggle" aria-expanded={!terminalCollapsed} onClick={toggleTerminal}>{terminalCollapsed ? uiCopy.common.action.expand : uiCopy.common.action.collapse}<Icon name={terminalCollapsed ? "chevronDown" : "chevronUp"} /></button></div> : null}
       </div>;
     }
     return <p>{message.text}</p>;
   };
 
-  const projectSubtitle = `${workbenchMeta.comicTitle} · ${workbenchMeta.chapterTitle} · r${state.fixture.working.revision}${runtimeAdapter === "server" ? " · 已持久化" : runtimeAdapter === "demo" ? " · 离线演示" : ""}`;
+  const projectSubtitle = uiCopy.workbench.navigation.projectSubtitle(workbenchMeta.comicTitle, workbenchMeta.chapterTitle, state.fixture.working.revision, runtimeAdapter === "server" || runtimeAdapter === "demo" ? runtimeAdapter : "other");
   const setCreationSpaceOpen = (open: boolean) => {
     setLeftOpen(open);
     if (!open) setProjectMenu(false);
   };
 
   if (hydrated && runtimeError) {
-    return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>工作台暂时无法载入</h1><p>{runtimeError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
+    return <main className="runtime-unavailable" role="alert"><section><span>{uiCopy.brand.api}</span><h1>{uiCopy.workbench.page.loadFailed}</h1><p>{runtimeError}</p><button type="button" onClick={() => window.location.reload()}>{uiCopy.common.action.reconnect}</button></section></main>;
   }
 
   if (!hydrated) {
     if (!showInitialLoading) return <main className="workbench-loading-blank" aria-busy="true" />;
-    return <main className="runtime-unavailable"><section><span>LANTERN WORKBENCH</span><h1>正在载入工作稿</h1></section></main>;
+    return <main className="runtime-unavailable"><section><span>{uiCopy.workbench.navigation.loadingBrand}</span><h1>{uiCopy.workbench.page.loadingDraft}</h1></section></main>;
   }
 
   return (
     <WorkbenchShell className={`route-page-transition ${entryTransition} mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <header className="project-chip" data-testid="project-chip">
-        <button className="project-back app-page-corner-button" type="button" aria-label="返回漫画" onClick={() => navigate(`/comics/${comicId}`, "back")}><Icon name="collapse" /></button>
-        <button className="project-main" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label="打开项目菜单">
+        <button className="project-back app-page-corner-button" type="button" aria-label={uiCopy.workbench.navigation.backToComic} onClick={() => navigate(`/comics/${comicId}`, "back")}><Icon name="collapse" /></button>
+        <button className="project-main" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label={uiCopy.workbench.navigation.projectMenuAria}>
           <span className="project-main-card">
-            <span><strong>Lantern AI</strong><small className="project-subtitle" data-full-text={projectSubtitle} tabIndex={0}><span>{projectSubtitle}</span></small></span>
+            <span><strong>{uiCopy.brand.name}</strong><small className="project-subtitle" data-full-text={projectSubtitle} tabIndex={0}><span>{projectSubtitle}</span></small></span>
             <Icon name="hamburger" />
           </span>
         </button>
         {projectMenu ? (
           <div className="project-menu" role="menu">
-            <button type="button" className="route-item" onClick={() => navigate("/workspace", "back")}><span className="menu-action-label"><Icon name="home" />返回首页</span></button>
-            <button type="button" className="route-item" onClick={() => navigate(`/comics/${comicId}`, "back")}><span className="menu-action-label"><Icon name="comic" />返回漫画</span></button>
+            <button type="button" className="route-item" onClick={() => navigate("/workspace", "back")}><span className="menu-action-label"><Icon name="home" />{uiCopy.workbench.navigation.backToHome}</span></button>
+            <button type="button" className="route-item" onClick={() => navigate(`/comics/${comicId}`, "back")}><span className="menu-action-label"><Icon name="comic" />{uiCopy.workbench.navigation.backToComic}</span></button>
             <button type="button" className="route-item" onClick={() => {
               setProjectMenu(false);
               navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`);
-            }}><span className="menu-action-label"><Icon name="folder" />资产空间</span></button>
+            }}><span className="menu-action-label"><Icon name="folder" />{uiCopy.asset.navigation.space}</span></button>
             <i className="project-menu-divider" />
-            <button type="button" onClick={saveChapter}><span className="menu-action-label"><Icon name="save" />保存</span></button>
-            <button type="button" onClick={restoreLastSaved} disabled={!state.fixture.snapshot || state.fixture.snapshot.sourceWorkingRevision === state.fixture.working.revision || restoringSnapshot}><span className="menu-action-label"><Icon name="undo" />回到上次保存</span></button>
-            <button type="button" onClick={goToPreview} disabled={previewDisabled} title={previewTitle}><span className="menu-action-label"><Icon name="preview" />阅读预览</span></button>
+            <button type="button" onClick={saveChapter}><span className="menu-action-label"><Icon name="save" />{uiCopy.common.action.save}</span></button>
+            <button type="button" onClick={restoreLastSaved} disabled={!state.fixture.snapshot || state.fixture.snapshot.sourceWorkingRevision === state.fixture.working.revision || restoringSnapshot}><span className="menu-action-label"><Icon name="undo" />{uiCopy.workbench.action.returnToSaved}</span></button>
+            <button type="button" onClick={goToPreview} disabled={previewDisabled} title={previewTitle}><span className="menu-action-label"><Icon name="preview" />{uiCopy.comic.action.readingPreview}</span></button>
             <i className="project-menu-divider" />
-            <button type="button" disabled={importingArchive || activeTask?.status === "running"} onClick={() => archiveImportRef.current?.click()}><span className="menu-action-label"><Icon name="publish" />{importingArchive ? "正在导入完整 LCD…" : "导入完整 LCD 资源"}</span></button>
+            <button type="button" disabled={importingArchive || activeTask?.status === "running"} onClick={() => archiveImportRef.current?.click()}><span className="menu-action-label"><Icon name="publish" />{importingArchive ? uiCopy.workbench.action.importingArchive : uiCopy.workbench.action.importArchive}</span></button>
             <i className="project-menu-divider" />
-            <button type="button" className="context-debug-entry" onClick={openContextDebug}><span className="menu-action-label"><Icon name="context" />查看当前上下文</span></button>
+            <button type="button" className="context-debug-entry" onClick={openContextDebug}><span className="menu-action-label"><Icon name="context" />{uiCopy.workbench.action.viewCurrentContext}</span></button>
           </div>
         ) : null}
       </header>
 
-      <CreationDrawer className={leftOpen ? "open" : "closed"} aria-label="创作空间">
+      <CreationDrawer className={leftOpen ? "open" : "closed"} aria-label={uiCopy.workbench.panel.creationSpace}>
         <div className="drawer-stack">
         <div className="drawer-top-card" data-tour-id="creation-space">
-        <div className="drawer-heading"><strong>创作空间</strong><button type="button" onClick={() => setCreationSpaceOpen(false)} aria-label="收起创作空间"><Icon name="collapse" /></button></div>
-        <nav className="drawer-tabs" aria-label="创作空间分类">
-          {([['assets', '资产'], ['storyboard', '分镜']] as Array<[LeftView, string]>).map(([value, label]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => setLeftView(value)}>{label}</button>)}
+        <div className="drawer-heading"><strong>{uiCopy.workbench.panel.creationSpace}</strong><button type="button" onClick={() => setCreationSpaceOpen(false)} aria-label={uiCopy.workbench.creationSpace.collapseAria}><Icon name="collapse" /></button></div>
+        <nav className="drawer-tabs" aria-label={uiCopy.workbench.creationSpace.categoriesAria}>
+          {([['assets', uiCopy.asset.label.asset], ['storyboard', uiCopy.workbench.creationSpace.storyboardTab]] as Array<[LeftView, string]>).map(([value, label]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => setLeftView(value)}>{label}</button>)}
         </nav>
         <div ref={creationListRef} className={`drawer-main ${leftView === "assets" ? "assets-view" : ""} ${leftView === "storyboard" ? "storyboard-view" : ""} ${creationListOverflows ? "has-scroll-overflow" : ""}`}>
         {leftView === "assets" ? <section className="drawer-view asset-reference-list">
-          <div className="asset-sidebar-head"><h2><span><Icon name="asset" /></span>资产</h2><div className="asset-sidebar-actions"><button type="button" className="asset-studio-entry" onClick={() => navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`)}><Icon name="folder" /><span>资产空间</span></button><button type="button" className="drawer-add-page asset-upload-button" aria-label="上传图片资产并放到画布" onClick={() => dockUploadRef.current?.click()}><Icon name="add" /></button></div></div>
+          <div className="asset-sidebar-head"><h2><span><Icon name="asset" /></span>{uiCopy.asset.label.asset}</h2><div className="asset-sidebar-actions"><button type="button" className="asset-studio-entry" onClick={() => navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`)}><Icon name="folder" /><span>{uiCopy.asset.navigation.space}</span></button><button type="button" className="drawer-add-page asset-upload-button" aria-label={uiCopy.workbench.creationSpace.uploadAssetAria} onClick={() => dockUploadRef.current?.click()}><Icon name="add" /></button></div></div>
           <div className="asset-reference-items">
             {canvasAssetLibrary.map((asset) => {
               const placement = canvasReferences.find((reference) => reference.assetId === asset.id);
               const thumbnail = canvasAssetThumbnail(asset);
               const kindTag = assetKindTag(asset.kind);
               const thumbnailNode = <span className="asset-row-thumbnail">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} /> : <Icon name="asset" />}</span>;
-              return <div className={`asset-row ${selectedAssetId === asset.id ? "active" : ""}`} key={asset.id}>
-                {assetRenameId === asset.id ? <form className="asset-row-rename" onSubmit={(event) => { event.preventDefault(); renameAssetInList(asset); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><input autoFocus value={assetRenameDraft} onChange={(event) => setAssetRenameDraft(event.target.value)} maxLength={120}/><button type="submit">保存</button><button type="button" aria-label="取消重命名" onClick={() => { setAssetRenameId(null); setAssetRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="asset-row-main" onClick={() => { closeFloatingMenus(); setSelectedAssetId(asset.id); setSelection(placement ? { type: "reference_card", id: placement.id, label: asset.name } : noSelection); setScope("仅图片"); }} onDoubleClick={() => { if (!thumbnail) { setToast(`「${asset.name}」还没有可查看的图片`); return; } setImageViewer({ images: [{ id: asset.id, src: thumbnail, alt: asset.name }] }); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><b>{asset.name}</b></button>
-                <button className="asset-more" type="button" aria-label={`${asset.name}更多选项`} onClick={(event) => { const workbench = event.currentTarget.closest<HTMLElement>(".workbench"); const button = event.currentTarget.getBoundingClientRect(); const workbenchRect = workbench?.getBoundingClientRect(); closeFloatingMenus("asset"); setAssetMenuPosition({ x: button.right - (workbenchRect?.left ?? 0) + 16, y: button.top - (workbenchRect?.top ?? 0) - 4 }); setAssetMenuId((id) => id === asset.id ? null : asset.id); }}><Icon name="moreVertical" /></button></>}
+              return <div className={`asset-row ${highlightedAssetId === asset.id ? "active" : ""}`} key={asset.id}>
+                {assetRenameId === asset.id ? <form className="asset-row-rename" onSubmit={(event) => { event.preventDefault(); renameAssetInList(asset); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><input autoFocus value={assetRenameDraft} onChange={(event) => setAssetRenameDraft(event.target.value)} maxLength={120}/><button type="submit">{uiCopy.common.action.save}</button><button type="button" aria-label={uiCopy.workbench.creationSpace.cancelRenameAria} onClick={() => { setAssetRenameId(null); setAssetRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="asset-row-main" onClick={() => { closeFloatingMenus(); setSelectedAssetId(asset.id); setSelection(placement ? { type: "reference_card", id: placement.id, label: asset.name } : noSelection); setScope(uiCopy.workbench.scope.imageOnly); }} onDoubleClick={() => { if (!thumbnail) { setToast(uiCopy.toast.workbench.asset.imageUnavailable(asset.name)); return; } setImageViewer({ images: [{ id: asset.id, src: thumbnail, alt: asset.name }] }); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><b>{asset.name}</b></button>
+                <button className="asset-more" type="button" aria-label={uiCopy.workbench.aria.assetMore(asset.name)} onClick={(event) => { const workbench = event.currentTarget.closest<HTMLElement>(".workbench"); const button = event.currentTarget.getBoundingClientRect(); const workbenchRect = workbench?.getBoundingClientRect(); closeFloatingMenus("asset"); setAssetMenuPosition({ x: button.right - (workbenchRect?.left ?? 0) + 16, y: button.top - (workbenchRect?.top ?? 0) - 4 }); setAssetMenuId((id) => id === asset.id ? null : asset.id); }}><Icon name="moreVertical" /></button></>}
               </div>;
             })}
-            {!canvasAssetLibrary.length ? <p className="drawer-empty">还没有可用资产。</p> : null}
+            {!canvasAssetLibrary.length ? <p className="drawer-empty">{uiCopy.workbench.creationSpace.emptyAssets}</p> : null}
           </div>
         </section> : null}
         {leftView === "storyboard" ? <section className="drawer-view">
-          <h2><span><Icon name="storyboard" /></span>单格画面</h2>
+          <h2><span><Icon name="storyboard" /></span>{uiCopy.workbench.creationSpace.frameSectionTitle}</h2>
           <div className="storyboard-frame-list">
             {storyboardFrameRows.map((row, index) => <div className={`storyboard-frame-row ${selection.id === row.frame.id ? "active" : ""}`} key={row.frame.id}>
               <button type="button" className="storyboard-frame-main" onClick={() => {
@@ -3805,12 +3802,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
                 setEditingStoryboardBeatId(null);
                 setEditingStoryboardTarget(null);
                 setInspectorOpen(false);
-                setScope("当前漫画格");
+                setScope(uiCopy.workbench.scope.comicFrame);
               }}>
                 <b>{String(index + 1).padStart(2, "0")}</b>
-                <strong>{row.beat?.title || "未填写单格内容"}</strong>
+                <strong>{row.beat?.title || uiCopy.workbench.creationSpace.emptyFrame}</strong>
               </button>
-              <button type="button" className="storyboard-frame-more" aria-label={`${row.label}更多选项`} aria-expanded={storyboardMenuFrameId === row.frame.id} onClick={(event) => {
+              <button type="button" className="storyboard-frame-more" aria-label={uiCopy.workbench.aria.assetMore(row.label)} aria-expanded={storyboardMenuFrameId === row.frame.id} onClick={(event) => {
                 const workbench = event.currentTarget.closest<HTMLElement>(".workbench");
                 const button = event.currentTarget.getBoundingClientRect();
                 const workbenchRect = workbench?.getBoundingClientRect();
@@ -3819,13 +3816,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
                 setStoryboardMenuFrameId((id) => id === row.frame.id ? null : row.frame.id);
               }}><Icon name="moreVertical" /></button>
             </div>)}
-            {!storyboardFrameRows.length ? <p className="drawer-empty">当前页面还没有画格。</p> : null}
+            {!storyboardFrameRows.length ? <p className="drawer-empty">{uiCopy.workbench.creationSpace.emptyFrames}</p> : null}
           </div>
         </section> : null}
         </div>
         </div>
-        <section className="drawer-pages-fixed" aria-label={isVerticalWorkbench ? "滚动段" : "漫画页"} data-tour-id="comic-pages">
-          <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>{isVerticalWorkbench ? "滚动段" : "漫画页"}</strong><small>{physicalPageCount(state.fixture.working.document)} {isVerticalWorkbench ? "段" : "页"}</small><button type="button" className="drawer-add-page" aria-label={isVerticalWorkbench ? "新增滚动段" : "新增一页"} aria-expanded={isVerticalWorkbench ? Boolean(verticalSegmentMenuPosition) : undefined} onClick={(event) => isVerticalWorkbench ? openVerticalSegmentMenu(event.currentTarget) : addBlankComicPage()}><Icon name="add" /></button></div>
+        <section className="drawer-pages-fixed" aria-label={isVerticalWorkbench ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page} data-tour-id="comic-pages">
+          <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>{isVerticalWorkbench ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page}</strong><small>{physicalPageCount(state.fixture.working.document)} {isVerticalWorkbench ? uiCopy.workbench.label.segmentUnit : uiCopy.workbench.label.pageUnit}</small><button type="button" className="drawer-add-page" aria-label={isVerticalWorkbench ? uiCopy.workbench.pageFlow.addSegment : uiCopy.workbench.pageFlow.addPageAria} aria-expanded={isVerticalWorkbench ? Boolean(verticalSegmentMenuPosition) : undefined} onClick={(event) => isVerticalWorkbench ? openVerticalSegmentMenu(event.currentTarget) : addBlankComicPage()}><Icon name="add" /></button></div>
           <div className="draft-pages">{currentPages.map((comicPage, index) => {
             const thumbnail = pageThumbSrc(comicPage);
             const unit = state.fixture.working.document.units.find((item) => item.id === comicPage.id);
@@ -3834,77 +3831,77 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
             const composite = Boolean(unit && unit.surfaces.length > 1);
             return <div key={comicPage.id} className={`draft-page ${index === state.currentPageIndex ? "active" : ""} ${composite ? "composite" : ""} ${unit?.kind === "spread" ? "true-spread" : ""}`}>
               <button type="button" className="draft-page-main" onClick={() => setCurrentComicPage(index)}>
-                <span className="draft-page-thumbnail">{thumbnail ? <img src={thumbnail} alt="漫画页缩略图" loading="lazy" decoding="async"/> : <span className="draft-page-empty" aria-label="空白漫画页"/>}{composite ? <i className="draft-page-seam" /> : null}</span>
-                <span className="draft-page-copy"><b>{pageName}</b><small><em>{pageNumber}</em>{comicPage.kind === "vertical_segment" ? <em className="page-ratio-tag">{composite ? `跨 ${unit?.surfaces.length} 段` : verticalSegmentRatioLabel(comicPage.canvas.width, comicPage.canvas.height)}</em> : null}<span>{comicPage.elements.filter((element) => element.type === "comic_frame").length} 格 · {index === state.currentPageIndex ? "当前查看" : "工作稿"}</span></small></span>
+                <span className="draft-page-thumbnail">{thumbnail ? <img src={thumbnail} alt={uiCopy.workbench.pageFlow.pageThumbnailAlt} loading="lazy" decoding="async"/> : <span className="draft-page-empty" aria-label={uiCopy.workbench.pageFlow.blankPageAria}/>}{composite ? <i className="draft-page-seam" /> : null}</span>
+                <span className="draft-page-copy"><b>{pageName}</b><small><em>{pageNumber}</em>{comicPage.kind === "vertical_segment" ? <em className="page-ratio-tag">{composite ? uiCopy.workbench.label.crossSegmentCount(unit?.surfaces.length ?? 0) : verticalSegmentRatioLabel(comicPage.canvas.width, comicPage.canvas.height)}</em> : null}<span>{uiCopy.workbench.label.pageFrameStatus(comicPage.elements.filter((element) => element.type === "comic_frame").length, index === state.currentPageIndex)}</span></small></span>
               </button>
-              <button type="button" className="draft-page-more" aria-label={`${pageName}更多选项`} aria-expanded={pageMenuId === comicPage.id} onClick={(event) => openPageMenu(event.currentTarget, comicPage.id)}><Icon name="moreVertical" /></button>
+              <button type="button" className="draft-page-more" aria-label={uiCopy.workbench.aria.pageMore(pageName)} aria-expanded={pageMenuId === comicPage.id} onClick={(event) => openPageMenu(event.currentTarget, comicPage.id)}><Icon name="moreVertical" /></button>
             </div>;
           })}</div>
         </section>
         </div>
       </CreationDrawer>
-      {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setCreationSpaceOpen(true)} aria-label="展开创作流"><Icon name="expand" /></button> : null}
+      {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setCreationSpaceOpen(true)} aria-label={uiCopy.workbench.pageFlow.expandAria}><Icon name="expand" /></button> : null}
       {activeAssetMenu && assetMenuPosition ? (() => {
         const visibleInAssetSpace = isAssetVisibleInAssetSpace(activeAssetMenu);
         return <FloatingMenu className="asset-reference-menu-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }}>
           <MenuSection className="asset-menu-section">
-            <button type="button" onClick={() => { addAssetReference(activeAssetMenu); setAgentOpen(true); setAssetMenuId(null); }}><span><Icon name="ai" />引用到对话</span></button>
-            <button type="button" onClick={handleActiveAssetPlacement}><span><Icon name="pointer" />{activeAssetPlacement ? "定位到画布" : "添加到画布"}</span></button>
+            <button type="button" onClick={() => { addAssetReference(activeAssetMenu); setAgentOpen(true); setAssetMenuId(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button>
+            <button type="button" onClick={handleActiveAssetPlacement}><span><Icon name="pointer" />{activeAssetPlacement ? uiCopy.workbench.action.locateOnCanvas : uiCopy.workbench.action.addToCanvas}</span></button>
           </MenuSection>
           <MenuDivider className="asset-menu-divider" />
           <MenuSection className="asset-menu-section">
-            {(activeAssetMenu.libraryStatus === "library" || activeAssetMenu.kind === "reference_image" || activeAssetMenu.kind === "generated_image") ? <button type="button" disabled={visibleInAssetSpace} onClick={() => openSaveAssetForm(activeAssetMenu)}><span><Icon name="save" />{visibleInAssetSpace ? "已关联资产" : "保存为资产"}</span></button> : null}
-            <button type="button" onClick={() => { setAssetRenameId(activeAssetMenu.id); setAssetRenameDraft(activeAssetMenu.name); setAssetMenuId(null); }}><span><Icon name="edit" />重命名</span></button>
-            <button type="button" onClick={() => pinAssetInList(activeAssetMenu)}><span><Icon name="pin" />置顶</span></button>
-            <button type="button" className="asset-list-delete" onClick={() => removeAssetFromList(activeAssetMenu)}><span><Icon name="trash" />从列表移除</span></button>
+            {(activeAssetMenu.libraryStatus === "library" || activeAssetMenu.kind === "reference_image" || activeAssetMenu.kind === "generated_image") ? <button type="button" disabled={visibleInAssetSpace} onClick={() => openSaveAssetForm(activeAssetMenu)}><span><Icon name="save" />{visibleInAssetSpace ? uiCopy.asset.status.linked : uiCopy.asset.action.saveToLibrary}</span></button> : null}
+            <button type="button" onClick={() => { setAssetRenameId(activeAssetMenu.id); setAssetRenameDraft(activeAssetMenu.name); setAssetMenuId(null); }}><span><Icon name="edit" />{uiCopy.workbench.chat.rename}</span></button>
+            <button type="button" onClick={() => pinAssetInList(activeAssetMenu)}><span><Icon name="pin" />{uiCopy.workbench.action.pin}</span></button>
+            <button type="button" className="asset-list-delete" onClick={() => removeAssetFromList(activeAssetMenu)}><span><Icon name="trash" />{uiCopy.workbench.action.removeFromList}</span></button>
           </MenuSection>
         </FloatingMenu>;
       })() : null}
       {activeStoryboardRow && storyboardMenuPosition ? <div className="storyboard-row-menu-floating" style={{ left: storyboardMenuPosition.x, top: storyboardMenuPosition.y }} role="menu">
-        <button type="button" onClick={() => openStoryboardRowEditor(activeStoryboardRow)}><Icon name="edit" /><span>{activeStoryboardRow.beat ? "编辑单格画面" : "创建单格画面"}</span></button>
+        <button type="button" onClick={() => openStoryboardRowEditor(activeStoryboardRow)}><Icon name="edit" /><span>{activeStoryboardRow.beat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard}</span></button>
       </div> : null}
       {activePageMenu && pageMenuPosition ? <FloatingMenu className="page-item-menu-floating" style={{ left: pageMenuPosition.x, top: pageMenuPosition.y }}>
         <MenuSection className="asset-menu-section">
-          <button type="button" onClick={() => openPageEditor(activePageMenu, "edit")}><span><Icon name="edit" />编辑页</span></button>
+          <button type="button" onClick={() => openPageEditor(activePageMenu, "edit")}><span><Icon name="edit" />{uiCopy.workbench.action.editPage}</span></button>
         </MenuSection>
         <MenuDivider />
         <MenuSection className="asset-menu-section">
-          <button type="button" onClick={() => duplicateComicPage(activePageMenu.id)}><span><Icon name="copy" />复制当前页</span></button>
-          <button type="button" disabled={activePageMenuIndex <= 0} onClick={() => moveComicPage(activePageMenu.id, "up")}><span><Icon name="moveUp" />上移一页</span></button>
-          <button type="button" disabled={activePageMenuIndex >= workingPages.length - 1} onClick={() => moveComicPage(activePageMenu.id, "down")}><span><Icon name="moveDown" />下移一页</span></button>
+          <button type="button" onClick={() => duplicateComicPage(activePageMenu.id)}><span><Icon name="copy" />{uiCopy.workbench.action.duplicateCurrentPage}</span></button>
+          <button type="button" disabled={activePageMenuIndex <= 0} onClick={() => moveComicPage(activePageMenu.id, "up")}><span><Icon name="moveUp" />{uiCopy.workbench.action.movePageUp}</span></button>
+          <button type="button" disabled={activePageMenuIndex >= workingPages.length - 1} onClick={() => moveComicPage(activePageMenu.id, "down")}><span><Icon name="moveDown" />{uiCopy.workbench.action.movePageDown}</span></button>
         </MenuSection>
         <MenuDivider />
         <MenuSection className="asset-menu-section">
-          {!isVerticalWorkbench && activePageMenuUnit ? <><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "before")}><span><Icon name="add" />向前插入一页</span></button><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "after")}><span><Icon name="add" />向后插入一页</span></button></> : null}
-          {activePageMenuUnit?.kind === "single_page" && activePageMenuNextUnit?.kind === "single_page" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_pages" }); setPageMenuId(null); }}><span><Icon name="pageSpread" />合并下一页</span></button> : null}
-          {activePageMenuUnit?.kind === "spread" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "split_spread" }); setPageMenuId(null); }}><span><Icon name="pageSingle" />拆分为单页</span></button> : null}
-          {activePageMenuUnit?.kind === "vertical_segment" && activePageMenuUnit.surfaces.length === 1 && activePageMenuNextUnit?.kind === "vertical_segment" && activePageMenuNextUnit.surfaces.length === 1 ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_segments" }); setPageMenuId(null); }}><span><Icon name="pages" />与下一段合并</span></button> : null}
-          {activePageMenuUnit?.kind === "vertical_segment" && activePageMenuUnit.surfaces.length > 1 ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "split_segments" }); setPageMenuId(null); }}><span><Icon name="pages" />拆分滚动段</span></button> : null}
+          {!isVerticalWorkbench && activePageMenuUnit ? <><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "before")}><span><Icon name="add" />{uiCopy.workbench.action.insertPageBefore}</span></button><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "after")}><span><Icon name="add" />{uiCopy.workbench.action.insertPageAfter}</span></button></> : null}
+          {activePageMenuUnit?.kind === "single_page" && activePageMenuNextUnit?.kind === "single_page" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_pages" }); setPageMenuId(null); }}><span><Icon name="pageSpread" />{uiCopy.workbench.action.mergeNextPage}</span></button> : null}
+          {activePageMenuUnit?.kind === "spread" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "split_spread" }); setPageMenuId(null); }}><span><Icon name="pageSingle" />{uiCopy.workbench.action.splitToSinglePages}</span></button> : null}
+          {activePageMenuUnit?.kind === "vertical_segment" && activePageMenuUnit.surfaces.length === 1 && activePageMenuNextUnit?.kind === "vertical_segment" && activePageMenuNextUnit.surfaces.length === 1 ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_segments" }); setPageMenuId(null); }}><span><Icon name="pages" />{uiCopy.workbench.action.mergeNextSegment}</span></button> : null}
+          {activePageMenuUnit?.kind === "vertical_segment" && activePageMenuUnit.surfaces.length > 1 ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "split_segments" }); setPageMenuId(null); }}><span><Icon name="pages" />{uiCopy.workbench.action.splitSegment}</span></button> : null}
         </MenuSection>
         <MenuDivider />
         <MenuSection className="asset-menu-section">
-          <button type="button" onClick={() => openPageEditor(activePageMenu, "delete")}><span><Icon name="trash" />删除{activePageMenuUnit?.kind === "spread" ? "双页" : activePageMenuUnit?.kind === "vertical_segment" ? "滚动段" : "页"}</span></button>
+          <button type="button" onClick={() => openPageEditor(activePageMenu, "delete")}><span><Icon name="trash" />{uiCopy.common.action.delete}{activePageMenuUnit?.kind === "spread" ? uiCopy.workbench.label.spreadUnit : activePageMenuUnit?.kind === "vertical_segment" ? uiCopy.comic.unit.segment : uiCopy.workbench.label.pageUnit}</span></button>
         </MenuSection>
       </FloatingMenu> : null}
       {activePageEditorPage && activePageEditorUnit && pageEditor?.mode === "edit" && pageMenuPosition ? <form className="page-edit-card-floating mode-edit" style={{ left: pageMenuPosition.x, top: pageMenuPosition.y }} onSubmit={(event) => { event.preventDefault(); savePageEditor(); }}>
-        <header><strong>{`编辑${activePageEditorPage.kind === "vertical_segment" ? "滚动段" : "漫画页"}`}</strong><button type="button" aria-label="关闭页面卡片" onClick={() => setPageEditor(null)}><Icon name="x" /></button></header>
-        <label><span>名称</span><input autoFocus value={pageEditDraft.name} maxLength={80} placeholder={defaultComicPageName(activePageEditorPage, activePageEditorIndex)} onChange={(event) => setPageEditDraft((current) => ({ ...current, name: event.target.value }))} /></label>
-        {activePageEditorUnit.kind === "vertical_segment" && activePageEditorUnit.surfaces.length === 1 ? <label><span>页面比例 <small>（裁切页面底部）</small></span><CustomSelect ariaLabel="滚动段页面比例" className="page-ratio-select" value={pageEditDraft.aspectRatio} options={verticalSegmentAspectRatios.map((ratio) => ({ value: ratio, label: ratio }))} onChange={(value) => setPageEditDraft((current) => ({ ...current, aspectRatio: value as VerticalSegmentAspectRatio, aspectRatioChanged: true }))} /></label> : null}
+        <header><strong>{uiCopy.workbench.aria.editUnit(activePageEditorPage.kind === "vertical_segment" ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page)}</strong><button type="button" aria-label={uiCopy.workbench.pageFlow.closeCardAria} onClick={() => setPageEditor(null)}><Icon name="x" /></button></header>
+        <label><span>{uiCopy.common.field.name}</span><input autoFocus value={pageEditDraft.name} maxLength={80} placeholder={defaultComicPageName(activePageEditorPage, activePageEditorIndex)} onChange={(event) => setPageEditDraft((current) => ({ ...current, name: event.target.value }))} /></label>
+        {activePageEditorUnit.kind === "vertical_segment" && activePageEditorUnit.surfaces.length === 1 ? <label><span>{uiCopy.workbench.pageFlow.pageRatio} <small>{uiCopy.workbench.pageFlow.cropBottomHint}</small></span><CustomSelect ariaLabel={uiCopy.workbench.pageFlow.pageRatioAria} className="page-ratio-select" value={pageEditDraft.aspectRatio} options={verticalSegmentAspectRatios.map((ratio) => ({ value: ratio, label: ratio }))} onChange={(value) => setPageEditDraft((current) => ({ ...current, aspectRatio: value as VerticalSegmentAspectRatio, aspectRatioChanged: true }))} /></label> : null}
         {pageEditError ? <p className="page-edit-warning">{pageEditError}</p> : null}
-        <footer><button type="button" onClick={() => setPageEditor(null)}>取消</button><button type="submit" disabled={Boolean(pageEditError)}>保存</button></footer>
+        <footer><button type="button" onClick={() => setPageEditor(null)}>{uiCopy.common.action.cancel}</button><button type="submit" disabled={Boolean(pageEditError)}>{uiCopy.common.action.save}</button></footer>
       </form> : null}
-      {activePageEditorPage && activePageEditorUnit && pageEditor?.mode === "delete" ? <DeleteConfirmDialog dialogId="page-delete" title={`删除“${activePageEditorPage.name || presentationUnitNumberLabel(activePageEditorUnit, activePageEditorIndex)}”？`} description={currentPages.length <= 1 ? "漫画至少需要保留一个展示单元，当前内容不能删除。" : `${activePageEditorUnit.surfaces.length > 1 ? `其中 ${activePageEditorUnit.surfaces.length} 个物理${activePageEditorUnit.kind === "spread" ? "页" : "段"}和` : "其中"}${activePageEditorPage.elements.filter((element) => element.type === "comic_frame").length} 个画格会一并移除。该操作可以撤销。`} disabled={currentPages.length <= 1} onCancel={() => setPageEditor(null)} onConfirm={deletePage} /> : null}
-      {pageStructureConfirm ? <DeleteConfirmDialog dialogId="page-structure-confirm" tone="neutral" icon="pages" title={pageStructureConfirm.action === "merge_pages" ? "与下一页合并为真正双页？" : pageStructureConfirm.action === "split_spread" ? "拆分为两个单页？" : pageStructureConfirm.action === "merge_segments" ? "与下一段合并为跨段画布？" : "拆分为独立滚动段？"} description={pageStructureConfirm.action === "merge_pages" ? "两张物理页会成为一个不可拆开的双页展示单元，原有对象与页码会保留。" : pageStructureConfirm.action === "merge_segments" ? "两个物理段会成为一个连续编辑单元，可放入单个跨段图片。" : "仅当画格和对象都没有跨越分隔线时才能安全拆分。"} confirmLabel={pageStructureConfirm.action.startsWith("merge") ? "确认合并" : "确认拆分"} onCancel={() => setPageStructureConfirm(null)} onConfirm={confirmPageStructureChange} /> : null}
-      {taskCancelConfirmOpen && activeTask?.status === "running" ? <DeleteConfirmDialog dialogId="task-cancel-confirm" tone="neutral" icon="x" title="取消当前任务？" description="任务会立即停止，当前工作稿不会改变，也不会产生新的候选结果。" confirmLabel="确认取消" onCancel={() => setTaskCancelConfirmOpen(false)} onConfirm={async () => { setTaskCancelConfirmOpen(false); await stopActiveTask(); }} /> : null}
+      {activePageEditorPage && activePageEditorUnit && pageEditor?.mode === "delete" ? <DeleteConfirmDialog dialogId="page-delete" title={uiCopy.workbench.aria.deletePage(activePageEditorPage.name || presentationUnitNumberLabel(activePageEditorUnit, activePageEditorIndex))} description={currentPages.length <= 1 ? uiCopy.workbench.dialog.keepOneUnit : uiCopy.workbench.dialog.unitDeleteDescription(activePageEditorUnit.surfaces.length, activePageEditorUnit.kind === "spread" ? "page" : "segment", activePageEditorPage.elements.filter((element) => element.type === "comic_frame").length)} disabled={currentPages.length <= 1} onCancel={() => setPageEditor(null)} onConfirm={deletePage} /> : null}
+      {pageStructureConfirm ? <DeleteConfirmDialog dialogId="page-structure-confirm" tone="neutral" icon="pages" title={pageStructureConfirm.action === "merge_pages" ? uiCopy.workbench.pageFlow.mergeSpreadTitle : pageStructureConfirm.action === "split_spread" ? uiCopy.workbench.pageFlow.splitSpreadTitle : pageStructureConfirm.action === "merge_segments" ? uiCopy.workbench.pageFlow.mergeSegmentTitle : uiCopy.workbench.pageFlow.splitSegmentTitle} description={pageStructureConfirm.action === "merge_pages" ? uiCopy.workbench.dialog.mergePagesDescription : pageStructureConfirm.action === "merge_segments" ? uiCopy.workbench.dialog.mergeSegmentsDescription : uiCopy.workbench.dialog.splitDescription} confirmLabel={pageStructureConfirm.action.startsWith("merge") ? uiCopy.common.action.confirmMerge : uiCopy.common.action.confirmSplit} onCancel={() => setPageStructureConfirm(null)} onConfirm={confirmPageStructureChange} /> : null}
+      {taskCancelConfirmOpen && activeTask?.status === "running" ? <DeleteConfirmDialog dialogId="task-cancel-confirm" tone="neutral" icon="x" title={uiCopy.workbench.task.cancelTitle} description={uiCopy.workbench.dialog.cancelTaskDescription} confirmLabel={uiCopy.common.action.confirmCancel} onCancel={() => setTaskCancelConfirmOpen(false)} onConfirm={async () => { setTaskCancelConfirmOpen(false); await stopActiveTask(); }} /> : null}
       {activeAssetSave && assetMenuPosition ? <form className="asset-save-form-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }} onSubmit={(event) => { event.preventDefault(); void saveCanvasAssetToLibrary(activeAssetSave); }} onPointerDown={(event) => event.stopPropagation()}>
-        <header><span>保存为资产</span><button type="button" aria-label="取消保存为资产" onClick={() => setAssetSaveFormId(null)}><Icon name="x" /></button></header>
-        <p>将“{activeAssetSave.name}”保存到资产空间</p>
-        <label>名称<input autoFocus value={assetSaveDraft.name} maxLength={120} onChange={(event) => setAssetSaveDraft((current) => ({ ...current, name: event.target.value }))} /></label>
-        <label>类型<CustomSelect ariaLabel="资产类型" className="asset-save-kind-select" value={assetSaveDraft.kind} options={canvasAssetSaveTypeOptions} onChange={(value) => setAssetSaveDraft((current) => ({ ...current, kind: value as CanvasAssetSaveKind }))} /></label>
-        <footer><button type="button" onClick={() => setAssetSaveFormId(null)}>取消</button><button type="submit" disabled={!assetSaveDraft.name.trim() || assetSaveSubmitting}>{assetSaveSubmitting ? "保存中…" : "确认保存"}</button></footer>
+        <header><span>{uiCopy.asset.action.saveToLibrary}</span><button type="button" aria-label={uiCopy.workbench.saveAssetDialog.cancelAria} onClick={() => setAssetSaveFormId(null)}><Icon name="x" /></button></header>
+        <p>{uiCopy.workbench.saveAssetDialog.description(activeAssetSave.name)}</p>
+        <label>{uiCopy.common.field.name}<input autoFocus value={assetSaveDraft.name} maxLength={120} onChange={(event) => setAssetSaveDraft((current) => ({ ...current, name: event.target.value }))} /></label>
+        <label>{uiCopy.workbench.saveAssetDialog.typeLabel}<CustomSelect ariaLabel={uiCopy.asset.label.type} className="asset-save-kind-select" value={assetSaveDraft.kind} options={canvasAssetSaveTypeOptions} onChange={(value) => setAssetSaveDraft((current) => ({ ...current, kind: value as CanvasAssetSaveKind }))} /></label>
+        <footer><button type="button" onClick={() => setAssetSaveFormId(null)}>{uiCopy.common.action.cancel}</button><button type="submit" disabled={!assetSaveDraft.name.trim() || assetSaveSubmitting}>{assetSaveSubmitting ? uiCopy.common.progress.saving : uiCopy.common.action.confirmSave}</button></footer>
       </form> : null}
-      {isVerticalWorkbench && verticalSegmentMenuPosition ? <FloatingMenu className="vertical-segment-ratio-menu" style={verticalSegmentMenuPosition} aria-label="选择滚动段比例">
-        <header><strong>新增滚动段</strong><small>宽 : 高</small></header>
+      {isVerticalWorkbench && verticalSegmentMenuPosition ? <FloatingMenu className="vertical-segment-ratio-menu" style={verticalSegmentMenuPosition} aria-label={uiCopy.workbench.segmentDialog.ratioAria}>
+        <header><strong>{uiCopy.workbench.pageFlow.addSegment}</strong><small>{uiCopy.workbench.segmentDialog.ratioLabel}</small></header>
         <div>{verticalSegmentAspectRatios.map((ratio) => <button type="button" key={ratio} onClick={() => addVerticalSegment(ratio)}><AspectRatioGlyph ratio={ratio} /><span>{ratio}</span></button>)}</div>
       </FloatingMenu> : null}
 
@@ -3927,12 +3924,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         onClick={handleStageClick}
       >
         <div className="canvas-world" style={canvasWorldStyle}>
-          {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelectedAssetId(reference.assetId ?? reference.localAssetId ?? null); setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope("仅图片"); }} onMove={(x, y) => updateReference(reference.id, { x, y }, `移动图片「${reference.name}」`)} onZoom={(zoom) => updateReference(reference.id, { zoom }, `缩放图片「${reference.name}」`)} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} onView={() => { closeFloatingMenus(); setImageViewer({ images: canvasReferences.map((item) => ({ id: item.id, src: item.imageSrc, alt: item.name })), initialIndex: canvasReferences.findIndex((item) => item.id === reference.id), allowNavigation: true }); }} />)}
+          {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelectedAssetId(reference.assetId ?? reference.localAssetId ?? null); setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope(uiCopy.workbench.scope.imageOnly); }} onMove={(x, y) => updateReference(reference.id, { x, y }, uiCopy.workbench.operation.moveCanvasImage(reference.name))} onZoom={(zoom) => updateReference(reference.id, { zoom }, uiCopy.workbench.operation.zoomCanvasImage(reference.name))} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} onView={() => { closeFloatingMenus(); setImageViewer({ images: canvasReferences.map((item) => ({ id: item.id, src: item.imageSrc, alt: item.name })), initialIndex: canvasReferences.findIndex((item) => item.id === reference.id), allowNavigation: true }); }} />)}
           <div ref={!isVerticalCanvas ? pageCanvasFitStageRef : undefined} className={`page-canvas-fit-stage ${isVerticalCanvas ? "vertical" : ""}`}>
             <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : showingSpread ? "spread" : ""} ${currentDisplayGroup?.trueSpread ? "true-spread" : ""}`} style={isVerticalCanvas ? verticalStageWrapStyle : pageCanvasStageStyle}>
-              <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : "滚动段 01") : showingSpread ? `PAGES ${displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")}` : page?.kind === "four_panel_unit" ? "4-KOMA 01" : `PAGE ${String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0")}`}</span>
+              <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : uiCopy.workbench.pageFlow.defaultSegment) : showingSpread ? uiCopy.workbench.label.pageRangeTag(displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")) : page?.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanelTag : uiCopy.workbench.label.pageTag(String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0"))}</span>
               <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={frameImageCandidatePreview?.target ?? selection} editable={canvasMode === "focus"} interactionMode={frameImageCandidatePreview ? "preview" : objectInteractionMode} creationMode={frameImageCandidatePreview ? undefined : creationMode ?? undefined} multiSelectedIds={frameImageCandidatePreview ? undefined : activeMultiComicIds} multiMoving={!frameImageCandidatePreview && multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={frameImageCandidatePreview ? undefined : handleCanvasSelection} onContextAction={frameImageCandidatePreview ? undefined : handleComicContextAction} onObjectDoubleClick={frameImageCandidatePreview ? undefined : handleComicObjectDoubleClick} onPlaceDialogue={frameImageCandidatePreview ? undefined : createDialogueBalloon} onPlacePageDialogue={frameImageCandidatePreview ? undefined : createPageDialogueBalloon} onPlaceNarration={frameImageCandidatePreview ? undefined : createNarration} onCommitElement={frameImageCandidatePreview ? undefined : (unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={frameImageCandidatePreview ? undefined : commitElementPatches} /></div>)}</div>
-              {canvasMode === "free" && !isVerticalCanvas ? <div className="canvas-page-turn-zones" aria-label="自由模式翻页"><button type="button" className="canvas-page-turn-zone previous" aria-label="上一页" onClick={() => turnCanvasPage(-1)} /><button type="button" className="canvas-page-turn-zone next" aria-label="下一页" onClick={() => turnCanvasPage(1)} /></div> : null}
+              {canvasMode === "free" && !isVerticalCanvas ? <div className="canvas-page-turn-zones" aria-label={uiCopy.workbench.pageFlow.freeModePaginationAria}><button type="button" className="canvas-page-turn-zone previous" aria-label={uiCopy.viewer.action.previousPage} onClick={() => turnCanvasPage(-1)} /><button type="button" className="canvas-page-turn-zone next" aria-label={uiCopy.viewer.action.nextPage} onClick={() => turnCanvasPage(1)} /></div> : null}
             </div>
           </div>
         </div>
@@ -3940,84 +3937,84 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         {isVerticalCanvas && canvasMode === "focus" ? <aside ref={verticalNavigatorRef} className="vertical-scroll-navigator" aria-hidden="true"><div className="vertical-scroll-map" style={verticalNavigatorPaperStyle}>{canvasUnits.map((unit) => <span key={unit.id} style={{ flexGrow: unit.canvas.height }} />)}<i /></div></aside> : null}
         {marquee && marqueeStyle ? <div className="canvas-marquee" style={marqueeStyle} aria-hidden="true" /> : null}
 
-        {frameImageCandidatePreview && toolbarPlacement ? <ObjectToolbar className={`candidate-preview-toolbar side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="候选图片预览工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" className="candidate-preview-apply" onClick={applyFrameImageCandidatePreview}><Icon name="save" />应用</button>
-          <button type="button" className="candidate-preview-toggle" aria-pressed={frameImageCandidatePreview.mode === "candidate"} onClick={() => setFrameImageCandidatePreview((current) => current ? { ...current, mode: current.mode === "candidate" ? "original" : "candidate" } : current)}><Icon name={frameImageCandidatePreview.mode === "candidate" ? "undo" : "preview"} />{frameImageCandidatePreview.mode === "candidate" ? "还原" : "预览"}</button>
-          <button type="button" className="candidate-preview-cancel" onClick={cancelFrameImageCandidatePreview}><Icon name="x" />取消</button>
+        {frameImageCandidatePreview && toolbarPlacement ? <ObjectToolbar className={`candidate-preview-toolbar side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label={uiCopy.workbench.candidate.previewToolbarAria} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" className="candidate-preview-apply" onClick={applyFrameImageCandidatePreview}><Icon name="save" />{uiCopy.workbench.candidate.apply}</button>
+          <button type="button" className="candidate-preview-toggle" aria-pressed={frameImageCandidatePreview.mode === "candidate"} onClick={() => setFrameImageCandidatePreview((current) => current ? { ...current, mode: current.mode === "candidate" ? "original" : "candidate" } : current)}><Icon name={frameImageCandidatePreview.mode === "candidate" ? "undo" : "preview"} />{frameImageCandidatePreview.mode === "candidate" ? uiCopy.asset.action.restore : uiCopy.common.action.preview}</button>
+          <button type="button" className="candidate-preview-cancel" onClick={cancelFrameImageCandidatePreview}><Icon name="x" />{uiCopy.common.action.cancel}</button>
         </ObjectToolbar> : null}
-        {canvasMode === "focus" && !frameImageCandidatePreview && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label="对象编辑工具栏" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" className="object-ai-reference" aria-label="将当前对象引用到 Agent 对话" onClick={() => { addSelectionReference(); setAgentOpen(true); }}><Icon name="ai" /></button>
-          <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? "开启或关闭气泡移动、缩放和尖尾调整" : selection.type === "text" ? "开启或关闭旁白移动和换行宽度调整" : selection.type === "image" ? "开启或关闭纸面图片移动和缩放" : "开启或关闭移动画格"} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay")) || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
-          <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? "旋转旁白" : selection.type === "speech_balloon" ? "旋转对白气泡" : "裁切格内图片并调整画格角度"} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
-          <button type="button" aria-label={selection.type === "speech_balloon" ? "编辑对白和气泡样式" : selection.type === "text" ? "编辑旁白文字和字号" : selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"} onClick={openSelectionEditor}><Icon name="edit" /></button>
-          <button type="button" aria-label="管理当前对象" aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
+        {canvasMode === "focus" && !frameImageCandidatePreview && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label={uiCopy.workbench.objectEditor.toolbarAria} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" className="object-ai-reference" aria-label={uiCopy.workbench.objectEditor.referenceAria} onClick={() => { addSelectionReference(); setAgentOpen(true); }}><Icon name="ai" /></button>
+          <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.toggleBalloonTransformAria : selection.type === "text" ? uiCopy.workbench.objectEditor.toggleNarrationTransformAria : selection.type === "image" ? uiCopy.workbench.objectEditor.togglePaperImageTransformAria : uiCopy.workbench.objectEditor.toggleFrameMoveAria} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay")) || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
+          <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? uiCopy.workbench.action.rotateNarration : selection.type === "speech_balloon" ? uiCopy.workbench.action.rotateBalloon : uiCopy.workbench.objectEditor.cropFrameImageAria} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
+          <button type="button" aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.editBalloonAria : selection.type === "text" ? uiCopy.workbench.objectEditor.editNarrationAria : selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard} onClick={openSelectionEditor}><Icon name="edit" /></button>
+          <button type="button" aria-label={uiCopy.workbench.objectEditor.manageAria} aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
         </ObjectToolbar> : null}
-        {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />编辑画格 · {editingStoryboardTarget.label}</span><button type="button" aria-label="关闭画格编辑" onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><section className="frame-editor-section"><strong>分镜条目</strong><label>标题<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder="分镜标题" onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>描述<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder="描述这一格的场景、人物、动作、情绪或叙事作用" onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? "保存" : "创建并绑定"}</button></section><section className="frame-editor-section"><strong>画格</strong><label>边框粗细<NumberStepper ariaLabel="画格边框粗细" step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>保存边框</button></section></aside> : null}
+        {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{uiCopy.workbench.frameEditor.editTitle(editingStoryboardTarget.label)}</span><button type="button" aria-label={uiCopy.workbench.frameEditor.closeAria} onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><section className="frame-editor-section"><strong>{uiCopy.workbench.frameEditor.storyboardTitle}</strong><label>{uiCopy.common.field.title}<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder={uiCopy.workbench.frameEditor.titlePlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>{uiCopy.common.field.description}<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder={uiCopy.workbench.frameEditor.descriptionPlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? uiCopy.common.action.save : uiCopy.workbench.frameEditor.createAndBind}</button></section><section className="frame-editor-section"><strong>{uiCopy.workbench.object.frame}</strong><label>{uiCopy.workbench.frameEditor.borderWidthLabel}<NumberStepper ariaLabel={uiCopy.workbench.frameEditor.borderWidthAria} step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>{uiCopy.workbench.frameEditor.saveBorder}</button></section></aside> : null}
 
-        {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label="关闭对象编辑器" onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>拖动图片调整取景，滚轮或下面动作缩放；拖动画格四角可沿横向或纵向调整边线角度。</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>放大</button><button type="button" onClick={() => cropImage("out")}>缩小</button><button type="button" onClick={() => cropImage("left")}>左移</button><button type="button" onClick={() => cropImage("up")}>上移</button><button type="button" onClick={() => cropImage("down")}>下移</button><button type="button" onClick={() => cropImage("right")}>右移</button><button type="button" onClick={() => cropImage("reset")}>重置取景</button></div><button className="text-edit-link" type="button" disabled={!selectedCropFrame || selectedCropFrame.shape.kind === "rect"} onClick={resetFrameShape}>重置画格角度</button><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: `画格 ${selectedElement.comicFrameId.split("-").pop()}` })}>回到画格</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? "编辑单格画面" : "创建单格画面"}</button></> : null}</aside> : null}
+        {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label={uiCopy.workbench.objectEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>{uiCopy.workbench.dialog.imageInspectorDescription}</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>{uiCopy.workbench.action.zoomIn}</button><button type="button" onClick={() => cropImage("out")}>{uiCopy.workbench.action.zoomOut}</button><button type="button" onClick={() => cropImage("left")}>{uiCopy.workbench.frameEditor.moveLeft}</button><button type="button" onClick={() => cropImage("up")}>{uiCopy.workbench.frameEditor.moveUp}</button><button type="button" onClick={() => cropImage("down")}>{uiCopy.workbench.frameEditor.moveDown}</button><button type="button" onClick={() => cropImage("right")}>{uiCopy.workbench.frameEditor.moveRight}</button><button type="button" onClick={() => cropImage("reset")}>{uiCopy.workbench.frameEditor.resetCrop}</button></div><button className="text-edit-link" type="button" disabled={!selectedCropFrame || selectedCropFrame.shape.kind === "rect"} onClick={resetFrameShape}>{uiCopy.workbench.frameEditor.resetRotation}</button><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: uiCopy.workbench.label.frame(selectedElement.comicFrameId.split("-").pop() ?? "") })}>{uiCopy.workbench.frameEditor.backToFrame}</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard}</button></> : null}</aside> : null}
       </CanvasStage>
 
-      {comicContextMenu && comicContextMenuStyle ? <FloatingMenu className="comic-context-menu reference-context-menu" style={comicContextMenuStyle} aria-label="对象管理菜单" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); handleComicContextAction(comicContextMenu.target, comicContextMenu.point); }}>
+      {comicContextMenu && comicContextMenuStyle ? <FloatingMenu className="comic-context-menu reference-context-menu" style={comicContextMenuStyle} aria-label={uiCopy.workbench.objectEditor.manageMenuAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); handleComicContextAction(comicContextMenu.target, comicContextMenu.point); }}>
         <header><strong><Icon name={comicContextHeader.icon} />{comicContextHeader.label}</strong>{objectLocationLabel(contextTargetElement) ? <em className="object-location-badge">{objectLocationLabel(contextTargetElement)}</em> : null}</header>
-        {comicContextMenu.target.type === "presentation_unit" ? <ComicMenuGroup label="新增"><button type="button" onClick={() => comicContextMenu.target.pageId && createFrameAt(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="add" />新增画格</span></button><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />放入纸面图片</span></button>{contextTargetUnit?.kind === "spread" ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_page")}><span><Icon name="pageSpread" />放入跨页图片</span></button> : null}{contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_segment")}><span><Icon name="pages" />放入跨段图片</span></button> : null}<button type="button" onClick={() => comicContextMenu.target.pageId && createPageDialogueBalloon(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="message" />新增纸面对白</span></button></ComicMenuGroup> : null}
+        {comicContextMenu.target.type === "presentation_unit" ? <ComicMenuGroup label={uiCopy.workbench.menuGroup.add}><button type="button" onClick={() => comicContextMenu.target.pageId && createFrameAt(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="add" />{uiCopy.workbench.action.addFrame}</span></button><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{uiCopy.workbench.imagePicker.placePaper}</span></button>{contextTargetUnit?.kind === "spread" ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_page")}><span><Icon name="pageSpread" />{uiCopy.workbench.imagePicker.placeCrossPage}</span></button> : null}{contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_segment")}><span><Icon name="pages" />{uiCopy.workbench.imagePicker.placeCrossSegment}</span></button> : null}<button type="button" onClick={() => comicContextMenu.target.pageId && createPageDialogueBalloon(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="message" />{uiCopy.workbench.action.addPaperDialogue}</span></button></ComicMenuGroup> : null}
         {comicContextMenu.target.type === "comic_frame" ? <>
-          <ComicMenuGroup label="内容"><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{contextTargetFrameData?.image ? "更换格内图片" : "放入格内图片"}</span></button><button type="button" onClick={() => createDialogueFromContext(comicContextMenu.target, comicContextMenu.point)}><span><Icon name="message" />新增对白</span></button></ComicMenuGroup>
+          <ComicMenuGroup label={uiCopy.asset.label.content}><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{contextTargetFrameData?.image ? uiCopy.workbench.action.replaceFrameImage : uiCopy.workbench.action.placeFrameImage}</span></button><button type="button" onClick={() => createDialogueFromContext(comicContextMenu.target, comicContextMenu.point)}><span><Icon name="message" />{uiCopy.workbench.action.addDialogue}</span></button></ComicMenuGroup>
           <MenuDivider />
-          <ComicMenuGroup label="画格布局"><button type="button" onClick={() => toggleFrameOverlap(comicContextMenu.target)}><span><Icon name="layout" />{contextTargetUnit?.layoutPolicy.frameOverlap === "allow" ? "取消叠格" : "允许叠格"}</span></button>{contextTargetUnit?.kind === "spread" ? <button type="button" onClick={() => toggleFrameCrossPage(comicContextMenu.target)}><span><Icon name={contextTargetFrameData?.frame?.surfaceScope === "unit" ? "collapse" : "pageSpread"} />{contextTargetFrameData?.frame?.surfaceScope === "unit" ? "取消跨页" : "设为跨页格"}</span></button> : null}<button type="button" aria-haspopup="menu" aria-expanded={Boolean(comicContextMenu.bleedMenu)} onClick={(event) => openFrameBleedMenu(event.currentTarget)}><span><Icon name="expand" />延伸至页边<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></ComicMenuGroup>
-          {contextTargetUnit?.layoutPolicy.frameOverlap === "allow" ? <><MenuDivider /><ComicMenuGroup label="层级"><button type="button" onClick={() => changeFrameLayer(comicContextMenu.target, "forward")}><span><Icon name="layers" />置于顶层</span></button><button type="button" onClick={() => changeFrameLayer(comicContextMenu.target, "backward")}><span><Icon name="layers" />置于底层</span></button></ComicMenuGroup></> : null}
+          <ComicMenuGroup label={uiCopy.workbench.menuGroup.frameLayout}><button type="button" onClick={() => toggleFrameOverlap(comicContextMenu.target)}><span><Icon name="layout" />{contextTargetUnit?.layoutPolicy.frameOverlap === "allow" ? uiCopy.workbench.action.cancelOverlap : uiCopy.workbench.action.allowOverlap}</span></button>{contextTargetUnit?.kind === "spread" ? <button type="button" onClick={() => toggleFrameCrossPage(comicContextMenu.target)}><span><Icon name={contextTargetFrameData?.frame?.surfaceScope === "unit" ? "collapse" : "pageSpread"} />{contextTargetFrameData?.frame?.surfaceScope === "unit" ? uiCopy.workbench.action.cancelCrossPage : uiCopy.workbench.action.enableCrossPageFrame}</span></button> : null}<button type="button" aria-haspopup="menu" aria-expanded={Boolean(comicContextMenu.bleedMenu)} onClick={(event) => openFrameBleedMenu(event.currentTarget)}><span><Icon name="expand" />{uiCopy.workbench.action.extendToPageEdge}<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></ComicMenuGroup>
+          {contextTargetUnit?.layoutPolicy.frameOverlap === "allow" ? <><MenuDivider /><ComicMenuGroup label={uiCopy.workbench.action.layer}><button type="button" onClick={() => changeFrameLayer(comicContextMenu.target, "forward")}><span><Icon name="layers" />{uiCopy.workbench.action.moveToFront}</span></button><button type="button" onClick={() => changeFrameLayer(comicContextMenu.target, "backward")}><span><Icon name="layers" />{uiCopy.workbench.action.moveToBack}</span></button></ComicMenuGroup></> : null}
           <MenuDivider />
-          <ComicMenuGroup label="对象"><button type="button" onClick={() => duplicateFrame(comicContextMenu.target)}><span><Icon name="copy" />复制画格</span></button></ComicMenuGroup>
+          <ComicMenuGroup label={uiCopy.workbench.defaultLabel.object}><button type="button" onClick={() => duplicateFrame(comicContextMenu.target)}><span><Icon name="copy" />{uiCopy.workbench.action.duplicateFrame}</span></button></ComicMenuGroup>
           <MenuDivider />
-          <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "frame", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />删除画格</span></button></ComicMenuGroup>
+          <ComicMenuGroup label={uiCopy.common.action.delete}><button type="button" onClick={() => { setComicDeleteTarget({ kind: "frame", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />{uiCopy.workbench.action.deleteFrame}</span></button></ComicMenuGroup>
         </> : null}
         {comicContextMenu.target.type === "image" && contextTargetElement?.type === "image" ? <>
-          {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label="内容"><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="replace" />{contextImageReplaceLabel}</span></button></ComicMenuGroup><MenuDivider /></> : null}
-          {contextImagePurpose === "cross_page" || contextImagePurpose === "cross_segment" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="collapse" />{contextImagePurpose === "cross_page" ? "取消跨页" : "取消跨段"}</span></button></ComicMenuGroup><MenuDivider /></> : contextImageIsPaperOwned && contextTargetUnit?.kind === "spread" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertImageToCrossSurface(comicContextMenu.target, "cross_page")}><span><Icon name="pageSpread" />设为跨页图片</span></button></ComicMenuGroup><MenuDivider /></> : contextImageIsPaperOwned && contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertImageToCrossSurface(comicContextMenu.target, "cross_segment")}><span><Icon name="pages" />设为跨段图片</span></button></ComicMenuGroup><MenuDivider /></> : null}
-          {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => promoteSelectionToOverlay(comicContextMenu.target)}><span><Icon name="expand" />设为破格</span></button><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面图片</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetElement.location.anchor.type === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面图片</span></button><button type="button" onClick={() => returnSelectionToFrame(comicContextMenu.target)}><span><Icon name="collapse" />收回画格</span></button></ComicMenuGroup><MenuDivider /></> : null}
-          {contextTargetElement.location.space === "overlay" ? <><ComicMenuGroup label="层级"><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "front")}><span><Icon name="layers" />置于顶层</span></button><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "back")}><span><Icon name="layers" />置于底层</span></button></ComicMenuGroup><MenuDivider /></> : null}
-          <ComicMenuGroup label="更多"><button type="button" aria-haspopup="menu" aria-expanded={Boolean(comicContextMenu.imageMoreMenu)} onClick={(event) => openImageMoreMenu(event.currentTarget)}><span><Icon name="more" />更多选项<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></ComicMenuGroup>
+          {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label={uiCopy.asset.label.content}><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="replace" />{contextImageReplaceLabel}</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          {contextImagePurpose === "cross_page" || contextImagePurpose === "cross_segment" ? <><ComicMenuGroup label={contextImagePurpose === "cross_page" ? uiCopy.workbench.menuGroup.crossPage : uiCopy.workbench.menuGroup.crossSegment}><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="collapse" />{contextImagePurpose === "cross_page" ? uiCopy.workbench.action.cancelCrossPage : uiCopy.workbench.action.cancelCrossSegment}</span></button></ComicMenuGroup><MenuDivider /></> : contextImageIsPaperOwned && contextTargetUnit?.kind === "spread" ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.crossPage}><button type="button" onClick={() => convertImageToCrossSurface(comicContextMenu.target, "cross_page")}><span><Icon name="pageSpread" />{uiCopy.workbench.action.placeCrossPageImage}</span></button></ComicMenuGroup><MenuDivider /></> : contextImageIsPaperOwned && contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.crossSegment}><button type="button" onClick={() => convertImageToCrossSurface(comicContextMenu.target, "cross_segment")}><span><Icon name="pages" />{uiCopy.workbench.action.placeCrossSegmentImage}</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.ownership}><button type="button" onClick={() => promoteSelectionToOverlay(comicContextMenu.target)}><span><Icon name="expand" />{uiCopy.workbench.action.enableBreakout}</span></button><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />{uiCopy.workbench.action.convertToPaperImage}</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetElement.location.anchor.type === "frame" ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.ownership}><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />{uiCopy.workbench.action.convertToPaperImage}</span></button><button type="button" onClick={() => returnSelectionToFrame(comicContextMenu.target)}><span><Icon name="collapse" />{uiCopy.workbench.action.returnToFrame}</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          {contextTargetElement.location.space === "overlay" ? <><ComicMenuGroup label={uiCopy.workbench.action.layer}><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "front")}><span><Icon name="layers" />{uiCopy.workbench.action.moveToFront}</span></button><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "back")}><span><Icon name="layers" />{uiCopy.workbench.action.moveToBack}</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          <ComicMenuGroup label={uiCopy.workbench.menuGroup.more}><button type="button" aria-haspopup="menu" aria-expanded={Boolean(comicContextMenu.imageMoreMenu)} onClick={(event) => openImageMoreMenu(event.currentTarget)}><span><Icon name="more" />{uiCopy.common.action.more}<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></ComicMenuGroup>
           <MenuDivider />
-          <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "image", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />移除图片</span></button></ComicMenuGroup>
+          <ComicMenuGroup label={uiCopy.common.action.delete}><button type="button" onClick={() => { setComicDeleteTarget({ kind: "image", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />{uiCopy.workbench.action.removeImage}</span></button></ComicMenuGroup>
         </> : null}
         {comicContextMenu.target.type === "speech_balloon" && contextTargetElement?.type === "speech_balloon" ? <>
-          <ComicMenuGroup label="对象"><button type="button" onClick={() => duplicateDialogueBalloon(comicContextMenu.target)}><span><Icon name="copy" />复制对白</span></button><button type="button" onClick={() => { if (!comicContextMenu.target.pageId) return; commitCapabilities(capabilitiesForElementPatch(comicContextMenu.target.pageId, contextTargetElement.id, { style: { ...contextTargetElement.style, writingMode: contextTargetElement.style.writingMode === "vertical" ? "horizontal" : "vertical" } }), contextTargetElement.style.writingMode === "vertical" ? "转为横向对白" : "转为竖向对白"); setComicContextMenu(null); }}><span><Icon name="text" />{contextTargetElement.style.writingMode === "vertical" ? "转为横向" : "转为竖向"}</span></button></ComicMenuGroup>
+          <ComicMenuGroup label={uiCopy.workbench.defaultLabel.object}><button type="button" onClick={() => duplicateDialogueBalloon(comicContextMenu.target)}><span><Icon name="copy" />{uiCopy.workbench.action.duplicateDialogue}</span></button><button type="button" onClick={() => { if (!comicContextMenu.target.pageId) return; commitCapabilities(capabilitiesForElementPatch(comicContextMenu.target.pageId, contextTargetElement.id, { style: { ...contextTargetElement.style, writingMode: contextTargetElement.style.writingMode === "vertical" ? "horizontal" : "vertical" } }), contextTargetElement.style.writingMode === "vertical" ? uiCopy.workbench.operation.horizontalDialogue : uiCopy.workbench.operation.verticalDialogue); setComicContextMenu(null); }}><span><Icon name="text" />{contextTargetElement.style.writingMode === "vertical" ? uiCopy.workbench.action.horizontal : uiCopy.workbench.action.vertical}</span></button></ComicMenuGroup>
           <MenuDivider />
-          {contextBalloonPurpose === "cross_page" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="collapse" />取消跨页</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetUnit?.kind === "spread" ? <><ComicMenuGroup label="跨 surface"><button type="button" onClick={() => convertBalloonToCrossPage(comicContextMenu.target)}><span><Icon name="pageSpread" />设为跨页对白</span></button></ComicMenuGroup><MenuDivider /></> : null}
-          {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => promoteSelectionToOverlay(comicContextMenu.target)}><span><Icon name="expand" />设为破格</span></button><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面对白</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetElement.location.anchor.type === "frame" ? <><ComicMenuGroup label="归属"><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />转为纸面对白</span></button><button type="button" onClick={() => returnSelectionToFrame(comicContextMenu.target)}><span><Icon name="collapse" />收回画格</span></button></ComicMenuGroup><MenuDivider /></> : null}
-          {contextTargetElement.location.space === "overlay" ? <><ComicMenuGroup label="层级"><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "front")}><span><Icon name="layers" />置于顶层</span></button><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "back")}><span><Icon name="layers" />置于底层</span></button></ComicMenuGroup><MenuDivider /></> : null}
-          <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "dialogue", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />删除对白</span></button></ComicMenuGroup>
+          {contextBalloonPurpose === "cross_page" ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.crossPage}><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="collapse" />{uiCopy.workbench.action.cancelCrossPage}</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetUnit?.kind === "spread" ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.crossPage}><button type="button" onClick={() => convertBalloonToCrossPage(comicContextMenu.target)}><span><Icon name="pageSpread" />{uiCopy.workbench.action.placeCrossPageBalloon}</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          {contextTargetElement.location.space === "frame" ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.ownership}><button type="button" onClick={() => promoteSelectionToOverlay(comicContextMenu.target)}><span><Icon name="expand" />{uiCopy.workbench.action.enableBreakout}</span></button><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />{uiCopy.workbench.action.convertToPaperDialogue}</span></button></ComicMenuGroup><MenuDivider /></> : contextTargetElement.location.anchor.type === "frame" ? <><ComicMenuGroup label={uiCopy.workbench.menuGroup.ownership}><button type="button" onClick={() => convertSelectionToPage(comicContextMenu.target)}><span><Icon name="pageSingle" />{uiCopy.workbench.action.convertToPaperDialogue}</span></button><button type="button" onClick={() => returnSelectionToFrame(comicContextMenu.target)}><span><Icon name="collapse" />{uiCopy.workbench.action.returnToFrame}</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          {contextTargetElement.location.space === "overlay" ? <><ComicMenuGroup label={uiCopy.workbench.action.layer}><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "front")}><span><Icon name="layers" />{uiCopy.workbench.action.moveToFront}</span></button><button type="button" onClick={() => changeOverlayElementLayer(comicContextMenu.target, "back")}><span><Icon name="layers" />{uiCopy.workbench.action.moveToBack}</span></button></ComicMenuGroup><MenuDivider /></> : null}
+          <ComicMenuGroup label={uiCopy.common.action.delete}><button type="button" onClick={() => { setComicDeleteTarget({ kind: "dialogue", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />{uiCopy.workbench.action.deleteDialogue}</span></button></ComicMenuGroup>
         </> : null}
         {comicContextMenu.target.type === "text" && contextTargetElement?.type === "text" ? <>
-          <ComicMenuGroup label="对象"><button type="button" onClick={() => duplicateNarration(comicContextMenu.target)}><span><Icon name="copy" />复制旁白</span></button><button type="button" onClick={() => { if (!comicContextMenu.target.pageId) return; commitCapabilities(capabilitiesForElementPatch(comicContextMenu.target.pageId, contextTargetElement.id, { style: { ...contextTargetElement.style, writingMode: contextTargetElement.style.writingMode === "vertical" ? "horizontal" : "vertical" } }), contextTargetElement.style.writingMode === "vertical" ? "转为横向旁白" : "转为竖向旁白"); setComicContextMenu(null); }}><span><Icon name="text" />{contextTargetElement.style.writingMode === "vertical" ? "转为横向" : "转为竖向"}</span></button></ComicMenuGroup>
+          <ComicMenuGroup label={uiCopy.workbench.defaultLabel.object}><button type="button" onClick={() => duplicateNarration(comicContextMenu.target)}><span><Icon name="copy" />{uiCopy.workbench.action.duplicateNarration}</span></button><button type="button" onClick={() => { if (!comicContextMenu.target.pageId) return; commitCapabilities(capabilitiesForElementPatch(comicContextMenu.target.pageId, contextTargetElement.id, { style: { ...contextTargetElement.style, writingMode: contextTargetElement.style.writingMode === "vertical" ? "horizontal" : "vertical" } }), contextTargetElement.style.writingMode === "vertical" ? uiCopy.workbench.operation.horizontalNarration : uiCopy.workbench.operation.verticalNarration); setComicContextMenu(null); }}><span><Icon name="text" />{contextTargetElement.style.writingMode === "vertical" ? uiCopy.workbench.action.horizontal : uiCopy.workbench.action.vertical}</span></button></ComicMenuGroup>
           <MenuDivider />
-          <ComicMenuGroup label="删除"><button type="button" onClick={() => { setComicDeleteTarget({ kind: "narration", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />删除旁白</span></button></ComicMenuGroup>
+          <ComicMenuGroup label={uiCopy.common.action.delete}><button type="button" onClick={() => { setComicDeleteTarget({ kind: "narration", selection: comicContextMenu.target }); setComicContextMenu(null); }}><span><Icon name="trash" />{uiCopy.workbench.action.deleteNarration}</span></button></ComicMenuGroup>
         </> : null}
       </FloatingMenu> : null}
-      {comicContextMenu?.bleedMenu && contextTargetFrameData?.frame ? <FloatingMenu className="reference-context-menu comic-frame-bleed-menu" style={comicContextMenu.bleedMenu} aria-label="选择出血边" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection>{(["top", "right", "bottom", "left"] as const).map((edge) => <button type="button" key={edge} aria-pressed={Boolean(contextTargetFrameData.frame?.bleedEdges?.[edge])} onClick={() => toggleFrameBleedEdge(comicContextMenu.target, edge)}><span><Icon name="expand" />{contextTargetFrameData.frame?.bleedEdges?.[edge] ? "取消" : "延伸至"}{{ top: "上", right: "右", bottom: "下", left: "左" }[edge]}侧页边</span></button>)}</MenuSection></FloatingMenu> : null}
-      {comicContextMenu?.imageMoreMenu && contextTargetElement?.type === "image" ? <FloatingMenu className="reference-context-menu comic-image-more-menu" style={comicContextMenu.imageMoreMenu} aria-label="图片更多选项" onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection><button type="button" onClick={() => openCanvasImageViewer(comicContextMenu.target)}><span><Icon name="referenceImage" />查看图片</span></button><button type="button" disabled={Boolean(downloadingCanvasImageId)} onClick={() => void downloadCanvasImage(comicContextMenu.target)}><span><Icon name="download" />{downloadingCanvasImageId === contextTargetElement.id ? "下载中…" : "下载图片"}</span></button><button type="button" disabled={contextImageAlreadyInAssetList || Boolean(addingCanvasImageAssetId)} onClick={() => void addCanvasImageToAssetList(comicContextMenu.target)}><span><Icon name="add" />{contextImageAlreadyInAssetList ? "已添加到资产列表" : addingCanvasImageAssetId === contextTargetElement.assetId ? "添加中…" : "添加到资产列表"}</span></button></MenuSection></FloatingMenu> : null}
+      {comicContextMenu?.bleedMenu && contextTargetFrameData?.frame ? <FloatingMenu className="reference-context-menu comic-frame-bleed-menu" style={comicContextMenu.bleedMenu} aria-label={uiCopy.workbench.objectEditor.selectBleedEdgeAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection>{(["top", "right", "bottom", "left"] as const).map((edge) => <button type="button" key={edge} aria-pressed={Boolean(contextTargetFrameData.frame?.bleedEdges?.[edge])} onClick={() => toggleFrameBleedEdge(comicContextMenu.target, edge)}><span><Icon name="expand" />{uiCopy.workbench.bleed.action(contextTargetFrameData.frame?.bleedEdges?.[edge] ? "cancel" : "extend", { top: uiCopy.workbench.direction.top, right: uiCopy.workbench.direction.right, bottom: uiCopy.workbench.direction.bottom, left: uiCopy.workbench.direction.left }[edge])}</span></button>)}</MenuSection></FloatingMenu> : null}
+      {comicContextMenu?.imageMoreMenu && contextTargetElement?.type === "image" ? <FloatingMenu className="reference-context-menu comic-image-more-menu" style={comicContextMenu.imageMoreMenu} aria-label={uiCopy.workbench.imagePicker.moreAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection><button type="button" onClick={() => openCanvasImageViewer(comicContextMenu.target)}><span><Icon name="referenceImage" />{uiCopy.common.action.viewImage}</span></button><button type="button" disabled={Boolean(downloadingCanvasImageId)} onClick={() => void downloadCanvasImage(comicContextMenu.target)}><span><Icon name="download" />{downloadingCanvasImageId === contextTargetElement.id ? uiCopy.common.progress.downloading : uiCopy.common.action.download}</span></button><button type="button" disabled={contextImageAlreadyInAssetList || Boolean(addingCanvasImageAssetId)} onClick={() => void addCanvasImageToAssetList(comicContextMenu.target)}><span><Icon name="add" />{contextImageAlreadyInAssetList ? uiCopy.asset.status.addedToList : addingCanvasImageAssetId === contextTargetElement.assetId ? uiCopy.workbench.action.addInProgress : uiCopy.asset.action.addToList}</span></button></MenuSection></FloatingMenu> : null}
 
-      {frameImageTarget && frameImagePickerStyle ? <FloatingMenu role="dialog" className="frame-image-picker" style={frameImagePickerStyle} aria-label="选择漫画图片" onPointerDown={(event) => event.stopPropagation()}>
-        <header><div><strong>{frameImageTarget.placement === "cross_page" ? "放入跨页图片" : frameImageTarget.placement === "cross_segment" ? "放入跨段图片" : (() => { const image = frameAndImageForSelection(frameImageTarget.selection).image; return image ? image.location.space === "frame" ? "更换格内图片" : image.location.purpose === "cross_page" ? "更换跨页图片" : image.location.purpose === "cross_segment" ? "更换跨段图片" : image.location.anchor.type === "unit" ? "更换纸面图片" : "更换破格图片" : frameImageTarget.selection.type === "presentation_unit" ? "放入纸面图片" : "放入格内图片"; })()}</strong><small>{frameImagePickerSelection?.frame ? "选择当前页、画布或资产中的图片" : "选择左侧资产列表中的图片"}</small></div><button type="button" aria-label="关闭图片选择" onClick={() => setFrameImageTarget(null)}><Icon name="x" /></button></header>
+      {frameImageTarget && frameImagePickerStyle ? <FloatingMenu role="dialog" className="frame-image-picker" style={frameImagePickerStyle} aria-label={uiCopy.workbench.imagePicker.selectAria} onPointerDown={(event) => event.stopPropagation()}>
+        <header><div><strong>{frameImageTarget.placement === "cross_page" ? uiCopy.workbench.imagePicker.placeCrossPage : frameImageTarget.placement === "cross_segment" ? uiCopy.workbench.imagePicker.placeCrossSegment : (() => { const image = frameAndImageForSelection(frameImageTarget.selection).image; return image ? image.location.space === "frame" ? uiCopy.workbench.action.replaceFrameImage : image.location.purpose === "cross_page" ? uiCopy.workbench.imagePicker.replaceCrossPage : image.location.purpose === "cross_segment" ? uiCopy.workbench.imagePicker.replaceCrossSegment : image.location.anchor.type === "unit" ? uiCopy.workbench.imagePicker.replacePaper : uiCopy.workbench.imagePicker.replaceBreakout : frameImageTarget.selection.type === "presentation_unit" ? uiCopy.workbench.imagePicker.placePaper : uiCopy.workbench.action.placeFrameImage; })()}</strong><small>{frameImagePickerSelection?.frame ? uiCopy.workbench.imagePicker.sourceHint : uiCopy.workbench.imagePicker.assetSourceHint}</small></div><button type="button" aria-label={uiCopy.workbench.imagePicker.closeAria} onClick={() => setFrameImageTarget(null)}><Icon name="x" /></button></header>
         <div className="frame-image-grid">{frameImageChoices.map((choice) => <button type="button" key={choice.id} onClick={() => placeFrameImage(choice)}>{choice.url ? <img src={choice.url} alt="" /> : <span className="frame-image-placeholder"><Icon name="asset" /></span>}<strong>{choice.label}</strong></button>)}</div>
-        {!frameImageChoices.length ? <p>左侧资产列表还没有图片资产，请先使用资产栏的“+”上传。</p> : null}
+        {!frameImageChoices.length ? <p>{uiCopy.workbench.imagePicker.empty}</p> : null}
       </FloatingMenu> : null}
 
-      {comicDeleteTarget && comicDeleteSelection ? <DeleteConfirmDialog dialogId="comic-delete" title={comicDeleteTitle} description={comicDeleteDescription} confirmLabel={comicDeleteTarget.kind === "image" ? "确认移除" : "确认删除"} onCancel={() => setComicDeleteTarget(null)} onConfirm={confirmComicDelete} /> : null}
-      {archiveImportFile ? <DeleteConfirmDialog dialogId="chapter-archive-import" title="覆盖当前一话内容？" description={`导入「${archiveImportFile.name}」会把完整 LCD、分镜条目和图片资源写入当前一话，并保存为新的稳定版本。现有历史版本不会删除。`} confirmLabel="确认导入" onCancel={() => setArchiveImportFile(null)} onConfirm={() => { const file = archiveImportFile; setArchiveImportFile(null); void importChapterArchive(file); }} /> : null}
-      {modelSettingsPromptOpen ? <DeleteConfirmDialog dialogId="model-settings-required" tone="neutral" icon="settings" title="配置模型后继续" description="当前 AI 能力还没有可用的 API Key。画布编辑不受影响，配置完成后可以直接重试。" confirmLabel="前往设置" onCancel={() => setModelSettingsPromptOpen(false)} onConfirm={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)} /> : null}
+      {comicDeleteTarget && comicDeleteSelection ? <DeleteConfirmDialog dialogId="comic-delete" title={comicDeleteTitle} description={comicDeleteDescription} confirmLabel={comicDeleteTarget.kind === "image" ? uiCopy.common.action.confirmRemove : uiCopy.common.action.confirmDelete} onCancel={() => setComicDeleteTarget(null)} onConfirm={confirmComicDelete} /> : null}
+      {archiveImportFile ? <DeleteConfirmDialog dialogId="chapter-archive-import" title={uiCopy.workbench.dialog.overwriteChapterTitle} description={uiCopy.workbench.dialog.importArchiveDescription(archiveImportFile.name)} confirmLabel={uiCopy.common.action.confirmImport} onCancel={() => setArchiveImportFile(null)} onConfirm={() => { const file = archiveImportFile; setArchiveImportFile(null); void importChapterArchive(file); }} /> : null}
+      {modelSettingsPromptOpen ? <DeleteConfirmDialog dialogId="model-settings-required" tone="neutral" icon="settings" title={uiCopy.workbench.dialog.configureModelTitle} description={uiCopy.workbench.dialog.configureModelDescription} confirmLabel={uiCopy.common.action.goToSettings} onCancel={() => setModelSettingsPromptOpen(false)} onConfirm={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)} /> : null}
 
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
-      {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>请输入文本</div> : null}
+      {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>{uiCopy.workbench.narrationEditor.placementPreview}</div> : null}
 
-      {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />对白 {String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭对白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>对白<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>文字样式<CustomSelect ariaLabel="文字样式" className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>字号<NumberStepper ariaLabel="对话字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>边框粗细<NumberStepper ariaLabel="气泡边框粗细" step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
-      {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />旁白 {String(selectedNarrationNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭旁白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>文字<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>字号<NumberStepper ariaLabel="旁白字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
+      {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />{uiCopy.workbench.object.dialogue}{String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label={uiCopy.workbench.balloonEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>{uiCopy.workbench.object.dialogue}<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>{uiCopy.workbench.balloonEditor.textStyleLabel}<CustomSelect ariaLabel={uiCopy.workbench.balloonEditor.textStyleLabel} className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>{uiCopy.workbench.balloonEditor.fontSizeLabel}<NumberStepper ariaLabel={uiCopy.workbench.balloonEditor.fontSizeAria} value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>{uiCopy.workbench.frameEditor.borderWidthLabel}<NumberStepper ariaLabel={uiCopy.workbench.balloonEditor.borderWidthAria} step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>{uiCopy.common.action.save}</button></div></aside> : null}
+      {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />{uiCopy.workbench.label.narration(selectedNarrationNumber || 1)}</span><button type="button" aria-label={uiCopy.workbench.narrationEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>{uiCopy.workbench.narrationEditor.textLabel}<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>{uiCopy.workbench.balloonEditor.fontSizeLabel}<NumberStepper ariaLabel={uiCopy.workbench.narrationEditor.fontSizeAria} value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>{uiCopy.common.action.save}</button></div></aside> : null}
 
-      <div className="canvas-global-actions" aria-label="全局入口"><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
-      <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label="Agent 对话">
+      <div className="canvas-global-actions" aria-label={uiCopy.common.navigation.globalEntry}><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
+      <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label={uiCopy.workbench.chat.panelAria}>
         <div className="agent-head">
-          <div className="agent-head-actions"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label="打开当前画布的会话列表" aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><button type="button" aria-label="收起 Agent 工作区" onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
+          <div className="agent-head-actions"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label={uiCopy.workbench.chat.sessionsAria} aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><button type="button" aria-label={uiCopy.workbench.chat.collapseAria} onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
         </div>
-        {sessionDrawerOpen ? <SessionDrawer aria-label="当前画布会话"><header><div><small>当前画布</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label="新建会话" onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder="输入新对话名称" maxLength={80}/><button type="submit" aria-label="创建会话"><Icon name="add" /></button><button type="button" aria-label="取消新建会话" onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="x" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit" aria-label="保存会话名称"><Icon name="save" /></button><button type="button" aria-label="取消重命名" onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={`管理「${conversation.title}」`} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />重命名</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="trash" />删除</button></div> : null}</SessionDrawer> : null}
+        {sessionDrawerOpen ? <SessionDrawer aria-label={uiCopy.workbench.chat.currentSessionsAria}><header><div><small>{uiCopy.workbench.chat.currentCanvasLabel}</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label={uiCopy.workbench.chat.newSessionAria} onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder={uiCopy.workbench.chat.sessionNamePlaceholder} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.createSessionAria}><Icon name="add" /></button><button type="button" aria-label={uiCopy.workbench.chat.cancelNewSessionAria} onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="x" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.saveSessionNameAria}><Icon name="save" /></button><button type="button" aria-label={uiCopy.workbench.creationSpace.cancelRenameAria} onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={uiCopy.workbench.aria.manageConversation(conversation.title)} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />{uiCopy.workbench.chat.rename}</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="trash" />{uiCopy.common.action.delete}</button></div> : null}</SessionDrawer> : null}
         <div ref={agentMessagesRef} className="agent-messages" data-testid="agent-messages">
           {state.messages.map((message) => {
             const candidate = message.candidateId ? state.candidates.find((item) => item.id === message.candidateId) : undefined;
@@ -4027,7 +4024,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
               <div className="message-attachments">
                 {message.attachments.map((attachment) => (
                   <figure key={attachment.id}>
-                    <button type="button" className="message-attachment-preview" aria-label={`查看${attachment.name}`} onClick={() => setImageViewer({ images: [{ id: attachment.id, src: attachment.imageUrl, alt: `${attachment.name} 对话引用` }] })}><img src={attachment.imageUrl} alt={`${attachment.name} 对话引用`} /></button>
+                    <button type="button" className="message-attachment-preview" aria-label={uiCopy.workbench.aria.viewAttachment(attachment.name)} onClick={() => setImageViewer({ images: [{ id: attachment.id, src: attachment.imageUrl, alt: uiCopy.workbench.aria.attachmentReference(attachment.name) }] })}><img src={attachment.imageUrl} alt={uiCopy.workbench.aria.attachmentReference(attachment.name)} /></button>
                     <figcaption>{attachment.name}</figcaption>
                   </figure>
                 ))}
@@ -4044,32 +4041,32 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
               </div>
             );
           })}
-          {activeTask?.status === "running" && !state.messages.some((message) => message.kind === "task" && (!message.taskId || message.taskId === activeTask.id)) ? <div className="agent-message agent task"><div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{activeTask.stage === "preparing" ? "正在准备上下文" : activeTask.stage === "queued" ? "等待生成资源" : activeTask.stage === "validating" ? "正在校验结果" : activeTask.stage === "saving" ? "正在保存候选" : "模型生成中"}</small></span><button type="button" className="task-cancel-trigger" aria-label="取消任务" onClick={() => setTaskCancelConfirmOpen(true)}><Icon name="x" /></button></div></div> : null}
-          {streamingTurn ? <div className="agent-message agent plain streaming" aria-live="polite">{streamingTurn.status === "thinking" ? <span className="agent-thinking" aria-label="Agent 正在思考"><i/><i/><i/></span> : <p>{streamingTurn.text}<span className="streaming-cursor" aria-hidden="true" /></p>}</div> : null}
+          {activeTask?.status === "running" && !state.messages.some((message) => message.kind === "task" && (!message.taskId || message.taskId === activeTask.id)) ? <div className="agent-message agent task"><div className="task-message"><i className="spinner"/><span><strong>{activeTask.label}</strong><small>{activeTask.stage === "preparing" ? uiCopy.workbench.taskStage.preparing : activeTask.stage === "queued" ? uiCopy.workbench.taskStage.queued : activeTask.stage === "validating" ? uiCopy.workbench.taskStage.validating : activeTask.stage === "saving" ? uiCopy.workbench.taskStage.saving : uiCopy.workbench.taskStage.generating}</small></span><button type="button" className="task-cancel-trigger" aria-label={uiCopy.workbench.task.cancelAria} onClick={() => setTaskCancelConfirmOpen(true)}><Icon name="x" /></button></div></div> : null}
+          {streamingTurn ? <div className="agent-message agent plain streaming" aria-live="polite">{streamingTurn.status === "thinking" ? <span className="agent-thinking" aria-label={uiCopy.workbench.chat.thinkingAria}><i/><i/><i/></span> : <p>{streamingTurn.text}<span className="streaming-cursor" aria-hidden="true" /></p>}</div> : null}
         </div>
         <div className="composer-box" data-tour-id="agent-composer">
-          <div className="reference-tags">{composerReferenceItems.map((item) => { if (item.type === "attachment") { const attachment = item.value; return <div className={`composer-image-reference ${attachment.status}`} key={item.key}><button type="button" className="composer-image-reference-preview" aria-label={`查看${attachment.name}`} onClick={() => setImageViewer({ images: [{ id: attachment.id, src: attachment.imageUrl, alt: `${attachment.name} 待发送` }] })}><img src={attachment.imageUrl} alt={`${attachment.name} 待发送`} /><span>{attachment.status === "uploading" ? "上传中…" : attachment.status === "failed" ? "上传失败" : attachment.name}</span></button><button type="button" className="composer-image-reference-remove" aria-label={`取消引用${attachment.name}`} onClick={() => removeComposerAttachment(attachment.id)}><Icon name="x" /></button></div>; } const reference = item.value; const removeReference = () => { setExplicitReferences((items) => items.filter((current) => current.id !== reference.id)); setComposerReferenceOrder((items) => items.filter((key) => key !== item.key)); }; return reference.kind === "comic_frame" ? <button type="button" className="composer-frame-reference" key={item.key} onClick={removeReference}>{reference.imageUrl ? <img src={reference.imageUrl} alt={`${reference.label} 缩略图`} /> : <span className="frame-reference-placeholder"><Icon name="layout" /></span>}<span>{reference.label}</span><Icon name="x" /></button> : reference.kind === "speech_balloon" ? <button type="button" className="composer-dialogue-reference" key={item.key} onClick={removeReference}><Icon name="reference" /><span>对白 {String(reference.balloonNumber ?? 1).padStart(2, "0")}</span><Icon name="x" /></button> : <button type="button" key={item.key} onClick={removeReference}><Icon name="reference" /> {reference.label} <Icon name="x" /></button>; })}</div>
-          <textarea ref={composerInputRef} data-testid="agent-input" value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? "可以继续准备下一条消息；任务结束后再发送" : "描述你想让 AI 生成、修改或确认的内容…"} />
-          <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" aria-label="添加对话引用或 Agent 选项" onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><span className="composer-mode-label"><Icon name="ai" />创作</span><button type="button" className="at-button" aria-label="引用当前对象" onClick={() => addSelectionReference()}><Icon name="reference" /><span>引用</span></button><button type="button" className="send" aria-label={activeTask?.status === "running" ? "任务运行中" : composerAttachments.some((attachment) => attachment.status === "uploading") ? "图片上传中" : "发送"} disabled={activeTask?.status === "running" || composerAttachments.some((attachment) => attachment.status === "uploading")} onClick={sendMessage}><Icon name="send" /></button></div>
+          <div className="reference-tags">{composerReferenceItems.map((item) => { if (item.type === "attachment") { const attachment = item.value; return <div className={`composer-image-reference ${attachment.status}`} key={item.key}><button type="button" className="composer-image-reference-preview" aria-label={uiCopy.workbench.aria.viewAttachment(attachment.name)} onClick={() => setImageViewer({ images: [{ id: attachment.id, src: attachment.imageUrl, alt: uiCopy.workbench.aria.attachmentPending(attachment.name) }] })}><img src={attachment.imageUrl} alt={uiCopy.workbench.aria.attachmentPending(attachment.name)} /><span>{attachment.status === "uploading" ? uiCopy.common.progress.uploading : attachment.status === "failed" ? uiCopy.asset.error.genericUpload : attachment.name}</span></button><button type="button" className="composer-image-reference-remove" aria-label={uiCopy.workbench.aria.cancelAttachmentReference(attachment.name)} onClick={() => removeComposerAttachment(attachment.id)}><Icon name="x" /></button></div>; } const reference = item.value; const removeReference = () => { setExplicitReferences((items) => items.filter((current) => current.id !== reference.id)); setComposerReferenceOrder((items) => items.filter((key) => key !== item.key)); }; return reference.kind === "comic_frame" ? <button type="button" className="composer-frame-reference" key={item.key} onClick={removeReference}>{reference.imageUrl ? <img src={reference.imageUrl} alt={uiCopy.workbench.aria.referenceThumbnail(reference.label)} /> : <span className="frame-reference-placeholder"><Icon name="layout" /></span>}<span>{reference.label}</span><Icon name="x" /></button> : reference.kind === "speech_balloon" ? <button type="button" className="composer-dialogue-reference" key={item.key} onClick={removeReference}><Icon name="reference" /><span>{uiCopy.workbench.object.dialogue}{String(reference.balloonNumber ?? 1).padStart(2, "0")}</span><Icon name="x" /></button> : <button type="button" key={item.key} onClick={removeReference}><Icon name="reference" /> {reference.label} <Icon name="x" /></button>; })}</div>
+          <textarea ref={composerInputRef} data-testid="agent-input" value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? uiCopy.workbench.composer.queuedPlaceholder : uiCopy.workbench.composer.placeholder} />
+          <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" aria-label={uiCopy.workbench.composer.addReferenceAria} onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><span className="composer-mode-label"><Icon name="ai" />{uiCopy.common.action.createContent}</span><button type="button" className="at-button" aria-label={uiCopy.workbench.composer.referenceCurrentAria} onClick={() => addSelectionReference()}><Icon name="reference" /><span>{uiCopy.workbench.chat.referenceLabel}</span></button><button type="button" className="send" aria-label={activeTask?.status === "running" ? uiCopy.workbench.composer.taskRunningAria : composerAttachments.some((attachment) => attachment.status === "uploading") ? uiCopy.workbench.composer.imageUploadingAria : uiCopy.workbench.composer.sendAria} disabled={activeTask?.status === "running" || composerAttachments.some((attachment) => attachment.status === "uploading")} onClick={sendMessage}><Icon name="send" /></button></div>
         </div>
       </AgentWorkspace>
-      {!agentOpen ? <button className="drawer-reopen right" type="button" onClick={() => setAgentOpen(true)} aria-label="展开 Agent 工作区"><Icon name="ai" /></button> : null}
+      {!agentOpen ? <button className="drawer-reopen right" type="button" onClick={() => setAgentOpen(true)} aria-label={uiCopy.workbench.chat.expandAria}><Icon name="ai" /></button> : null}
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <input ref={archiveImportRef} type="file" accept="application/zip,.zip" hidden onChange={(event) => { const file = event.target.files?.[0]; setProjectMenu(false); if (file) setArchiveImportFile(file); event.currentTarget.value = ""; }} />
-      <CreationDock className={[multiSelection ? "multi-hidden" : "", dockEntering ? "mode-entering" : "", modeSwitching ? "mode-exiting" : ""].filter(Boolean).join(" ")} aria-label="创作工具">
-        <div><span className="dock-canvas-mode-pair" data-tour-id="tool-canvas-modes"><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label="聚焦选择模式" onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label="自由拖动画布" onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button></span><i/>{!isVerticalWorkbench ? <button type="button" data-tour-id="tool-display" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" data-tour-id="tool-display" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={`${verticalViewportLabel}，点击切换`} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label="上传图片到画布图片层" onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? "取消放置旁白" : "在纸面放置旁白"} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label="撤销" disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label="重做" disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active" data-tour-id="tool-mode"><button type="button" className="mode-star mode-active" aria-label="AI 编辑选中画格的分镜条目" onClick={() => { setComposer("编辑选中画格的分镜条目，只改标题和画面描述"); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label="切换到阅读预览" title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
+      <CreationDock className={[multiSelection ? "multi-hidden" : "", dockEntering ? "mode-entering" : "", modeSwitching ? "mode-exiting" : ""].filter(Boolean).join(" ")} aria-label={uiCopy.workbench.toolbar.creationAria}>
+        <div><span className="dock-canvas-mode-pair" data-tour-id="tool-canvas-modes"><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label={uiCopy.workbench.toolbar.focusModeAria} onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label={uiCopy.workbench.toolbar.freeModeAria} onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button></span><i/>{!isVerticalWorkbench ? <button type="button" data-tour-id="tool-display" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? uiCopy.viewer.action.spread : uiCopy.viewer.action.singlePage} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" data-tour-id="tool-display" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={uiCopy.workbench.aria.switchViewport(verticalViewportLabel)} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label={uiCopy.workbench.toolbar.uploadCanvasImageAria} onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? uiCopy.workbench.toolbar.cancelNarrationAria : uiCopy.workbench.toolbar.placeNarrationAria} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label={uiCopy.workbench.toolbar.undoAria} disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label={uiCopy.workbench.toolbar.redoAria} disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active" data-tour-id="tool-mode"><button type="button" className="mode-star mode-active" aria-label={uiCopy.workbench.toolbar.aiEditStoryboardAria} onClick={() => { setComposer(uiCopy.workbench.chat.editStoryboardPrompt); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label={uiCopy.workbench.toolbar.previewAria} title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
       </CreationDock>
-      <nav className={`multi-selection-dock ${multiSelection ? "active" : ""}`} aria-label="多选工具">
-        <button type="button" aria-label="将选中对象引用到对话" disabled={!multiComicActive && !multiCanvasActive} onClick={addMultiSelectionToDialogue}><Icon name="ai" /></button>
+      <nav className={`multi-selection-dock ${multiSelection ? "active" : ""}`} aria-label={uiCopy.workbench.multiSelect.toolbarAria}>
+        <button type="button" aria-label={uiCopy.workbench.multiSelect.referenceAria} disabled={!multiComicActive && !multiCanvasActive} onClick={addMultiSelectionToDialogue}><Icon name="ai" /></button>
         <i />
-        <button type="button" className={`multi-group-button ${multiComicActive ? "active" : ""}`} aria-label={multiComicActive ? "暂时取消选中的漫画元素" : "重新选中漫画元素"} aria-pressed={multiComicActive} disabled={!multiSelection?.comic.length} onClick={() => toggleMultiGroup("comic")}><Icon name="comic" /><small>{multiSelection?.comic.length ?? 0}</small></button>
-        <button type="button" className={`multi-group-button ${multiCanvasActive ? "active" : ""}`} aria-label={multiCanvasActive ? "暂时取消选中的画布元素" : "重新选中画布元素"} aria-pressed={multiCanvasActive} disabled={!multiSelection?.canvasIds.length} onClick={() => toggleMultiGroup("canvas")}><Icon name="asset" /><small>{multiSelection?.canvasIds.length ?? 0}</small></button>
+        <button type="button" className={`multi-group-button ${multiComicActive ? "active" : ""}`} aria-label={multiComicActive ? uiCopy.workbench.multiSelect.disableComicAria : uiCopy.workbench.multiSelect.enableComicAria} aria-pressed={multiComicActive} disabled={!multiSelection?.comic.length} onClick={() => toggleMultiGroup("comic")}><Icon name="comic" /><small>{multiSelection?.comic.length ?? 0}</small></button>
+        <button type="button" className={`multi-group-button ${multiCanvasActive ? "active" : ""}`} aria-label={multiCanvasActive ? uiCopy.workbench.multiSelect.disableCanvasAria : uiCopy.workbench.multiSelect.enableCanvasAria} aria-pressed={multiCanvasActive} disabled={!multiSelection?.canvasIds.length} onClick={() => toggleMultiGroup("canvas")}><Icon name="asset" /><small>{multiSelection?.canvasIds.length ?? 0}</small></button>
         <i />
-        <button type="button" className={multiSelection?.moveActive ? "active" : ""} aria-label="批量移动选中对象" aria-pressed={Boolean(multiSelection?.moveActive)} disabled={!multiMoveEnabled} onClick={() => setMultiSelection((current) => current ? { ...current, moveActive: !current.moveActive } : current)}><Icon name="move" /></button>
-        <button type="button" aria-label="从画布批量移除选中对象" disabled={!multiCanvasActive || multiComicActive} onClick={removeMultiCanvasElements}><Icon name="trash" /></button>
+        <button type="button" className={multiSelection?.moveActive ? "active" : ""} aria-label={uiCopy.workbench.multiSelect.moveAria} aria-pressed={Boolean(multiSelection?.moveActive)} disabled={!multiMoveEnabled} onClick={() => setMultiSelection((current) => current ? { ...current, moveActive: !current.moveActive } : current)}><Icon name="move" /></button>
+        <button type="button" aria-label={uiCopy.workbench.multiSelect.removeAria} disabled={!multiCanvasActive || multiComicActive} onClick={removeMultiCanvasElements}><Icon name="trash" /></button>
         <i />
-        <button type="button" className="multi-mode-exit active" aria-label="退出多选模式" onClick={exitMultiSelection}><Icon name="select" /></button>
+        <button type="button" className="multi-mode-exit active" aria-label={uiCopy.workbench.multiSelect.exitAria} onClick={exitMultiSelection}><Icon name="select" /></button>
       </nav>
 
       </>
@@ -4078,21 +4075,21 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {contextDebugOpen ? <div className="context-debug-overlay" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setContextDebugOpen(false); }}>
         <section className="context-debug-dialog" role="dialog" aria-modal="true" aria-labelledby="context-debug-title" onPointerDown={(event) => event.stopPropagation()}>
           <header>
-            <div><span>DEVELOPMENT · LIVE SNAPSHOT</span><h2 id="context-debug-title">当前上下文</h2></div>
-            <button type="button" className="context-debug-close" aria-label="关闭上下文调试" onClick={() => setContextDebugOpen(false)}><Icon name="x" /></button>
+            <div><span>{uiCopy.workbench.contextDebug.eyebrow}</span><h2 id="context-debug-title">{uiCopy.workbench.contextDebug.title}</h2></div>
+            <button type="button" className="context-debug-close" aria-label={uiCopy.workbench.contextDebug.closeAria} onClick={() => setContextDebugOpen(false)}><Icon name="x" /></button>
           </header>
-          <div className="context-debug-meta"><span>工作稿 r{state.fixture.working.revision}</span><span>Page {String(state.currentPageIndex + 1).padStart(2, "0")}</span><span>{activeConversation?.title ?? "当前对话"}</span><span>{selection.label}</span></div>
+          <div className="context-debug-meta"><span>{uiCopy.workbench.contextDebug.workingRevision(state.fixture.working.revision)}</span><span>{uiCopy.workbench.contextDebug.page(state.currentPageIndex + 1)}</span><span>{activeConversation?.title ?? uiCopy.workbench.contextDebug.currentConversation}</span><span>{selection.label}</span></div>
           {contextDebugError ? <div className="context-debug-error">{contextDebugError}</div> : null}
           <div className="context-debug-workspace">
-            <nav className="context-debug-nav" aria-label="上下文定位目录">
+            <nav className="context-debug-nav" aria-label={uiCopy.workbench.contextDebug.navigationAria}>
               {contextDebugSections.map((section) => <button type="button" key={section.id} className={contextDebugSection === section.id ? "active" : ""} onClick={() => setContextDebugSection(section.id)}><strong>{section.label}</strong><small>{section.detail}</small></button>)}
             </nav>
             <section className="context-debug-content" aria-live="polite">
-              {contextDebugLoading ? <div className="context-debug-loading">正在重新读取数据库并构建上下文…</div> : (() => {
+              {contextDebugLoading ? <div className="context-debug-loading">{uiCopy.workbench.contextDebug.loading}</div> : (() => {
                 const current = contextDebugSections.find((section) => section.id === contextDebugSection) ?? contextDebugSections[0];
-                if (!current) return <div className="context-debug-loading">等待上下文快照…</div>;
+                if (!current) return <div className="context-debug-loading">{uiCopy.workbench.contextDebug.waiting}</div>;
                 const sectionText = current.id === "raw" ? contextDebugText : JSON.stringify(current.value, null, 2);
-                return <div className="context-debug-code-shell"><div className="context-debug-code-actions"><button type="button" title="复制当前内容" aria-label="复制当前内容" onClick={() => void navigator.clipboard.writeText(sectionText)}><Icon name="copy" /></button><button type="button" title="重新计算上下文" aria-label="重新计算上下文" onClick={() => void refreshContextDebug()} disabled={contextDebugLoading}><Icon name="replace" /></button></div>{current.id === "raw" ? <textarea aria-label="当前上下文原始 JSON" readOnly spellCheck={false} value={sectionText} /> : <pre>{sectionText}</pre>}</div>;
+                return <div className="context-debug-code-shell"><div className="context-debug-code-actions"><button type="button" title={uiCopy.workbench.contextDebug.copyAria} aria-label={uiCopy.workbench.contextDebug.copyAria} onClick={() => void navigator.clipboard.writeText(sectionText)}><Icon name="copy" /></button><button type="button" title={uiCopy.workbench.contextDebug.refreshAria} aria-label={uiCopy.workbench.contextDebug.refreshAria} onClick={() => void refreshContextDebug()} disabled={contextDebugLoading}><Icon name="replace" /></button></div>{current.id === "raw" ? <textarea aria-label={uiCopy.workbench.contextDebug.rawJsonAria} readOnly spellCheck={false} value={sectionText} /> : <pre>{sectionText}</pre>}</div>;
               })()}
             </section>
           </div>

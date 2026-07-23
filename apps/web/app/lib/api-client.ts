@@ -1,6 +1,7 @@
 import type { Candidate, ReferencePlacement, WorkbenchFixture, WorkspaceChangeSet } from "@lantern/shared";
 import type { ActiveTaskLike, AgentMessage, PersistedWorkbench } from "@/app/lib/workbench-state";
 import { normalizeResolvedResourceUrls } from "@/app/lib/document-asset-urls";
+import { uiCopy } from "./ui-copy";
 
 type ApiEnvelope<T> = { data: T; requestId: string };
 type ApiFailure = { error?: { code?: string; message?: string; details?: unknown } };
@@ -139,8 +140,8 @@ export async function apiUploadComicVisualStyleImage(comicId: string, file: File
   const form = new FormData();
   form.set("file", file);
   const response = await fetch(`${uploadApiBase()}/v1/comics/${encodeURIComponent(comicId)}/visual-style/images`, { method: "POST", body: form, credentials: "include" });
-  const body = await readApiResponse<ComicVisualStyle>(response, "视觉风格图片上传失败");
-  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "视觉风格图片上传失败");
+  const body = await readApiResponse<ComicVisualStyle>(response, uiCopy.asset.error.visualStyleUpload);
+  if (!response.ok || !body.data) throw new Error(body.error?.message ?? uiCopy.asset.error.visualStyleUpload);
   return { ...body.data, images: body.data.images.map((image) => ({ ...image, contentUrl: absoluteAssetUrl(image.contentUrl) })) };
 }
 
@@ -157,8 +158,8 @@ export async function apiUploadAssetImage(assetId: string, file: File) {
   const form = new FormData();
   form.set("file", file);
   const response = await fetch(`${uploadApiBase()}/v1/assets/${encodeURIComponent(assetId)}/images`, { method: "POST", body: form, credentials: "include" });
-  const body = await readApiResponse<ComicAssetDetail>(response, "图片上传失败");
-  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "图片上传失败");
+  const body = await readApiResponse<ComicAssetDetail>(response, uiCopy.asset.error.upload);
+  if (!response.ok || !body.data) throw new Error(body.error?.message ?? uiCopy.asset.error.upload);
   return withAbsoluteAssetDetail(body.data);
 }
 
@@ -217,17 +218,17 @@ async function uploadCover(path: string, file: File) {
     body: form,
     credentials: "include",
   });
-  const body = await readApiResponse<{ coverUrl: string }>(response, "上传封面失败");
-  if (!response.ok) throw new Error(body.error?.message ?? "上传封面失败");
+  const body = await readApiResponse<{ coverUrl: string }>(response, uiCopy.asset.error.coverUpload);
+  if (!response.ok) throw new Error(body.error?.message ?? uiCopy.asset.error.coverUpload);
   return { ...body.data, coverUrl: absoluteAssetUrl(body.data.coverUrl) };
 }
 
 function validateUploadFile(file: File) {
-  if (file.size > MAX_UPLOAD_BYTES) throw new Error("图片文件太大，请上传 50MB 以内的 PNG、JPEG 或 WebP。");
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error(uiCopy.asset.error.fileTooLarge);
   const extension = file.name.toLowerCase().match(/\.[a-z0-9]+$/)?.[0];
   const supportedExtension = extension ? SUPPORTED_UPLOAD_EXTENSIONS.has(extension) : false;
-  if (file.type && !SUPPORTED_UPLOAD_TYPES.has(file.type.toLowerCase()) && !supportedExtension) throw new Error("请选择 PNG、JPEG/JPG 或 WebP 图片。");
-  if (!file.type && !supportedExtension) throw new Error("请选择 PNG、JPEG/JPG 或 WebP 图片。");
+  if (file.type && !SUPPORTED_UPLOAD_TYPES.has(file.type.toLowerCase()) && !supportedExtension) throw new Error(uiCopy.asset.error.invalidFormat);
+  if (!file.type && !supportedExtension) throw new Error(uiCopy.asset.error.invalidFormat);
 }
 
 export function apiUploadComicCover(comicId: string, file: File) {
@@ -316,7 +317,7 @@ async function readApiResponse<T>(response: Response, fallbackMessage: string) {
     return JSON.parse(text) as ApiEnvelope<T> & ApiFailure;
   } catch {
     const message = response.status === 413 || /payload too large/i.test(text)
-      ? "上传通道暂时拒绝了这张图片，请稍后重试；不需要更换图片。"
+      ? uiCopy.asset.error.uploadChannelRejected
       : text.slice(0, 200) || fallbackMessage;
     return { error: { message } } as ApiEnvelope<T> & ApiFailure;
   }
@@ -434,8 +435,8 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
   const activeTask = running ? {
     id: running.id,
     name: running.type,
-    label: running.type === "asset_image_generate" ? "创建角色或场景" : running.type === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
-    scope: running.target?.label ?? "当前创作范围",
+    label: running.type === "asset_image_generate" ? uiCopy.workbench.taskLabel.generateAssetImage : running.type === "frame_image_generate" ? uiCopy.workbench.action.generateFrameImage : uiCopy.workbench.action.editStoryboard,
+    scope: running.target?.label ?? uiCopy.workbench.task.currentScope,
     progress: running.progress,
     status: "running" as const,
     stage: (running.status === "created" ? "preparing" : running.status === "queued" ? "queued" : running.progress >= 88 ? "saving" : running.progress >= 72 ? "validating" : "generating") as NonNullable<ActiveTaskLike["stage"]>,
@@ -445,8 +446,8 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
   } : failed ? {
     id: failed.id,
     name: failed.type,
-    label: "任务失败",
-    scope: failed.errorMessage ?? "工作稿未改变",
+    label: uiCopy.workbench.task.failedLabel,
+    scope: failed.errorMessage ?? uiCopy.workbench.task.unchanged,
     progress: failed.progress,
     status: "failed" as const,
   } : null;
@@ -612,7 +613,7 @@ export async function apiStreamInteraction(ids: RuntimeIds, body: AgentInteracti
     if (done) break;
   }
   if (buffer) consumeLine(buffer);
-  if (!completed) throw new Error("Agent 流式响应未正常结束。");
+  if (!completed) throw new Error(uiCopy.workbench.error.agentStreamIncomplete);
   return completed;
 }
 
@@ -679,7 +680,7 @@ export function apiRestoreSnapshot(chapterId: string, expectedWorkingRevision: n
 
 async function downloadPageResponse(path: string, fallbackName: string) {
   const response = await fetch(apiUrl(path));
-  if (!response.ok) throw new Error("下载失败，请稍后重试。");
+  if (!response.ok) throw new Error(uiCopy.preview.error.download);
   const blob = await response.blob();
   const fileName = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1] ?? fallbackName;
   saveBrowserBlob(blob, fileName);
@@ -720,7 +721,7 @@ function imageFileName(name: string, contentType: string) {
 
 export async function apiDownloadImage(contentUrl: string, name: string) {
   const response = await fetch(contentUrl, { credentials: "include" });
-  if (!response.ok) throw new Error("图片下载失败，请稍后重试。");
+  if (!response.ok) throw new Error(uiCopy.asset.error.download);
   const blob = await response.blob();
   saveBrowserBlob(blob, imageFileName(name, blob.type));
 }
@@ -730,32 +731,32 @@ export async function apiDownloadAssetImage(image: ComicAssetImage, assetName: s
 }
 
 export async function apiDownloadPage(chapterId: string, unitId: string) {
-  if (!unitId) throw new Error("当前没有可下载的漫画页。");
+  if (!unitId) throw new Error(uiCopy.preview.error.noPage);
   return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/download`, `${unitId}.png`);
 }
 
 export async function apiDownloadSurface(chapterId: string, unitId: string, surfaceId: string) {
-  if (!unitId || !surfaceId) throw new Error("当前没有可下载的物理纸面。");
+  if (!unitId || !surfaceId) throw new Error(uiCopy.preview.error.noSurface);
   return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/pages/${encodeURIComponent(unitId)}/surfaces/${encodeURIComponent(surfaceId)}/download`, `${surfaceId}.png`);
 }
 
 export async function apiDownloadPreviewSpread(chapterId: string, firstUnitId: string, secondUnitId: string) {
-  if (!firstUnitId || !secondUnitId) throw new Error("当前没有可下载的双页预览。");
+  if (!firstUnitId || !secondUnitId) throw new Error(uiCopy.preview.error.noSpread);
   return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/preview-spreads/${encodeURIComponent(firstUnitId)}/${encodeURIComponent(secondUnitId)}/download`, `${firstUnitId}-${secondUnitId}.png`);
 }
 
 export async function apiDownloadChapterArchive(chapterId: string) {
   const response = await fetch(apiUrl(`/v1/chapters/${encodeURIComponent(chapterId)}/archive/download`), { credentials: "include" });
   if (!response.ok) {
-    const body = await readApiResponse<never>(response, "完整 LCD 资源下载失败");
-    throw new Error(body.error?.message ?? "完整 LCD 资源下载失败，请稍后重试。");
+    const body = await readApiResponse<never>(response, uiCopy.workbench.error.archiveDownload);
+    throw new Error(body.error?.message ?? uiCopy.workbench.error.archiveDownloadRetry);
   }
   saveBrowserBlob(await response.blob(), responseFileName(response, `${chapterId}-saved.lantern.zip`));
 }
 
 export async function apiImportChapterArchive(chapterId: string, expectedWorkingRevision: number, file: File) {
-  if (!file.name.toLowerCase().endsWith(".zip")) throw new Error("请选择 Lantern 导出的 ZIP 完整 LCD 归档。");
-  if (!file.size || file.size > MAX_CHAPTER_ARCHIVE_BYTES) throw new Error("完整 LCD 归档必须小于 512MB。");
+  if (!file.name.toLowerCase().endsWith(".zip")) throw new Error(uiCopy.workbench.error.archiveInvalidFormat);
+  if (!file.size || file.size > MAX_CHAPTER_ARCHIVE_BYTES) throw new Error(uiCopy.workbench.error.archiveTooLarge);
   const form = new FormData();
   form.set("file", file);
   const response = await fetch(`${uploadApiBase()}/v1/chapters/${encodeURIComponent(chapterId)}/archive/import?expectedWorkingRevision=${expectedWorkingRevision}`, {
@@ -763,8 +764,8 @@ export async function apiImportChapterArchive(chapterId: string, expectedWorking
     body: form,
     credentials: "include",
   });
-  const body = await readApiResponse<{ revision: number; importedResources: number; importedStoryboardBeats: number }>(response, "完整 LCD 导入失败");
-  if (!response.ok || !body.data) throw new Error(body.error?.message ?? "完整 LCD 导入失败，请稍后重试。");
+  const body = await readApiResponse<{ revision: number; importedResources: number; importedStoryboardBeats: number }>(response, uiCopy.workbench.error.archiveImport);
+  if (!response.ok || !body.data) throw new Error(body.error?.message ?? uiCopy.workbench.error.archiveImportRetry);
   return body.data;
 }
 
@@ -797,9 +798,9 @@ export async function apiUploadAsset(projectId: string, file: File, kind = "refe
     body: form,
     credentials: "include",
   });
-  const body = await readApiResponse<{ id: string; name: string; versions: Array<{ id: string; contentType?: string; width?: number; height?: number }> }>(response, "上传失败");
-  if (!response.ok) throw new Error(body.error?.message ?? "上传失败");
-  if (!body.data) throw new Error("上传失败");
+  const body = await readApiResponse<{ id: string; name: string; versions: Array<{ id: string; contentType?: string; width?: number; height?: number }> }>(response, uiCopy.asset.error.genericUpload);
+  if (!response.ok) throw new Error(body.error?.message ?? uiCopy.asset.error.genericUpload);
+  if (!body.data) throw new Error(uiCopy.asset.error.genericUpload);
   return body.data;
 }
 
@@ -814,8 +815,8 @@ export async function apiUploadAgentAttachment(projectId: string, file: File) {
     body: form,
     credentials: "include",
   });
-  const body = await readApiResponse<{ id: string; versions: Array<{ id: string }> }>(response, "图片附件上传失败");
-  if (!response.ok || !body.data?.versions[0]) throw new Error(body.error?.message ?? "图片附件上传失败");
+  const body = await readApiResponse<{ id: string; versions: Array<{ id: string }> }>(response, uiCopy.asset.error.attachmentUpload);
+  if (!response.ok || !body.data?.versions[0]) throw new Error(body.error?.message ?? uiCopy.asset.error.attachmentUpload);
   return { assetId: body.data.id, versionId: body.data.versions[0].id, name: file.name };
 }
 

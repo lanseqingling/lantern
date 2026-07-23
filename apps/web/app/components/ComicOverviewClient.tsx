@@ -19,18 +19,19 @@ import { Icon } from "@lantern/ui";
 import { navigateWithContentTransition } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 const readingDirectionOptions = [
-  { value: "ltr", label: "从左到右" },
-  { value: "rtl", label: "从右到左", disabled: true },
+  { value: "ltr", label: uiCopy.comic.readingDirection.leftToRight },
+  { value: "rtl", label: uiCopy.comic.readingDirection.rightToLeft, disabled: true },
 ];
 const creationStatusOptions = [
-  { value: "in_progress", label: "创作中" },
-  { value: "completed", label: "已完成" },
+  { value: "in_progress", label: uiCopy.comic.creationStatus.creating },
+  { value: "completed", label: uiCopy.comic.creationStatus.complete },
 ];
 
 function creationStatusLabel(status: "in_progress" | "completed") {
-  return status === "completed" ? "已完成" : "创作中";
+  return status === "completed" ? uiCopy.comic.creationStatus.complete : uiCopy.comic.creationStatus.creating;
 }
 
 export function ComicOverviewClient({ comicId }: { comicId: string }) {
@@ -76,7 +77,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
         }
       })
       .catch(() => {
-        if (alive) setError("漫画信息暂时无法加载");
+        if (alive) setError(uiCopy.comic.overview.error.loadFailed);
       });
     return () => { alive = false; };
   }, [comicId]);
@@ -115,15 +116,15 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
   const notify = (message: string) => setToast(message);
   const uploadErrorMessage = (cause: unknown) => {
     const message = cause instanceof Error ? cause.message : "";
-    if (/50MB/.test(message)) return "图片太大，请换一张小图。";
-    if (/PNG|JPEG|WebP|请选择/.test(message)) return "请选择 PNG、JPEG 或 WebP。";
-    return "上传失败，请换一张图片再试。";
+    if (/50MB/.test(message)) return uiCopy.toast.comicOverview.upload.imageTooLarge;
+    if (/PNG|JPEG|WebP|请选择/.test(message)) return uiCopy.toast.comicOverview.upload.invalidFormat;
+    return uiCopy.toast.comicOverview.upload.failed;
   };
   const deleteErrorMessage = (cause: unknown) => {
     const message = cause instanceof Error ? cause.message : "";
-    if (/任务|task/i.test(message)) return "请先停止运行中的任务。";
-    if (/服务|不可用|fetch|network|failed/i.test(message)) return "本地服务暂时不可用。";
-    return "删除失败，请稍后再试。";
+    if (/任务|task/i.test(message)) return uiCopy.toast.comicOverview.deletion.stopRunningTask;
+    if (/服务|不可用|fetch|network|failed/i.test(message)) return uiCopy.toast.comicOverview.deletion.serviceUnavailable;
+    return uiCopy.toast.comicOverview.deletion.failed;
   };
 
   const createChapter = async () => {
@@ -134,7 +135,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
       const created = await apiCreateChapter(comicId, { title: draft.title.trim(), summary: draft.summary.trim() });
       navigate(`/comics/${comicId}/chapters/${created.chapterId}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "创建新一话失败");
+      setError(cause instanceof Error ? cause.message : uiCopy.comic.overview.error.createChapterFailed);
       setSubmitting(false);
     }
   };
@@ -149,9 +150,9 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
       setComic((current) => current ? { ...current, title: updated.title, summary: updated.summary, defaultReadingDirection: updated.defaultReadingDirection.toLowerCase() as "ltr" | "rtl", status } : current);
       setSettingsOpen(false);
       setMenuOpen(false);
-      notify(`漫画设置已保存，当前为${creationStatusLabel(status)}。`);
+      notify(uiCopy.toast.comicOverview.settings.comicSaved(creationStatusLabel(status)));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "保存漫画设置失败");
+      setError(cause instanceof Error ? cause.message : uiCopy.comic.overview.error.saveComicFailed);
     } finally {
       setSavingSettings(false);
     }
@@ -167,9 +168,9 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
       setComic((current) => current ? { ...current, chapters: current.chapters.map((chapter) => chapter.id === chapterSettingsId ? { ...chapter, title: updated.title, summary: updated.summary, status } : chapter) } : current);
       setChapterSettingsId(null);
       setChapterMenuId(null);
-      notify(`本话设置已保存，当前为${creationStatusLabel(status)}。`);
+      notify(uiCopy.toast.comicOverview.settings.chapterSaved(creationStatusLabel(status)));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "保存章节设置失败");
+      setError(cause instanceof Error ? cause.message : uiCopy.comic.overview.error.saveChapterFailed);
     } finally {
       setSavingChapterSettings(false);
     }
@@ -214,7 +215,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
     try {
       await apiDeleteChapter(comicId, chapter.id);
       await reloadComic();
-      notify("已删除这一话。");
+      notify(uiCopy.toast.comicOverview.deletion.chapterDeleted);
     } catch (cause) {
       notify(deleteErrorMessage(cause));
     } finally {
@@ -230,7 +231,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
     setError("");
     try {
       await apiDeleteComic(comic.id);
-      notify("已删除漫画。");
+      notify(uiCopy.toast.comicOverview.deletion.comicDeleted);
       navigate("/workspace", "back");
     } catch (cause) {
       notify(deleteErrorMessage(cause));
@@ -245,69 +246,69 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
     setError("");
     try {
       const copied = await apiDuplicateComic(comic.id);
-      notify("已复制为一部全新的漫画。");
+      notify(uiCopy.toast.comicOverview.duplication.completed);
       setMenuOpen(false);
       navigate(`/comics/${copied.comicId}`);
     } catch (cause) {
-      notify(cause instanceof Error ? cause.message : "复制漫画失败，请稍后再试。");
+      notify(cause instanceof Error ? cause.message : uiCopy.toast.comicOverview.duplication.failed);
     } finally {
       setDuplicatingComic(false);
     }
   };
 
-  if (!comic) return <section className="chapter-loading">{error || "正在加载漫画…"}</section>;
+  if (!comic) return <section className="chapter-loading">{error || uiCopy.comic.overview.progress.loading}</section>;
   const chapterSettingsChapter = chapterSettingsId ? comic.chapters.find((chapter) => chapter.id === chapterSettingsId) : null;
 
   return <>
     <header>
       <div className="chapter-top-left">
-        <Link href="/workspace" className="chapter-back-icon app-page-corner-button" aria-label="返回我的漫画" onClick={(event) => { event.preventDefault(); navigate("/workspace", "back"); }}><Icon name="collapse" /></Link>
-        <Link href={`/comics/${comic.id}/assets`} className="chapter-back-icon chapter-asset-space-icon app-page-corner-button" aria-label="进入资产空间" onClick={(event) => { event.preventDefault(); navigate(`/comics/${comic.id}/assets`); }}><Icon name="folder" /></Link>
+        <Link href="/workspace" className="chapter-back-icon app-page-corner-button" aria-label={uiCopy.comic.overview.navigation.backToLibraryAria} onClick={(event) => { event.preventDefault(); navigate("/workspace", "back"); }}><Icon name="collapse" /></Link>
+        <Link href={`/comics/${comic.id}/assets`} className="chapter-back-icon chapter-asset-space-icon app-page-corner-button" aria-label={uiCopy.comic.overview.navigation.openAssetsAria} onClick={(event) => { event.preventDefault(); navigate(`/comics/${comic.id}/assets`); }}><Icon name="folder" /></Link>
         <div className="comic-settings-wrap" ref={comicMenuRef}>
-          <button type="button" className="comic-settings-trigger app-page-corner-button" aria-label="漫画设置" onClick={() => { setMenuOpen((open) => !open); setChapterMenuId(null); }}><span className="settings-mark comic-settings-mark" aria-hidden="true" /></button>
+          <button type="button" className="comic-settings-trigger app-page-corner-button" aria-label={uiCopy.comic.overview.action.openSettings} onClick={() => { setMenuOpen((open) => !open); setChapterMenuId(null); }}><span className="settings-mark comic-settings-mark" aria-hidden="true" /></button>
           {menuOpen ? <div className="comic-settings-menu" role="menu">
-            <button type="button" onClick={() => { setSettingsDraft({ title: comic.title, summary: comic.summary, defaultReadingDirection: comic.defaultReadingDirection, status: comic.status }); setSettingsOpen(true); setMenuOpen(false); }}><span className="menu-item-glyph menu-item-glyph-settings" aria-hidden="true" /><span>漫画设置</span></button>
-            <button type="button" onClick={() => navigate(`/comics/${comic.id}/assets`)}><Icon name="folder" /><span>资产空间</span></button>
-            <button type="button" disabled={duplicatingComic} onClick={() => void duplicateComic()}><Icon name="copy" /><span>{duplicatingComic ? "复制中" : "复制漫画"}</span></button>
-            <button type="button" disabled={deletingComic} onClick={() => setConfirmDelete({ type: "comic" })}><Icon name="trash" /><span>{deletingComic ? "删除中" : "删除漫画"}</span></button>
+            <button type="button" onClick={() => { setSettingsDraft({ title: comic.title, summary: comic.summary, defaultReadingDirection: comic.defaultReadingDirection, status: comic.status }); setSettingsOpen(true); setMenuOpen(false); }}><span className="menu-item-glyph menu-item-glyph-settings" aria-hidden="true" /><span>{uiCopy.comic.overview.action.openSettings}</span></button>
+            <button type="button" onClick={() => navigate(`/comics/${comic.id}/assets`)}><Icon name="folder" /><span>{uiCopy.asset.navigation.space}</span></button>
+            <button type="button" disabled={duplicatingComic} onClick={() => void duplicateComic()}><Icon name="copy" /><span>{duplicatingComic ? uiCopy.common.progress.copyingPlain : uiCopy.comic.overview.action.duplicateComic}</span></button>
+            <button type="button" disabled={deletingComic} onClick={() => setConfirmDelete({ type: "comic" })}><Icon name="trash" /><span>{deletingComic ? uiCopy.common.progress.deletingPlain : uiCopy.comic.overview.action.deleteComic}</span></button>
           </div> : null}
         </div>
       </div>
       <div className="chapter-top-right">
-        <div className="global-header-actions" aria-label="全局入口">
-          <button type="button" className="global-icon-button app-page-corner-button" aria-label="全局设置" onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}`)}`)}><Icon name="settings" /></button>
+        <div className="global-header-actions" aria-label={uiCopy.common.navigation.globalEntry}>
+          <button type="button" className="global-icon-button app-page-corner-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}`)}`)}><Icon name="settings" /></button>
         </div>
       </div>
     </header>
     <input ref={comicCoverInputRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void uploadComicCover(event.target.files?.[0]); event.currentTarget.value = ""; }} />
     <input ref={chapterCoverInputRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void uploadChapterCover(event.target.files?.[0]); event.currentTarget.value = ""; }} />
     <section className="chapter-hero">
-      <div><span>{comic.format === "vertical" ? "条漫" : comic.format === "four_panel" ? "四格" : "页漫"} · {comic.chapters.length ? creationStatusLabel(comic.status) : "等待第一话"}</span><h1>{comic.title}</h1><p>{comic.summary}</p></div>
-      <button type="button" className="chapter-cover-action" onClick={() => comicCoverInputRef.current?.click()}>{comic.coverUrl ? <img src={comic.coverUrl} alt={`${comic.title}漫画封面`} /> : <div className="chapter-cover-placeholder"><b>{comic.title.slice(0, 2)}</b><span>{uploadingCover ? "上传中" : "点击上传封面"}</span></div>}</button>
+      <div><span>{comic.format === "vertical" ? uiCopy.comic.format.vertical : comic.format === "four_panel" ? uiCopy.comic.format.fourPanel : uiCopy.comic.format.page} · {comic.chapters.length ? creationStatusLabel(comic.status) : uiCopy.comic.overview.chapter.waiting}</span><h1>{comic.title}</h1><p>{comic.summary}</p></div>
+      <button type="button" className="chapter-cover-action" onClick={() => comicCoverInputRef.current?.click()}>{comic.coverUrl ? <img src={comic.coverUrl} alt={uiCopy.library.cover.comicAlt(comic.title)} /> : <div className="chapter-cover-placeholder"><b>{comic.title.slice(0, 2)}</b><span>{uploadingCover ? uiCopy.common.progress.uploadingPlain : uiCopy.comic.overview.cover.uploadHint}</span></div>}</button>
     </section>
     <section className="chapter-list app-page-wide">
-      <div className="chapter-list-head"><h2>章节</h2><button type="button" className="chapter-add-button" aria-label="新建一话" onClick={() => { setDraft({ title: `第 ${comic.chapters.length + 1} 话`, summary: "" }); setCreating(true); }}><span aria-hidden="true" /></button></div>
+      <div className="chapter-list-head"><h2>{uiCopy.comic.overview.section.chapters}</h2><button type="button" className="chapter-add-button" aria-label={uiCopy.comic.overview.action.newChapter} onClick={() => { setDraft({ title: uiCopy.comic.overview.chapter.defaultTitle(comic.chapters.length + 1), summary: "" }); setCreating(true); }}><span aria-hidden="true" /></button></div>
       {error ? <p className="chapter-list-error">{error}</p> : null}
       {comic.chapters.length ? comic.chapters.map((chapter) => <article className="chapter-list-card" key={chapter.id}>
         <button type="button" className="chapter-list-open" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}${chapter.status === "completed" ? "/preview" : ""}`)}>
-          {chapter.coverUrl ? <img src={chapter.coverUrl} alt={`第 ${chapter.number} 话封面`} loading="lazy" decoding="async"/> : <div className="chapter-thumb-placeholder"><span>{chapter.number}</span></div>}
-          <span><small>第 {chapter.number} 话</small><strong>{chapter.title}</strong><em><b className={`chapter-status ${chapter.status}`}>{creationStatusLabel(chapter.status)}</b>{chapter.summary}</em></span>
+          {chapter.coverUrl ? <img src={chapter.coverUrl} alt={uiCopy.comic.overview.cover.chapterAlt(chapter.number)} loading="lazy" decoding="async"/> : <div className="chapter-thumb-placeholder"><span>{chapter.number}</span></div>}
+          <span><small>{uiCopy.comic.overview.chapter.numberLabel(chapter.number)}</small><strong>{chapter.title}</strong><em><b className={`chapter-status ${chapter.status}`}>{creationStatusLabel(chapter.status)}</b>{chapter.summary}</em></span>
         </button>
         <div className="chapter-more-wrap" ref={chapterMenuId === chapter.id ? chapterMenuRef : null}>
-          <button type="button" className="chapter-more-button" aria-label={`第 ${chapter.number} 话更多选项`} onClick={() => { setChapterMenuId((current) => current === chapter.id ? null : chapter.id); setMenuOpen(false); }}><Icon name="more" /></button>
+          <button type="button" className="chapter-more-button" aria-label={uiCopy.comic.overview.chapter.moreAria(chapter.number)} onClick={() => { setChapterMenuId((current) => current === chapter.id ? null : chapter.id); setMenuOpen(false); }}><Icon name="more" /></button>
           {chapterMenuId === chapter.id ? <div className={`chapter-more-menu ${chapterMenuOpensUpward ? "opens-upward" : ""}`} role="menu">
-            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}`)}><Icon name="ai" /><span>进入工作台</span></button>
-            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}/preview`)}><Icon name="preview" /><span>阅读预览</span></button>
-            <button type="button" onClick={() => { setChapterSettingsId(chapter.id); setChapterSettingsDraft({ title: chapter.title, summary: chapter.summary, status: chapter.status }); }}><span className="menu-item-glyph menu-item-glyph-settings" aria-hidden="true" /><span>修改设置</span></button>
-            <button type="button" className="chapter-delete-action" disabled={deletingChapterId === chapter.id} onClick={() => setConfirmDelete({ type: "chapter", chapter })}><Icon name="trash" /><span>{deletingChapterId === chapter.id ? "删除中" : "删除一话"}</span></button>
+            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}`)}><Icon name="ai" /><span>{uiCopy.common.action.enterWorkbench}</span></button>
+            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}/preview`)}><Icon name="preview" /><span>{uiCopy.comic.action.readingPreview}</span></button>
+            <button type="button" onClick={() => { setChapterSettingsId(chapter.id); setChapterSettingsDraft({ title: chapter.title, summary: chapter.summary, status: chapter.status }); }}><span className="menu-item-glyph menu-item-glyph-settings" aria-hidden="true" /><span>{uiCopy.comic.overview.section.chapterSettings}</span></button>
+            <button type="button" className="chapter-delete-action" disabled={deletingChapterId === chapter.id} onClick={() => setConfirmDelete({ type: "chapter", chapter })}><Icon name="trash" /><span>{deletingChapterId === chapter.id ? uiCopy.common.progress.deletingPlain : uiCopy.comic.overview.action.deleteChapter}</span></button>
           </div> : null}
         </div>
       </article>) : null}
     </section>
-    {settingsOpen ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="comic-settings-title" onMouseDown={(event) => event.stopPropagation()}><div><small>COMIC SETTINGS</small><h2 id="comic-settings-title">漫画设置</h2></div><label>漫画名称<input autoFocus value={settingsDraft.title} onChange={(event) => setSettingsDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>漫画简介<textarea value={settingsDraft.summary} onChange={(event) => setSettingsDraft((current) => ({ ...current, summary: event.target.value }))}/></label><div className="comic-settings-options"><label>创作阶段<CustomSelect ariaLabel={comic.isExample ? "漫画创作阶段（示例漫画不可修改）" : "漫画创作阶段"} className="creation-select" value={settingsDraft.status} options={creationStatusOptions} disabled={comic.isExample} onChange={(value) => setSettingsDraft((current) => ({ ...current, status: value as "in_progress" | "completed" }))} /></label>{comic.format === "page" ? <label>阅读顺序<CustomSelect ariaLabel="阅读顺序" className="creation-select" value={settingsDraft.defaultReadingDirection} options={readingDirectionOptions} onChange={(value) => setSettingsDraft((current) => ({ ...current, defaultReadingDirection: value as "ltr" | "rtl" }))} /></label> : null}</div><footer><button type="button" onClick={() => setSettingsOpen(false)}>取消</button><button type="button" className="primary" disabled={!settingsDraft.title.trim() || !settingsDraft.summary.trim() || savingSettings} onClick={() => void saveSettings()}>{savingSettings ? "保存中" : "保存设置"}</button></footer></section></div> : null}
-    {chapterSettingsId ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setChapterSettingsId(null)}><section className="creation-dialog chapter-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="chapter-settings-title" onMouseDown={(event) => event.stopPropagation()}><div className="chapter-settings-heading"><small>CHAPTER SETTINGS</small><h2 id="chapter-settings-title">修改设置</h2></div><div className="chapter-settings-layout"><div className="chapter-settings-fields"><label>标题<input autoFocus value={chapterSettingsDraft.title} onChange={(event) => setChapterSettingsDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>本话梗概<textarea value={chapterSettingsDraft.summary} onChange={(event) => setChapterSettingsDraft((current) => ({ ...current, summary: event.target.value }))}/></label><label>创作阶段<CustomSelect ariaLabel="章节创作阶段" className="creation-select" value={chapterSettingsDraft.status} options={creationStatusOptions} onChange={(value) => setChapterSettingsDraft((current) => ({ ...current, status: value as "in_progress" | "completed" }))} /></label></div><button type="button" className="chapter-settings-cover-card" aria-label="更换本话封面" onClick={() => { setPendingChapterCoverId(chapterSettingsId); chapterCoverInputRef.current?.click(); }}>{chapterSettingsChapter?.coverUrl ? <img src={chapterSettingsChapter.coverUrl} alt={`第 ${chapterSettingsChapter.number} 话封面`} /> : <span><b>{chapterSettingsChapter?.number ?? ""}</b><small>{uploadingCover ? "上传中" : "点击更换封面"}</small></span>}{chapterSettingsChapter?.coverUrl ? <em>{uploadingCover ? "上传中" : "点击更换封面"}</em> : null}</button></div><footer><button type="button" onClick={() => setChapterSettingsId(null)}>取消</button><button type="button" className="primary" disabled={!chapterSettingsDraft.title.trim() || !chapterSettingsDraft.summary.trim() || savingChapterSettings} onClick={() => void saveChapterSettings()}>{savingChapterSettings ? "保存中" : "保存设置"}</button></footer></section></div> : null}
-    {creating ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setCreating(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="new-chapter-title" onMouseDown={(event) => event.stopPropagation()}><div><small>NEW CHAPTER</small><h2 id="new-chapter-title">新建一话</h2></div><label>标题<input autoFocus value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>本话梗概<textarea value={draft.summary} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}/></label>{error ? <p className="creation-error">{error}</p> : null}<footer><button type="button" onClick={() => setCreating(false)}>取消</button><button type="button" className="primary" disabled={!draft.title.trim() || !draft.summary.trim() || submitting} onClick={() => void createChapter()}>{submitting ? "正在创建…" : "创建并进入工作区"}</button></footer></section></div> : null}
-    {confirmDelete ? <DeleteConfirmDialog dialogId={confirmDelete.type === "comic" ? "comic-delete" : "chapter-delete"} title={confirmDelete.type === "comic" ? `删除漫画“${comic.title}”？` : `删除“第 ${confirmDelete.chapter.number} 话 · ${confirmDelete.chapter.title}”？`} description={confirmDelete.type === "comic" ? "漫画和其中所有章节会从当前创作空间中移除。" : "这一话会从漫画中移除，其他章节和漫画资料保持不变。"} confirmLabel={deletingComic || deletingChapterId ? "处理中…" : "确认删除"} disabled={deletingComic || Boolean(deletingChapterId)} onCancel={() => setConfirmDelete(null)} onConfirm={() => confirmDelete.type === "comic" ? removeComic() : removeChapter(confirmDelete.chapter)} /> : null}
+    {settingsOpen ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="comic-settings-title" onMouseDown={(event) => event.stopPropagation()}><div><small>{uiCopy.comic.eyebrow.settings}</small><h2 id="comic-settings-title">{uiCopy.comic.overview.action.openSettings}</h2></div><label>{uiCopy.comic.field.name}<input autoFocus value={settingsDraft.title} onChange={(event) => setSettingsDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>{uiCopy.comic.field.description}<textarea value={settingsDraft.summary} onChange={(event) => setSettingsDraft((current) => ({ ...current, summary: event.target.value }))}/></label><div className="comic-settings-options"><label>{uiCopy.comic.overview.field.creationStage}<CustomSelect ariaLabel={comic.isExample ? uiCopy.comic.overview.aria.exampleStatus : uiCopy.comic.overview.aria.status} className="creation-select" value={settingsDraft.status} options={creationStatusOptions} disabled={comic.isExample} onChange={(value) => setSettingsDraft((current) => ({ ...current, status: value as "in_progress" | "completed" }))} /></label>{comic.format === "page" ? <label>{uiCopy.comic.overview.field.readingOrder}<CustomSelect ariaLabel={uiCopy.comic.overview.field.readingOrder} className="creation-select" value={settingsDraft.defaultReadingDirection} options={readingDirectionOptions} onChange={(value) => setSettingsDraft((current) => ({ ...current, defaultReadingDirection: value as "ltr" | "rtl" }))} /></label> : null}</div><footer><button type="button" onClick={() => setSettingsOpen(false)}>{uiCopy.common.action.cancel}</button><button type="button" className="primary" disabled={!settingsDraft.title.trim() || !settingsDraft.summary.trim() || savingSettings} onClick={() => void saveSettings()}>{savingSettings ? uiCopy.common.progress.savingPlain : uiCopy.comic.overview.action.saveSettings}</button></footer></section></div> : null}
+    {chapterSettingsId ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setChapterSettingsId(null)}><section className="creation-dialog chapter-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="chapter-settings-title" onMouseDown={(event) => event.stopPropagation()}><div className="chapter-settings-heading"><small>{uiCopy.comic.eyebrow.chapterSettings}</small><h2 id="chapter-settings-title">{uiCopy.comic.overview.section.chapterSettings}</h2></div><div className="chapter-settings-layout"><div className="chapter-settings-fields"><label>{uiCopy.common.field.title}<input autoFocus value={chapterSettingsDraft.title} onChange={(event) => setChapterSettingsDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>{uiCopy.comic.overview.field.chapterSummary}<textarea value={chapterSettingsDraft.summary} onChange={(event) => setChapterSettingsDraft((current) => ({ ...current, summary: event.target.value }))}/></label><label>{uiCopy.comic.overview.field.creationStage}<CustomSelect ariaLabel={uiCopy.comic.overview.aria.chapterStatus} className="creation-select" value={chapterSettingsDraft.status} options={creationStatusOptions} onChange={(value) => setChapterSettingsDraft((current) => ({ ...current, status: value as "in_progress" | "completed" }))} /></label></div><button type="button" className="chapter-settings-cover-card" aria-label={uiCopy.comic.overview.action.changeChapterCoverAria} onClick={() => { setPendingChapterCoverId(chapterSettingsId); chapterCoverInputRef.current?.click(); }}>{chapterSettingsChapter?.coverUrl ? <img src={chapterSettingsChapter.coverUrl} alt={uiCopy.comic.overview.cover.chapterAlt(chapterSettingsChapter.number)} /> : <span><b>{chapterSettingsChapter?.number ?? ""}</b><small>{uploadingCover ? uiCopy.common.progress.uploadingPlain : uiCopy.comic.overview.cover.changeHint}</small></span>}{chapterSettingsChapter?.coverUrl ? <em>{uploadingCover ? uiCopy.common.progress.uploadingPlain : uiCopy.comic.overview.cover.changeHint}</em> : null}</button></div><footer><button type="button" onClick={() => setChapterSettingsId(null)}>{uiCopy.common.action.cancel}</button><button type="button" className="primary" disabled={!chapterSettingsDraft.title.trim() || !chapterSettingsDraft.summary.trim() || savingChapterSettings} onClick={() => void saveChapterSettings()}>{savingChapterSettings ? uiCopy.common.progress.savingPlain : uiCopy.comic.overview.action.saveSettings}</button></footer></section></div> : null}
+    {creating ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setCreating(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="new-chapter-title" onMouseDown={(event) => event.stopPropagation()}><div><small>{uiCopy.comic.eyebrow.newChapter}</small><h2 id="new-chapter-title">{uiCopy.comic.overview.action.newChapter}</h2></div><label>{uiCopy.common.field.title}<input autoFocus value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>{uiCopy.comic.overview.field.chapterSummary}<textarea value={draft.summary} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}/></label>{error ? <p className="creation-error">{error}</p> : null}<footer><button type="button" onClick={() => setCreating(false)}>{uiCopy.common.action.cancel}</button><button type="button" className="primary" disabled={!draft.title.trim() || !draft.summary.trim() || submitting} onClick={() => void createChapter()}>{submitting ? uiCopy.common.progress.creating : uiCopy.comic.overview.action.createChapter}</button></footer></section></div> : null}
+    {confirmDelete ? <DeleteConfirmDialog dialogId={confirmDelete.type === "comic" ? "comic-delete" : "chapter-delete"} title={confirmDelete.type === "comic" ? uiCopy.comic.overview.deletion.comicTitle(comic.title) : uiCopy.comic.overview.deletion.chapterTitle(confirmDelete.chapter.number, confirmDelete.chapter.title)} description={confirmDelete.type === "comic" ? uiCopy.comic.overview.deletion.comicDescription : uiCopy.comic.overview.deletion.chapterDescription} confirmLabel={deletingComic || deletingChapterId ? uiCopy.common.progress.processing : uiCopy.common.action.confirmDelete} disabled={deletingComic || Boolean(deletingChapterId)} onCancel={() => setConfirmDelete(null)} onConfirm={() => confirmDelete.type === "comic" ? removeComic() : removeChapter(confirmDelete.chapter)} /> : null}
     <div className={`toast ${toast ? "show" : ""}`} role="status" aria-live="polite">{toast}</div>
   </>;
 }

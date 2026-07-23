@@ -1,25 +1,26 @@
 import type { AssetSummary } from "@lantern/shared";
+import { uiCopy } from "./ui-copy";
 
 export type AssetKindName = AssetSummary["kind"];
 
 const assetKindLabels: Record<AssetKindName, string> = {
-  character: "角色",
-  scene: "场景",
-  prop: "道具",
-  style: "风格",
-  sketch: "草图",
-  reference_image: "图片",
-  generated_image: "图片",
+  character: uiCopy.asset.kind.character,
+  scene: uiCopy.asset.kind.scene,
+  prop: uiCopy.asset.kind.prop,
+  style: uiCopy.asset.kind.style,
+  sketch: uiCopy.asset.kind.sketch,
+  reference_image: uiCopy.asset.kind.image,
+  generated_image: uiCopy.asset.kind.image,
 };
 
 const assetKindTags: Record<AssetKindName, string> = {
-  character: "人",
-  scene: "景",
-  prop: "物",
-  style: "风",
-  sketch: "草",
-  reference_image: "图",
-  generated_image: "图",
+  character: uiCopy.asset.kindTag.character,
+  scene: uiCopy.asset.kindTag.scene,
+  prop: uiCopy.asset.kindTag.prop,
+  style: uiCopy.asset.kindTag.style,
+  sketch: uiCopy.asset.kindTag.sketch,
+  reference_image: uiCopy.workbench.object.image,
+  generated_image: uiCopy.workbench.object.image,
 };
 
 export const assetKindLabel = (kind: AssetKindName) => assetKindLabels[kind];

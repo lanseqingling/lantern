@@ -8,6 +8,8 @@ import { DeleteConfirmDialog } from "@/app/components/DeleteConfirmDialog";
 import { ImageViewer, type ImageViewerRequest } from "@/app/components/ImageViewer";
 import { assetKindLabel } from "@/app/lib/asset-kind";
 import { apiDownloadAssetImage, type ComicAssetDetail, type ComicAssetImage } from "@/app/lib/api-client";
+import { useDocumentBody } from "@/app/lib/client-environment";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 type AssetDetailPatch = { name?: string; description?: string };
 
@@ -73,7 +75,7 @@ export function AssetDetailDialog({
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(false);
   const [assetDeleting, setAssetDeleting] = useState(false);
   const [imageViewer, setImageViewer] = useState<ImageViewerRequest | null>(null);
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const portalTarget = useDocumentBody();
 
   const entries = useMemo(() => detail ? [detail.root, ...detail.variants] : [], [detail]);
   const activeEntry = entries.find((entry) => entry.id === activeEntryId) ?? entries[0];
@@ -93,8 +95,6 @@ export function AssetDetailDialog({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
-
-  useEffect(() => setPortalTarget(document.body), []);
 
   useEffect(() => {
     editingRef.current = editing;
@@ -210,7 +210,7 @@ export function AssetDetailDialog({
       });
       setEditing(false);
     } catch (reason) {
-      setEditError(reason instanceof Error ? reason.message : "资产资料保存失败，请稍后重试。");
+      setEditError(reason instanceof Error ? reason.message : uiCopy.asset.error.detailsSave);
     } finally {
       setSaving(false);
     }
@@ -227,7 +227,7 @@ export function AssetDetailDialog({
     if (!activeEntry || !editingTitle || titleSaving) return;
     const name = titleDraft.trim();
     if (!name) {
-      setTitleError("资产名称不能为空。");
+      setTitleError(uiCopy.asset.error.assetNameEmpty);
       window.requestAnimationFrame(() => titleInputRef.current?.focus());
       return;
     }
@@ -242,7 +242,7 @@ export function AssetDetailDialog({
       await onSaveEntry(activeEntry.id, { name });
       setEditingTitle(false);
     } catch (reason) {
-      setTitleError(reason instanceof Error ? reason.message : "资产名称保存失败，请稍后重试。");
+      setTitleError(reason instanceof Error ? reason.message : uiCopy.asset.error.assetNameSave);
       window.requestAnimationFrame(() => titleInputRef.current?.focus());
     } finally {
       setTitleSaving(false);
@@ -257,7 +257,7 @@ export function AssetDetailDialog({
       await onUploadImage(activeEntry.id, file);
       setActiveImageIndex(activeEntry.images.length);
     } catch (reason) {
-      setImageError(reason instanceof Error ? reason.message : "图片上传失败，请稍后重试。");
+      setImageError(reason instanceof Error ? reason.message : uiCopy.asset.error.upload);
     } finally {
       setImageMutating(false);
       if (uploadInputRef.current) uploadInputRef.current.value = "";
@@ -273,7 +273,7 @@ export function AssetDetailDialog({
       await onSetPrimaryImage(activeEntry.id, imageId);
       setActiveImageIndex(0);
     } catch (reason) {
-      setImageError(reason instanceof Error ? reason.message : "主图设置失败，请稍后重试。");
+      setImageError(reason instanceof Error ? reason.message : uiCopy.asset.error.setPrimary);
     } finally {
       setImageMutating(false);
     }
@@ -288,7 +288,7 @@ export function AssetDetailDialog({
       setActiveImageIndex((index) => Math.max(0, index - 1));
       setPendingDeleteImageId(null);
     } catch (reason) {
-      setImageError(reason instanceof Error ? reason.message : "图片删除失败，请稍后重试。");
+      setImageError(reason instanceof Error ? reason.message : uiCopy.asset.error.delete);
     } finally {
       setImageMutating(false);
     }
@@ -298,7 +298,7 @@ export function AssetDetailDialog({
     if (!activeEntry || !pendingRenameImageId || imageMutating) return;
     const label = imageNameDraft.trim();
     if (!label) {
-      setImageNameError("图片名称不能为空。");
+      setImageNameError(uiCopy.asset.error.nameEmpty);
       return;
     }
     setImageMutating(true);
@@ -307,7 +307,7 @@ export function AssetDetailDialog({
       await onRenameImage(activeEntry.id, pendingRenameImageId, label);
       setPendingRenameImageId(null);
     } catch (reason) {
-      setImageNameError(reason instanceof Error ? reason.message : "图片名称保存失败，请稍后重试。");
+      setImageNameError(reason instanceof Error ? reason.message : uiCopy.asset.error.nameSave);
     } finally {
       setImageMutating(false);
     }
@@ -321,7 +321,7 @@ export function AssetDetailDialog({
     try {
       await apiDownloadAssetImage(image, activeEntry.name);
     } catch (reason) {
-      setImageError(reason instanceof Error ? reason.message : "图片下载失败，请稍后重试。");
+      setImageError(reason instanceof Error ? reason.message : uiCopy.asset.error.download);
     } finally {
       setDownloadingImageId(null);
     }
@@ -337,46 +337,46 @@ export function AssetDetailDialog({
       setAssetDeleting(false);
     } catch (reason) {
       setPendingDeleteAsset(false);
-      setImageError(reason instanceof Error ? reason.message : "资产删除失败，请稍后重试。");
+      setImageError(reason instanceof Error ? reason.message : uiCopy.asset.error.assetDelete);
       setAssetDeleting(false);
     }
   };
 
   const dialog = <div className="asset-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={dialogRef} className="asset-detail-dialog" role="dialog" aria-modal="true" aria-label={loading ? "正在加载资产详情" : error ? "资产详情加载失败" : activeEntry?.name} onMouseDown={(event) => event.stopPropagation()}>
-      <button ref={closeButtonRef} type="button" className="asset-detail-close" aria-label="关闭资产详情" onClick={onClose}><Icon name="x" /></button>
-      {loading ? <div className="asset-detail-loading" role="status"><span /><strong>正在打开资产…</strong></div> : null}
-      {!loading && error ? <div className="asset-detail-error" role="alert"><span><Icon name="asset" /></span><strong>资产详情暂时无法读取</strong><p>{error}</p><button type="button" onClick={onRetry}><Icon name="replace" />重新加载</button></div> : null}
+    <section ref={dialogRef} className="asset-detail-dialog" role="dialog" aria-modal="true" aria-label={loading ? uiCopy.asset.detail.loadingAria : error ? uiCopy.asset.detail.loadFailedAria : activeEntry?.name} onMouseDown={(event) => event.stopPropagation()}>
+      <button ref={closeButtonRef} type="button" className="asset-detail-close" aria-label={uiCopy.asset.detail.closeAria} onClick={onClose}><Icon name="x" /></button>
+      {loading ? <div className="asset-detail-loading" role="status"><span /><strong>{uiCopy.asset.detail.opening}</strong></div> : null}
+      {!loading && error ? <div className="asset-detail-error" role="alert"><span><Icon name="asset" /></span><strong>{uiCopy.asset.detail.unavailable}</strong><p>{error}</p><button type="button" onClick={onRetry}><Icon name="replace" />{uiCopy.common.action.reload}</button></div> : null}
       {!loading && !error && detail && activeEntry ? <>
         <header className="asset-detail-head">
-          <div><small>{assetKindLabel(detail.kind)} ASSET</small>{editingTitle ? <input ref={titleInputRef} className="asset-detail-title-input" autoFocus aria-label="资产名称" value={titleDraft} maxLength={120} disabled={titleSaving} onChange={(event) => setTitleDraft(event.target.value)} onBlur={() => void saveTitle()} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /> : <h2 title="双击编辑资产名称" tabIndex={0} onDoubleClick={startTitleEditing} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); startTitleEditing(); } }}>{activeEntry.name}</h2>}{titleError ? <em className="asset-detail-title-error" role="alert">{titleError}</em> : null}{entries.length > 1 ? <p>{`共 ${entries.length} 个形态`}</p> : null}</div>
+          <div><small>{uiCopy.asset.eyebrow.detail(assetKindLabel(detail.kind))}</small>{editingTitle ? <input ref={titleInputRef} className="asset-detail-title-input" autoFocus aria-label={uiCopy.asset.detail.nameLabel} value={titleDraft} maxLength={120} disabled={titleSaving} onChange={(event) => setTitleDraft(event.target.value)} onBlur={() => void saveTitle()} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /> : <h2 title={uiCopy.asset.detail.editNameHint} tabIndex={0} onDoubleClick={startTitleEditing} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); startTitleEditing(); } }}>{activeEntry.name}</h2>}{titleError ? <em className="asset-detail-title-error" role="alert">{titleError}</em> : null}{entries.length > 1 ? <p>{uiCopy.asset.detail.variantCount(entries.length)}</p> : null}</div>
         </header>
-        {entries.length > 1 ? <nav className="asset-variant-tabs" aria-label="资产派生形态">
+        {entries.length > 1 ? <nav className="asset-variant-tabs" aria-label={uiCopy.asset.detail.variantsAria}>
           {entries.map((entry) => <button type="button" key={entry.id} className={entry.id === activeEntry.id ? "active" : ""} aria-pressed={entry.id === activeEntry.id} onClick={() => selectEntry(entry.id)}>{entry.label}</button>)}
         </nav> : null}
         <div className="asset-detail-body">
-          {editing ? <form id="asset-detail-edit-form" className="asset-detail-copy asset-detail-unified-editor" aria-label="编辑资产文字资料" onSubmit={(event) => { event.preventDefault(); void saveDetails(); }}>
-            <div className="asset-detail-copy-actions asset-detail-edit-actions"><span className="asset-detail-type">{assetKindLabel(detail.kind)}</span><button type="button" disabled={saving} onClick={cancelEditing}>取消</button><button type="submit" className="primary" disabled={saving}><Icon name="save" />{saving ? "保存中…" : "保存资料"}</button></div>
-            <label><small>详细描述</small><textarea aria-label="详细描述" value={descriptionDraft} maxLength={4000} onChange={(event) => setDescriptionDraft(event.target.value)} /></label>
+          {editing ? <form id="asset-detail-edit-form" className="asset-detail-copy asset-detail-unified-editor" aria-label={uiCopy.asset.detail.editCopyAria} onSubmit={(event) => { event.preventDefault(); void saveDetails(); }}>
+            <div className="asset-detail-copy-actions asset-detail-edit-actions"><span className="asset-detail-type">{assetKindLabel(detail.kind)}</span><button type="button" disabled={saving} onClick={cancelEditing}>{uiCopy.common.action.cancel}</button><button type="submit" className="primary" disabled={saving}><Icon name="save" />{saving ? uiCopy.common.progress.saving : uiCopy.common.action.saveDetails}</button></div>
+            <label><small>{uiCopy.asset.detail.descriptionLabel}</small><textarea aria-label={uiCopy.asset.detail.descriptionLabel} value={descriptionDraft} maxLength={4000} onChange={(event) => setDescriptionDraft(event.target.value)} /></label>
             {editError ? <em role="alert">{editError}</em> : null}
-          </form> : <section className="asset-detail-copy" aria-label="资产文字资料">
-            <div className="asset-detail-copy-actions"><span className="asset-detail-type">{assetKindLabel(detail.kind)}</span><button type="button" aria-label="编辑资产资料" onClick={startEditing}><Icon name="edit" /></button><button type="button" aria-label="上传资产图片" disabled={imageMutating} onClick={() => uploadInputRef.current?.click()}><Icon name="add" /></button><div className="asset-detail-more" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAssetMenuOpen(false); }}><button type="button" aria-label="更多选项" aria-haspopup="menu" aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((open) => !open)}><Icon name="moreVertical" /></button>{assetMenuOpen ? <div className="asset-detail-more-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAssetMenuOpen(false); setPendingDeleteAsset(true); }}><Icon name="trash" />删除资产</button></div> : null}</div><input ref={uploadInputRef} className="asset-image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} /></div>
-            <div className="asset-detail-section"><small>详细描述</small><p>{activeEntry.description || "暂无描述"}</p></div>
+          </form> : <section className="asset-detail-copy" aria-label={uiCopy.asset.detail.copyAria}>
+            <div className="asset-detail-copy-actions"><span className="asset-detail-type">{assetKindLabel(detail.kind)}</span><button type="button" aria-label={uiCopy.asset.detail.editAria} onClick={startEditing}><Icon name="edit" /></button><button type="button" aria-label={uiCopy.asset.detail.uploadImageAria} disabled={imageMutating} onClick={() => uploadInputRef.current?.click()}><Icon name="add" /></button><div className="asset-detail-more" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAssetMenuOpen(false); }}><button type="button" aria-label={uiCopy.common.action.more} aria-haspopup="menu" aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((open) => !open)}><Icon name="moreVertical" /></button>{assetMenuOpen ? <div className="asset-detail-more-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAssetMenuOpen(false); setPendingDeleteAsset(true); }}><Icon name="trash" />{uiCopy.asset.detail.delete}</button></div> : null}</div><input ref={uploadInputRef} className="asset-image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} /></div>
+            <div className="asset-detail-section"><small>{uiCopy.asset.detail.descriptionLabel}</small><p>{activeEntry.description || uiCopy.asset.detail.emptyDescription}</p></div>
             {imageError ? <em className="asset-image-error" role="alert">{imageError}</em> : null}
           </section>}
           <AssetImageViewer name={activeEntry.name} images={activeEntry.images} activeIndex={activeImageIndex} onActiveIndexChange={setActiveImageIndex} onStagePointerDown={() => setImageMenu(null)} onImageClick={(event, image) => { event.preventDefault(); event.stopPropagation(); openImageViewer(image.id); }} onImageContextMenu={(event, image) => { event.preventDefault(); event.stopPropagation(); const stage = event.currentTarget.parentElement?.getBoundingClientRect(); const rawX = event.clientX - (stage?.left ?? 0); const rawY = event.clientY - (stage?.top ?? 0); setImageMenu({ x: Math.max(12, Math.min(rawX, (stage?.width ?? rawX + 166) - 166)), y: Math.max(12, Math.min(rawY, (stage?.height ?? rawY + 226) - 226)), imageId: image.id }); }} stageOverlay={imageMenu && activeImage?.id === imageMenu.imageId ? <div className="asset-image-menu" role="menu" style={{ left: imageMenu.x, top: imageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
-                <button type="button" role="menuitem" disabled={activeImage.isPrimary || imageMutating} onClick={() => void setPrimaryImage(activeImage.id)}><Icon name="pin" />{activeImage.isPrimary ? "当前主图" : "设置为主图"}</button>
-                <button type="button" role="menuitem" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingRenameImageId(activeImage.id); setImageNameDraft(activeImage.label); setImageNameError(""); }}><Icon name="edit" />修改名称</button>
-                <button type="button" role="menuitem" onClick={() => openImageViewer(activeImage.id)}><Icon name="referenceImage" />查看图片</button>
-                <button type="button" role="menuitem" disabled={Boolean(downloadingImageId)} onClick={() => void downloadImage(activeImage)}><Icon name="download" />{downloadingImageId === activeImage.id ? "下载中…" : "下载图片"}</button>
-                <button type="button" role="menuitem" disabled title="AI 图片精修能力将在后续开放"><Icon name="ai" />创作</button>
-                <button type="button" role="menuitem" className="danger" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingDeleteImageId(activeImage.id); }}><Icon name="trash" />删除</button>
+                <button type="button" role="menuitem" disabled={activeImage.isPrimary || imageMutating} onClick={() => void setPrimaryImage(activeImage.id)}><Icon name="pin" />{activeImage.isPrimary ? uiCopy.asset.detail.currentPrimary : uiCopy.asset.detail.setPrimary}</button>
+                <button type="button" role="menuitem" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingRenameImageId(activeImage.id); setImageNameDraft(activeImage.label); setImageNameError(""); }}><Icon name="edit" />{uiCopy.common.action.editName}</button>
+                <button type="button" role="menuitem" onClick={() => openImageViewer(activeImage.id)}><Icon name="referenceImage" />{uiCopy.common.action.viewImage}</button>
+                <button type="button" role="menuitem" disabled={Boolean(downloadingImageId)} onClick={() => void downloadImage(activeImage)}><Icon name="download" />{downloadingImageId === activeImage.id ? uiCopy.common.progress.downloading : uiCopy.common.action.download}</button>
+                <button type="button" role="menuitem" disabled title={uiCopy.asset.image.editUnavailable}><Icon name="ai" />{uiCopy.common.action.createContent}</button>
+                <button type="button" role="menuitem" className="danger" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingDeleteImageId(activeImage.id); }}><Icon name="trash" />{uiCopy.common.action.delete}</button>
               </div> : null} />
         </div>
       </> : null}
-      {pendingRenameImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) { setPendingRenameImageId(null); setImageNameError(""); } }}><form className="asset-image-confirm asset-image-rename" role="dialog" aria-modal="true" aria-labelledby="asset-image-rename-title" onSubmit={(event) => { event.preventDefault(); void renameImage(); }}><span><Icon name="edit" /></span><h3 id="asset-image-rename-title">修改图片名称</h3><p>名称用于区分同一资产中的不同图片。</p><label><small>图片名称</small><input autoFocus value={imageNameDraft} maxLength={80} disabled={imageMutating} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setImageNameDraft(event.target.value)} /></label>{imageNameError ? <em role="alert">{imageNameError}</em> : null}<footer><button type="button" disabled={imageMutating} onClick={() => { setPendingRenameImageId(null); setImageNameError(""); }}>取消</button><button type="submit" className="primary" disabled={imageMutating}>{imageMutating ? "保存中…" : "保存"}</button></footer></form></div> : null}
-      {pendingDeleteImageId ? <DeleteConfirmDialog dialogId="asset-image-delete" title="删除这张图片？" description="图片会从当前资产中移除，已经放到画布上的内容不会被打断。" confirmLabel={imageMutating ? "删除中…" : "确认删除"} disabled={imageMutating} onCancel={() => setPendingDeleteImageId(null)} onConfirm={deleteImage} /> : null}
-      {pendingDeleteAsset && detail ? <DeleteConfirmDialog dialogId="asset-delete" title={`删除资产“${detail.root.name}”？`} description={detail.variants.length ? `资产及其 ${detail.variants.length} 个派生形态会从资产空间和画布资产列表移除，已经放到页面或画布上的内容不会被打断。` : "资产会从资产空间和画布资产列表移除，已经放到页面或画布上的内容不会被打断。"} confirmLabel={assetDeleting ? "删除中…" : "确认删除"} disabled={assetDeleting} onCancel={() => setPendingDeleteAsset(false)} onConfirm={deleteAsset} /> : null}
+      {pendingRenameImageId ? <div className="asset-image-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !imageMutating) { setPendingRenameImageId(null); setImageNameError(""); } }}><form className="asset-image-confirm asset-image-rename" role="dialog" aria-modal="true" aria-labelledby="asset-image-rename-title" onSubmit={(event) => { event.preventDefault(); void renameImage(); }}><span><Icon name="edit" /></span><h3 id="asset-image-rename-title">{uiCopy.common.action.renameImage}</h3><p>{uiCopy.asset.detail.renameImageDescription}</p><label><small>{uiCopy.asset.image.label}</small><input autoFocus value={imageNameDraft} maxLength={80} disabled={imageMutating} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setImageNameDraft(event.target.value)} /></label>{imageNameError ? <em role="alert">{imageNameError}</em> : null}<footer><button type="button" disabled={imageMutating} onClick={() => { setPendingRenameImageId(null); setImageNameError(""); }}>{uiCopy.common.action.cancel}</button><button type="submit" className="primary" disabled={imageMutating}>{imageMutating ? uiCopy.common.progress.saving : uiCopy.common.action.save}</button></footer></form></div> : null}
+      {pendingDeleteImageId ? <DeleteConfirmDialog dialogId="asset-image-delete" title={uiCopy.asset.image.deleteTitle} description={uiCopy.asset.detail.deleteImageDescription} confirmLabel={imageMutating ? uiCopy.common.progress.deleting : uiCopy.common.action.confirmDelete} disabled={imageMutating} onCancel={() => setPendingDeleteImageId(null)} onConfirm={deleteImage} /> : null}
+      {pendingDeleteAsset && detail ? <DeleteConfirmDialog dialogId="asset-delete" title={uiCopy.asset.detail.deleteTitle(detail.root.name)} description={detail.variants.length ? uiCopy.asset.detail.deleteWithVariantsDescription(detail.variants.length) : uiCopy.asset.detail.deleteDescription} confirmLabel={assetDeleting ? uiCopy.common.progress.deleting : uiCopy.common.action.confirmDelete} disabled={assetDeleting} onCancel={() => setPendingDeleteAsset(false)} onConfirm={deleteAsset} /> : null}
     </section>
     {imageViewer ? <ImageViewer {...imageViewer} onIndexChange={setActiveImageIndex} onClose={() => setImageViewer(null)} /> : null}
   </div>;

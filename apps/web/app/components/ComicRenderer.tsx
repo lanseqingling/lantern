@@ -6,6 +6,7 @@ import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, F
 import { balloonCutCornerPoints, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@lantern/shared";
 import type { Selection } from "@/app/lib/workbench-state";
 import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
@@ -150,7 +151,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   useEffect(() => () => {
     if (cropWheelRef.current) window.clearTimeout(cropWheelRef.current.timer);
   }, []);
-  if (!unit) return <div className="empty-comic">暂无可预览的漫画页面</div>;
+  if (!unit) return <div className="empty-comic">{uiCopy.renderer.empty}</div>;
 
   const frameDraft = (frame: Frame): Frame => ({
     ...frame,
@@ -179,17 +180,17 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const crossPurpose = node.overlayPurpose === "cross_page" || node.overlayPurpose === "cross_segment" ? node.overlayPurpose : undefined;
     const orderGroup = crossPurpose ? overlayImages.filter((candidate) => candidate.overlayPurpose === crossPurpose) : overlayImages.filter((candidate) => candidate.overlayPurpose !== "cross_page" && candidate.overlayPurpose !== "cross_segment");
     const order = orderGroup.findIndex((candidate) => candidate.element.id === node.element.id) + 1;
-    return `${crossPurpose === "cross_page" ? "跨页图" : crossPurpose === "cross_segment" ? "跨段图" : "图"} ${String(order).padStart(2, "0")}`;
+    return `${crossPurpose === "cross_page" ? uiCopy.workbench.object.crossPageImage : crossPurpose === "cross_segment" ? uiCopy.workbench.object.crossSegmentImage : uiCopy.workbench.object.image} ${String(order).padStart(2, "0")}`;
   };
   const balloonOrder = (node: BalloonSceneNode) => {
     const crossPage = node.overlayPurpose === "cross_page";
     const orderGroup = balloons.filter((candidate) => crossPage ? candidate.overlayPurpose === "cross_page" : candidate.overlayPurpose !== "cross_page");
     return orderGroup.findIndex((candidate) => candidate.element.id === node.element.id) + 1;
   };
-  const balloonOrderLabel = (node: BalloonSceneNode) => `${node.overlayPurpose === "cross_page" ? "跨页泡" : "对白"} ${String(balloonOrder(node)).padStart(2, "0")}`;
-  const narrationOrderLabel = (node: TextSceneNode) => `旁白 ${String(narrations.findIndex((candidate) => candidate.element.id === node.element.id) + 1).padStart(2, "0")}`;
+  const balloonOrderLabel = (node: BalloonSceneNode) => `${node.overlayPurpose === "cross_page" ? uiCopy.workbench.object.crossPageBalloon : uiCopy.workbench.object.dialogue} ${String(balloonOrder(node)).padStart(2, "0")}`;
+  const narrationOrderLabel = (node: TextSceneNode) => uiCopy.renderer.narration(narrations.findIndex((candidate) => candidate.element.id === node.element.id) + 1);
 
-  const frameLabel = (frame: Frame) => `${unit.kind === "spread" && frame.surfaceScope === "unit" ? "跨页格" : "画格"} ${String(readingOrder.get(frame.id) ?? "").padStart(2, "0")}`.trim();
+  const frameLabel = (frame: Frame) => `${unit.kind === "spread" && frame.surfaceScope === "unit" ? uiCopy.workbench.object.crossPageFrame : uiCopy.workbench.object.frame} ${String(readingOrder.get(frame.id) ?? "").padStart(2, "0")}`.trim();
   const selectFrame = (frame: Frame) => onSelect?.({ type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) });
   const doubleClick = (event: ReactMouseEvent, next: Selection) => {
     if (!editable || !onObjectDoubleClick) return;
@@ -235,7 +236,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const timer = window.setTimeout(() => {
       const pending = cropWheelRef.current;
       if (!pending || pending.elementId !== image.id) return;
-      onCommitElement(unit.id, image.id, { crop: pending.crop }, "缩放图片取景");
+      onCommitElement(unit.id, image.id, { crop: pending.crop }, uiCopy.renderer.zoomImageCrop);
       const remainingDrafts = { ...draftsRef.current };
       delete remainingDrafts[image.id];
       draftsRef.current = remainingDrafts;
@@ -268,7 +269,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const step = (axis === "x" ? frame.geometry.width : frame.geometry.height) * (event.shiftKey ? .04 : .015) * sign;
     const reshaped = reshapeFrameCorner(frame.geometry, frame.shape, cornerIndex, axis, step, editableBoundsForFrame(frame));
     if (!reshaped || !frameGeometryAllowed(frame.id, reshaped.geometry)) return;
-    onCommitElements(unit.id, [{ elementId: frame.id, patch: reshaped }], "调整画格角度");
+    onCommitElements(unit.id, [{ elementId: frame.id, patch: reshaped }], uiCopy.renderer.rotateFrame);
   };
   const nodeCoordinateBounds = (node: SceneElementNode, frame?: Frame) => {
     if (node.source === "overlay" && frame) return { minX: -frame.geometry.x / frame.geometry.width, minY: -frame.geometry.y / frame.geometry.height, maxX: (unit.canvas.width - frame.geometry.x) / frame.geometry.width, maxY: (unit.canvas.height - frame.geometry.y) / frame.geometry.height };
@@ -462,7 +463,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const drag = dragRef.current; if (!drag) return;
     if (drag.moved) { suppressClick.current = true; window.setTimeout(() => { suppressClick.current = false; }, 0); }
     const patch = draftsRef.current[drag.elementId];
-    const label = drag.mode === "image_crop" ? "调整图片取景" : drag.mode === "image_resize" ? "调整纸面图片大小" : drag.mode === "image_move" ? "移动纸面图片" : drag.mode === "frame_corner" ? "调整画格角度" : drag.mode === "frame_resize" ? "调整画格大小" : drag.mode === "balloon_resize" ? "调整对话气泡大小" : drag.mode === "balloon_rotate" ? "旋转对白气泡" : drag.mode === "balloon_tail" ? "调整气泡尾巴指向" : drag.mode === "balloon_move" ? "移动对话气泡" : drag.mode === "text_resize" ? "调整旁白换行宽度" : drag.mode === "text_rotate" ? "旋转旁白" : drag.mode === "text_move" ? "移动旁白" : "移动画格";
+    const label = drag.mode === "image_crop" ? uiCopy.renderer.cropImage : drag.mode === "image_resize" ? uiCopy.renderer.resizePaperImage : drag.mode === "image_move" ? uiCopy.renderer.movePaperImage : drag.mode === "frame_corner" ? uiCopy.renderer.rotateFrame : drag.mode === "frame_resize" ? uiCopy.renderer.resizeFrame : drag.mode === "balloon_resize" ? uiCopy.renderer.resizeBalloon : drag.mode === "balloon_rotate" ? uiCopy.workbench.action.rotateBalloon : drag.mode === "balloon_tail" ? uiCopy.renderer.adjustBalloonTail : drag.mode === "balloon_move" ? uiCopy.renderer.moveBalloon : drag.mode === "text_resize" ? uiCopy.renderer.resizeNarration : drag.mode === "text_rotate" ? uiCopy.workbench.action.rotateNarration : drag.mode === "text_move" ? uiCopy.renderer.moveNarration : uiCopy.workbench.action.moveFrame;
     if (patch) {
       if (drag.mode === "frame_move" || drag.mode === "frame_resize" || drag.mode === "frame_corner") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
       else onCommitElement?.(unit.id, drag.elementId, patch, label);
@@ -484,8 +485,8 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
 
   return <div className={`comic-page ${editable ? "is-editable" : "is-preview"} interaction-${interactionMode} ${creationMode ? `creation-${creationMode}` : ""} ${multiMoving ? "multi-moving" : ""} ${className ?? ""}`} data-testid="comic-page" data-page-id={unit.id} ref={paperRef}
     style={{ aspectRatio: `${unit.canvas.width} / ${unit.canvas.height}`, background: unit.canvas.background.color, "--multi-move-x": `${multiMoveDelta?.x ?? 0}px`, "--multi-move-y": `${multiMoveDelta?.y ?? 0}px` } as CSSProperties} onPointerMoveCapture={pointerMove} onPointerUpCapture={finishDrag} onPointerCancelCapture={finishDrag}
-    onClick={(event) => { const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue" && point) { const frame = frameAtPoint(point); if (!frame) onPlacePageDialogue?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (interactionMode !== "select") return; const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: `Page ${String(pageIndex + 1).padStart(2, "0")}` }); onPageClick?.(pageIndex); }}
-    onContextMenu={(event) => { const point = eventPoint(event); if (!point) return; const frame = frameAtPoint(point); contextFor(event, frame ? { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) } : { type: "presentation_unit", id: unit.id, pageId: unit.id, label: `Page ${String(pageIndex + 1).padStart(2, "0")}` }); }}>
+    onClick={(event) => { const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue" && point) { const frame = frameAtPoint(point); if (!frame) onPlacePageDialogue?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (interactionMode !== "select") return; const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); onPageClick?.(pageIndex); }}
+    onContextMenu={(event) => { const point = eventPoint(event); if (!point) return; const frame = frameAtPoint(point); contextFor(event, frame ? { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) } : { type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); }}>
     <div className="paper-grain" aria-hidden="true" />
     {snapGuides ? <svg className="snap-guide-layer" viewBox={`0 0 ${unit.canvas.width} ${unit.canvas.height}`} preserveAspectRatio="none" aria-hidden="true">
       {"edgeGuides" in snapGuides ? snapGuides.edgeGuides.map((guide) => guide.axis === "x"
@@ -502,7 +503,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
       return <div className="lcd-frame-fill" key={`${frame.id}-fill`} style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: fillZIndex }}>
         <FrameShapeVisual frame={frame} fill="#fff" />
-        {editable ? <button type="button" className="lcd-frame-hit-target" data-element-id={frame.id} data-page-id={unit.id} tabIndex={-1} aria-label={`选择${frameLabel(frame)}`} style={{ clipPath: frameClipPath(frame, frame.geometry) }}
+        {editable ? <button type="button" className="lcd-frame-hit-target" data-element-id={frame.id} data-page-id={unit.id} tabIndex={-1} aria-label={uiCopy.renderer.selectFrameAria(frameLabel(frame))} style={{ clipPath: frameClipPath(frame, frame.geometry) }}
           onClick={(event) => { event.stopPropagation(); const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
           onDoubleClick={(event) => doubleClick(event, frameSelection)}
           onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection); }}
@@ -518,8 +519,8 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const label = node.source === "overlay"
         ? overlayImageLabel(node)
         : frame
-          ? `${frameLabel(frame)}主图`
-          : "页面图像";
+          ? uiCopy.renderer.framePrimaryImage(frameLabel(frame))
+          : uiCopy.renderer.pageImage;
       const imageSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
       const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
       const coordinateBounds = nodeCoordinateBounds(node, frame);
@@ -562,9 +563,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
           startDrag(event, { mode: "image_crop", elementId: image.id, frameId: frame.id, startCrop }, imageSelection);
         }}>
         <div className="lcd-image-crop">
-          {src ? <img src={src} alt="漫画画格中的格内成稿图" draggable={false} style={cropStyle(image)} /> : <div className="missing-frame-image" aria-label="等待格内成稿图"><span>等待格内成稿图</span></div>}
+          {src ? <img src={src} alt={uiCopy.renderer.frameImageAlt} draggable={false} style={cropStyle(image)} /> : <div className="missing-frame-image" aria-label={uiCopy.renderer.waitingFrameImageAria}><span>{uiCopy.renderer.waitingFrameImageAria}</span></div>}
         </div>
-        {selected && editable ? <><div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div>{node.source === "overlay" && interactionMode === "move" ? <button type="button" aria-label="调整纸面图片大小" className="resize-handle overlay-image-resize" onPointerDown={(event) => startDrag(event, { mode: "image_resize", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, imageSelection)}/> : null}</> : null}
+        {selected && editable ? <><div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div>{node.source === "overlay" && interactionMode === "move" ? <button type="button" aria-label={uiCopy.renderer.resizePaperImage} className="resize-handle overlay-image-resize" onPointerDown={(event) => startDrag(event, { mode: "image_resize", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, imageSelection)}/> : null}</> : null}
       </div>;
     })}
     {scene.frames.map(({ frame, borderZIndex }) => {
@@ -589,8 +590,8 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
       const retainedSelection = selection?.type === "image" && cropEditing ? selection : frameSelection;
       return <div className="frame-interaction-layer" key={`controls-${frame.id}`} style={geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height)}>
-        {cropEditing && cornerPoints ? <div className="frame-corner-controls" aria-label="调整画格角度">{cornerPoints.map((point, index) => <button type="button" key={index} className={`frame-corner-handle corner-${index}`} style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }} aria-label={`调整画格${["左上", "右上", "右下", "左下"][index]}角；使用方向键单轴微调`} onKeyDown={(event) => nudgeFrameCorner(event, frame, index as FrameCornerIndex)} onPointerDown={(event) => startDrag(event, { mode: "frame_corner", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry, startShape: frame.shape, frameBounds: editableBoundsForFrame(frame), cornerIndex: index as FrameCornerIndex }, retainedSelection)} />)}</div> : null}
-        {selected && interactionMode === "move" ? <button type="button" aria-label="调整画格大小" className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection)}/> : null}
+        {cropEditing && cornerPoints ? <div className="frame-corner-controls" aria-label={uiCopy.renderer.rotateFrame}>{cornerPoints.map((point, index) => <button type="button" key={index} className={`frame-corner-handle corner-${index}`} style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }} aria-label={uiCopy.renderer.adjustCornerAria([uiCopy.renderer.cornerAria.topLeft, uiCopy.renderer.cornerAria.topRight, uiCopy.renderer.cornerAria.bottomRight, uiCopy.renderer.cornerAria.bottomLeft][index])} onKeyDown={(event) => nudgeFrameCorner(event, frame, index as FrameCornerIndex)} onPointerDown={(event) => startDrag(event, { mode: "frame_corner", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry, startShape: frame.shape, frameBounds: editableBoundsForFrame(frame), cornerIndex: index as FrameCornerIndex }, retainedSelection)} />)}</div> : null}
+        {selected && interactionMode === "move" ? <button type="button" aria-label={uiCopy.renderer.resizeFrame} className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection)}/> : null}
       </div>;
     }) : null}
     {texts.map((node) => {
@@ -609,7 +610,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         onContextMenu={editableNarration ? (event) => contextFor(event, textSelection) : undefined}
         onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; if (selected && interactionMode === "move") startDrag(event, { mode: "text_move", elementId: text.id, anchorGeometry, startTransform: text.transform }, textSelection); }}>
         {appearanceSrc ? <img src={appearanceSrc} alt="" draggable={false} /> : <span>{text.content}</span>}
-        {selected && editable ? <><span className="text-selection-outline" aria-hidden="true" />{interactionMode === "move" ? <span className="text-resize-handle" aria-label="调整旁白宽度" onPointerDown={(event) => startDrag(event, { mode: "text_resize", elementId: text.id, anchorGeometry, startTransform: text.transform, minimumWidth }, textSelection)} /> : null}{interactionMode === "crop" ? <span className="text-rotate-handle" aria-label="旋转旁白" onPointerDown={(event) => startDrag(event, { mode: "text_rotate", elementId: text.id, anchorGeometry, startTransform: text.transform, startSceneGeometry: node.geometry }, textSelection)} /> : null}</> : null}
+        {selected && editable ? <><span className="text-selection-outline" aria-hidden="true" />{interactionMode === "move" ? <span className="text-resize-handle" aria-label={uiCopy.renderer.resizeNarration} onPointerDown={(event) => startDrag(event, { mode: "text_resize", elementId: text.id, anchorGeometry, startTransform: text.transform, minimumWidth }, textSelection)} /> : null}{interactionMode === "crop" ? <span className="text-rotate-handle" aria-label={uiCopy.workbench.action.rotateNarration} onPointerDown={(event) => startDrag(event, { mode: "text_rotate", elementId: text.id, anchorGeometry, startTransform: text.transform, startSceneGeometry: node.geometry }, textSelection)} /> : null}</> : null}
       </div>;
     })}
     {effects.map((node) => {
@@ -620,7 +621,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     {balloons.map((node) => {
       const balloon = node.element;
       const frame = node.frame;
-      const selected = selection?.type === "speech_balloon" && selection.id === balloon.id; const label = node.overlayPurpose === "cross_page" ? balloonOrderLabel(node) : balloon.name ?? (node.source === "overlay" ? frame ? `${frameLabel(frame)}破格气泡` : "纸面气泡" : frame ? `${frameLabel(frame)}气泡` : "页面气泡");
+      const selected = selection?.type === "speech_balloon" && selection.id === balloon.id; const label = node.overlayPurpose === "cross_page" ? balloonOrderLabel(node) : balloon.name ?? (node.source === "overlay" ? frame ? uiCopy.renderer.frameBreakoutBalloon(frameLabel(frame)) : uiCopy.renderer.paperBalloon : frame ? uiCopy.renderer.frameBalloon(frameLabel(frame)) : uiCopy.renderer.pageBalloon);
       const balloonSelection: Selection = { type: "speech_balloon", id: balloon.id, pageId: unit.id, label };
       const appearanceSrc = balloon.appearance ? resolvedResources?.[balloon.appearance.assetVersionId]?.url : undefined;
       const tail = projectBalloonTail(balloon);
@@ -643,8 +644,8 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
           {tail && paths ? <><path className="balloon-tail-fill" d={paths.fill} style={{ fill: balloon.style.fill }} /><path className="balloon-tail-outline" d={paths.outline} vectorEffect="non-scaling-stroke" style={{ stroke: balloon.style.stroke, strokeWidth: strokeWidths.tail }} /><ellipse className="balloon-mask" cx="50" cy="50" rx="48" ry="46" style={{ fill: balloon.style.fill }} /></> : null}
         </svg>}
         <span className="balloon-content">{node.dialogueText ?? ""}</span>
-        {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label="调整气泡大小" onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, minimumWidth }, balloonSelection)}/>{tail && localTailTip ? <span className="balloon-tail-handle" aria-label="调整气泡尾巴长度与指向" style={{ left: `${tail.tip.x}%`, top: `${tail.tip.y}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: localTailTip }, balloonSelection)}/> : null}</> : null}
-        {selected && interactionMode === "crop" ? <span className="balloon-rotate-handle" aria-label="旋转对白气泡" onPointerDown={(event) => startDrag(event, { mode: "balloon_rotate", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startSceneGeometry: node.geometry }, balloonSelection)} /> : null}
+        {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label={uiCopy.renderer.resizeBalloon} onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, minimumWidth }, balloonSelection)}/>{tail && localTailTip ? <span className="balloon-tail-handle" aria-label={uiCopy.renderer.adjustBalloonTail} style={{ left: `${tail.tip.x}%`, top: `${tail.tip.y}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: localTailTip }, balloonSelection)}/> : null}</> : null}
+        {selected && interactionMode === "crop" ? <span className="balloon-rotate-handle" aria-label={uiCopy.workbench.action.rotateBalloon} onPointerDown={(event) => startDrag(event, { mode: "balloon_rotate", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startSceneGeometry: node.geometry }, balloonSelection)} /> : null}
       </button>;
     })}
     {editable ? <div className="object-order-layer">
@@ -657,7 +658,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         const nextSelection: Selection = { type: "speech_balloon", id: balloon.id, pageId: unit.id, label };
         const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
         const coordinateBounds = nodeCoordinateBounds(node, frame);
-        return <span className="balloon-order-anchor" key={`${balloon.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`balloon:${balloon.id}`) ?? 0}px 0` }}><button type="button" className={`balloon-order ${crossPage ? "cross-page" : ""} ${selection?.type === "speech_balloon" && selection.id === balloon.id ? "selected" : ""}`} aria-label={`选择${label}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, nextSelection); }}>{crossPage ? label : String(order).padStart(2, "0")}</button></span>;
+        return <span className="balloon-order-anchor" key={`${balloon.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`balloon:${balloon.id}`) ?? 0}px 0` }}><button type="button" className={`balloon-order ${crossPage ? "cross-page" : ""} ${selection?.type === "speech_balloon" && selection.id === balloon.id ? "selected" : ""}`} aria-label={uiCopy.renderer.selectObjectAria(label)} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, nextSelection); }}>{crossPage ? label : String(order).padStart(2, "0")}</button></span>;
       })}
       {overlayImages.map((node) => {
         const image = node.element;
@@ -666,16 +667,16 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
         const coordinateBounds = nodeCoordinateBounds(node, frame);
         const nextSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
-        return <span className="image-order-anchor" key={`${image.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`image:${image.id}`) ?? 0}px 0` }}><button type="button" className={`image-object-order ${selection?.type === "image" && selection.id === image.id ? "selected" : ""}`} aria-label={`选择${label}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, nextSelection); }}>{label}</button></span>;
+        return <span className="image-order-anchor" key={`${image.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`image:${image.id}`) ?? 0}px 0` }}><button type="button" className={`image-object-order ${selection?.type === "image" && selection.id === image.id ? "selected" : ""}`} aria-label={uiCopy.renderer.selectObjectAria(label)} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, nextSelection); }}>{label}</button></span>;
       })}
       {scene.frames.map(({ frame }, index) => {
         const order = readingOrder.get(frame.id) ?? index + 1;
         const crossPage = unit.kind === "spread" && frame.surfaceScope === "unit";
         const cornerEditing = cropFrameId === frame.id;
         const nextSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
-        return <button type="button" className={`reading-order frame-order-button ${cornerEditing ? "corner-editing" : ""} ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - ${cornerEditing ? 34 : 12}px)` }} aria-label={`选择${frameLabel(frame)}`} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); if (interactionMode === "move") startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, nextSelection); }}>{crossPage ? frameLabel(frame) : order}</button>;
+        return <button type="button" className={`reading-order frame-order-button ${cornerEditing ? "corner-editing" : ""} ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - ${cornerEditing ? 34 : 12}px)` }} aria-label={uiCopy.renderer.selectFrameAria(frameLabel(frame))} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); if (interactionMode === "move") startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, nextSelection); }}>{crossPage ? frameLabel(frame) : order}</button>;
       })}
     </div> : null}
-    <span className="page-watermark">{unit.kind === "vertical_segment" ? `SCROLL ${String(pageIndex + 1).padStart(2, "0")}` : unit.kind === "four_panel_unit" ? "4-KOMA" : `PAGE ${String(pageIndex + 1).padStart(2, "0")}`}</span>
+    <span className="page-watermark">{unit.kind === "vertical_segment" ? uiCopy.renderer.watermark.scroll(pageIndex + 1) : unit.kind === "four_panel_unit" ? uiCopy.renderer.watermark.fourPanel : uiCopy.renderer.watermark.page(pageIndex + 1)}</span>
   </div>;
 }

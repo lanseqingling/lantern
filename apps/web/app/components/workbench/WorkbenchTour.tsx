@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@lantern/ui";
+import { useClientMounted } from "@/app/lib/client-environment";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 type PanelSnapshot = { leftOpen: boolean; agentOpen: boolean };
 type TargetRect = { id: string; left: number; top: number; width: number; height: number; radius: number };
@@ -42,8 +44,8 @@ const workbenchTourSteps: TourStep[] = [
     panel: "left",
     callouts: [{
       id: "creation-space",
-      title: "创作空间",
-      content: "在资产与分镜之间切换，整理当前一话的创作素材。",
+      title: uiCopy.workbench.panel.creationSpace,
+      content: uiCopy.tour.workbench.stepContent.creationSpace,
       targets: ["creation-space"],
       placement: "right",
     }],
@@ -53,8 +55,8 @@ const workbenchTourSteps: TourStep[] = [
     panel: "left",
     callouts: [{
       id: "comic-pages",
-      title: "漫画页",
-      content: "切换、添加和管理漫画页；条漫会在这里显示滚动段。",
+      title: uiCopy.comic.unit.page,
+      content: uiCopy.tour.workbench.stepContent.comicPages,
       targets: ["comic-pages"],
       placement: "right",
     }],
@@ -64,27 +66,27 @@ const workbenchTourSteps: TourStep[] = [
     callouts: [
       {
         id: "canvas-modes",
-        title: "选择与拖动画布",
+        title: uiCopy.tour.workbench.stepTitle.canvasControls,
         items: [
-          { icon: "select", text: "聚焦模式编辑对象。" },
-          { icon: "pan", text: "自由模式移动画布。" },
+          { icon: "select", text: uiCopy.tour.workbench.stepContent.focusMode },
+          { icon: "pan", text: uiCopy.tour.workbench.stepContent.freeMode },
         ],
         targets: ["tool-canvas-modes"],
         placement: "tools",
       },
       {
         id: "page-display",
-        title: "页面显示",
-        content: "页漫切换单双页；条漫切换设备视区。",
+        title: uiCopy.tour.workbench.stepTitle.pageDisplay,
+        content: uiCopy.tour.workbench.stepContent.pageDisplay,
         targets: ["tool-display"],
         placement: "tools",
       },
       {
         id: "creation-preview",
-        title: "创作与预览",
+        title: uiCopy.tour.workbench.stepTitle.creationAndPreview,
         items: [
-          { icon: "ai", text: "创作模式编辑漫画。" },
-          { icon: "preview", text: "预览模式检查最终画面。" },
+          { icon: "ai", text: uiCopy.tour.workbench.stepContent.creationMode },
+          { icon: "preview", text: uiCopy.tour.workbench.stepContent.previewMode },
         ],
         targets: ["tool-mode"],
         placement: "tools",
@@ -96,8 +98,8 @@ const workbenchTourSteps: TourStep[] = [
     panel: "agent",
     callouts: [{
       id: "agent-composer",
-      title: "与 Agent 协作",
-      content: "选择对象后，在这里描述要生成、修改或确认的内容。",
+      title: uiCopy.tour.workbench.stepTitle.agentCollaboration,
+      content: uiCopy.tour.workbench.stepContent.agentComposer,
       targets: ["agent-composer"],
       placement: "left",
     }],
@@ -251,20 +253,22 @@ export function WorkbenchTour({
   onLeftOpenChange: (open: boolean) => void;
   onAgentOpenChange: (open: boolean) => void;
 }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useClientMounted();
   const [active, setActive] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [targets, setTargets] = useState<TargetRect[]>([]);
   const panelSnapshotRef = useRef<PanelSnapshot | null>(null);
+  const panelStateRef = useRef<PanelSnapshot>({ leftOpen, agentOpen });
   const nextActionRef = useRef<HTMLButtonElement>(null);
   const maskId = `workbench-tour-mask-${useId().replace(/:/g, "")}`;
   const step = workbenchTourSteps[stepIndex];
 
-  const startTour = () => {
-    panelSnapshotRef.current = { leftOpen, agentOpen };
+  const startTour = useCallback(() => {
+    panelSnapshotRef.current = panelStateRef.current;
+    setTargets([]);
     setStepIndex(0);
     setActive(true);
-  };
+  }, []);
 
   const restorePanels = () => {
     const snapshot = panelSnapshotRef.current;
@@ -276,16 +280,20 @@ export function WorkbenchTour({
 
   const completeTour = () => {
     storeCompletedTour();
+    setTargets([]);
     setActive(false);
     restorePanels();
   };
 
   useEffect(() => {
-    setMounted(true);
+    panelStateRef.current = { leftOpen, agentOpen };
+  }, [agentOpen, leftOpen]);
+
+  useEffect(() => {
     if (hasCompletedTour()) return;
     const timer = window.setTimeout(startTour, 650);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [startTour]);
 
   useEffect(() => {
     if (!active) return;
@@ -300,10 +308,7 @@ export function WorkbenchTour({
   }, [active, stepIndex]);
 
   useLayoutEffect(() => {
-    if (!active) {
-      setTargets([]);
-      return;
-    }
+    if (!active) return;
 
     const ids = [...new Set(step.callouts.flatMap((callout) => callout.targets))];
     const elements = ids
@@ -373,10 +378,10 @@ export function WorkbenchTour({
       ))}
 
       <div className="workbench-tour-controls">
-        <nav className="workbench-tour-navigation" aria-label="工作台导览步骤">
-          <button type="button" aria-label="上一步" onClick={previousStep} disabled={stepIndex === 0}><Icon name="collapse" /></button>
+        <nav className="workbench-tour-navigation" aria-label={uiCopy.tour.workbench.stepsAria}>
+          <button type="button" aria-label={uiCopy.tour.workbench.previousAria} onClick={previousStep} disabled={stepIndex === 0}><Icon name="collapse" /></button>
           <span>{stepIndex + 1} / {workbenchTourSteps.length}</span>
-          <button ref={nextActionRef} type="button" className={stepIndex === workbenchTourSteps.length - 1 ? "finish" : ""} aria-label={stepIndex === workbenchTourSteps.length - 1 ? "完成导览" : "下一步"} onClick={nextStep}>{stepIndex === workbenchTourSteps.length - 1 ? "完成" : <Icon name="expand" />}</button>
+          <button ref={nextActionRef} type="button" className={stepIndex === workbenchTourSteps.length - 1 ? "finish" : ""} aria-label={stepIndex === workbenchTourSteps.length - 1 ? uiCopy.tour.workbench.finishAria : uiCopy.tour.workbench.nextAria} onClick={nextStep}>{stepIndex === workbenchTourSteps.length - 1 ? uiCopy.tour.workbench.finish : <Icon name="expand" />}</button>
         </nav>
       </div>
     </div>
@@ -384,7 +389,7 @@ export function WorkbenchTour({
 
   return (
     <>
-      <button type="button" className={`global-icon-button workbench-tour-trigger ${active ? "active" : ""}`} aria-label="播放工作台导览" aria-pressed={active} onClick={startTour}><Icon name="help" /></button>
+      <button type="button" className={`global-icon-button workbench-tour-trigger ${active ? "active" : ""}`} aria-label={uiCopy.tour.workbench.replayAria} aria-pressed={active} onClick={startTour}><Icon name="help" /></button>
       {mounted && layer ? createPortal(layer, document.body) : null}
     </>
   );

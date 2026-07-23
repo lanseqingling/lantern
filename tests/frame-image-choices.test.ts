@@ -39,7 +39,7 @@ test("frame image choices put unbound current-page images before library assets"
     includeCurrentPageImages: true,
   });
 
-  assert.deepEqual(choices.map((choice) => choice.label), ["当前页 · 跨页图 01", "当前页 · 纸面图 01", "画布 · 画布人物", "资产图片"]);
+  assert.deepEqual(choices.map((choice) => choice.label), ["当前页 · 跨页图片 01", "当前页 · 纸面图 01", "画布 · 画布人物", "资产图片"]);
   assert.deepEqual(choices.slice(0, 2).map((choice) => choice.url), ["/cross.png", "/paper.webp"]);
   assert.equal(choices.some((choice) => choice.id === "page:breakout" || choice.id === "page:framed"), false);
 });

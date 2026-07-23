@@ -1,12 +1,13 @@
 "use client";
 
 import { Icon, type IconName } from "@lantern/ui";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 export function DeleteConfirmDialog({
   dialogId,
   title,
   description,
-  confirmLabel = "确认删除",
+  confirmLabel = uiCopy.common.action.confirmDelete,
   tone = "danger",
   icon = "trash",
   disabled = false,
@@ -32,7 +33,7 @@ export function DeleteConfirmDialog({
       <h2 id={titleId}>{title}</h2>
       <p id={descriptionId}>{description}</p>
       <div className="delete-confirm-actions">
-        <button type="button" disabled={disabled} onClick={onCancel}>取消</button>
+        <button type="button" disabled={disabled} onClick={onCancel}>{uiCopy.common.action.cancel}</button>
         <button type="button" className={tone === "danger" ? "danger" : "neutral-primary"} disabled={disabled} onClick={() => void onConfirm()}>{confirmLabel}</button>
       </div>
     </section>

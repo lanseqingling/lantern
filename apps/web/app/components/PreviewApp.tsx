@@ -9,6 +9,7 @@ import { apiDownloadChapterArchive, apiDownloadPage, apiDownloadPreviewSpread, a
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 import { prepareContentRouteEntry, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageDisplayMode } from "@lantern/shared";
+import { uiCopy } from "@/app/lib/ui-copy";
 
 export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId: string }) {
   const router = useRouter();
@@ -44,7 +45,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         setPageDisplayMode("single");
         setLoaded(true);
       } catch (error) {
-        if (!canceled) setLoadError(error instanceof Error ? error.message : "无法连接 Lantern API");
+        if (!canceled) setLoadError(error instanceof Error ? error.message : uiCopy.workbench.error.apiUnavailable);
       }
     };
     void hydrate();
@@ -124,12 +125,12 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     setPageDisplayMode(next);
   };
   const goPrevious = () => {
-    if (atFirstPage) { setNotice("已经是第一话"); return; }
+    if (atFirstPage) { setNotice(uiCopy.toast.preview.firstChapter); return; }
     if (isVertical) setPageIndex((index) => Math.max(0, index - 1));
     else setPageIndex(displayGroups[currentGroupIndex - 1]?.unitIndices[0] ?? 0);
   };
   const goNext = () => {
-    if (atLastPage) { setNotice("已经是最后一页"); return; }
+    if (atLastPage) { setNotice(uiCopy.toast.common.lastPage); return; }
     if (isVertical) setPageIndex((index) => Math.min(orderedUnits.length - 1, index + 1));
     else setPageIndex(displayGroups[currentGroupIndex + 1]?.unitIndices[0] ?? shownPageIndex);
   };
@@ -155,7 +156,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     if (downloading) return;
     setDownloading(true);
     try {
-      if (configuredRuntimeAdapter() === "demo") throw new Error("演示模式暂不支持导出，请切换到服务端模式后重试。");
+      if (configuredRuntimeAdapter() === "demo") throw new Error(uiCopy.toast.preview.demoExportUnsupported);
       if (downloadSpreadUnit) await apiDownloadPage(chapterId, downloadSpreadUnit.id);
       else if (downloadPreviewSpreadUnits.length === 2) await apiDownloadPreviewSpread(chapterId, downloadPreviewSpreadUnits[0].id, downloadPreviewSpreadUnits[1].id);
       else for (const { unit, surface } of downloadSurfaces) await apiDownloadSurface(chapterId, unit.id, surface.id);
@@ -163,9 +164,9 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         .map((surface) => surface.pageNumber)
         .filter((number): number is number => typeof number === "number")
         .sort((a, b) => a - b);
-      setNotice(numbers.length > 1 ? `第 ${numbers.join("、")} 页已开始下载` : `第 ${numbers[0] ?? shownPageIndex + 1} 页已开始下载`);
+      setNotice(uiCopy.toast.preview.pageDownloadStarted(numbers.length > 1 ? numbers.join("、") : String(numbers[0] ?? shownPageIndex + 1)));
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "保存失败，请稍后重试");
+      setNotice(error instanceof Error ? error.message : uiCopy.toast.preview.downloadFailed);
     } finally {
       setDownloading(false);
       setDownloadMenuOpen(false);
@@ -181,45 +182,45 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
-    setNotice("LCD 已开始下载");
+    setNotice(uiCopy.toast.preview.lcdDownloadStarted);
     setDownloadMenuOpen(false);
   };
   const downloadChapterArchive = async () => {
     if (downloading) return;
     setDownloading(true);
     try {
-      if (configuredRuntimeAdapter() === "demo") throw new Error("演示模式暂不支持完整资源导出，请切换到服务端模式后重试。");
+      if (configuredRuntimeAdapter() === "demo") throw new Error(uiCopy.toast.preview.demoArchiveExportUnsupported);
       await apiDownloadChapterArchive(chapterId);
-      setNotice("完整 LCD 资源已开始下载");
+      setNotice(uiCopy.toast.preview.archiveDownloadStarted);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "完整 LCD 资源下载失败，请稍后重试");
+      setNotice(error instanceof Error ? error.message : uiCopy.toast.preview.archiveDownloadFailed);
     } finally {
       setDownloading(false);
       setDownloadMenuOpen(false);
     }
   };
 
-  if (loadError) return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>预览暂时无法载入</h1><p>{loadError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
-  if (!loaded) return <main className="runtime-unavailable"><section><span>LANTERN PREVIEW</span><h1>正在载入已保存版本</h1></section></main>;
-  if (!sourceEnvelope) return <main className={`runtime-unavailable route-page-transition ${entryTransition}`} role="status"><section><span>LANTERN PREVIEW</span><h1>还没有已保存版本</h1><p>请先返回工作台保存当前一话，再进入阅读预览。</p><button type="button" onClick={() => { prepareContentRouteEntry("back"); router.push(editUrl); }}>返回工作台</button></section></main>;
+  if (loadError) return <main className="runtime-unavailable" role="alert"><section><span>{uiCopy.brand.api}</span><h1>{uiCopy.preview.page.loadFailed}</h1><p>{loadError}</p><button type="button" onClick={() => window.location.reload()}>{uiCopy.common.action.reconnect}</button></section></main>;
+  if (!loaded) return <main className="runtime-unavailable"><section><span>{uiCopy.brand.preview}</span><h1>{uiCopy.preview.page.loadingSavedVersion}</h1></section></main>;
+  if (!sourceEnvelope) return <main className={`runtime-unavailable route-page-transition ${entryTransition}`} role="status"><section><span>{uiCopy.brand.preview}</span><h1>{uiCopy.preview.page.noSavedVersion}</h1><p>{uiCopy.preview.page.noSavedVersionDescription}</p><button type="button" onClick={() => { prepareContentRouteEntry("back"); router.push(editUrl); }}>{uiCopy.preview.action.backToWorkbench}</button></section></main>;
 
   return (
     <main className={`preview-shell route-page-transition ${entryTransition} ${isVertical ? "format-vertical" : "format-page"}`}>
       <section ref={isVertical ? verticalReaderRef : undefined} onScroll={isVertical ? handleVerticalScroll : undefined} className={`reader paged-reader ${isVertical ? "vertical-reader" : displayedPageIndices.length === 2 || currentGroup?.trueSpread ? "is-spread" : "is-single"} ${currentGroup?.trueSpread ? "is-true-spread" : ""}`} data-testid="preview-reader">
-        {!isVertical ? <button type="button" className="preview-page-turn previous" aria-label="上一页" onClick={goPrevious} /> : null}
+        {!isVertical ? <button type="button" className="preview-page-turn previous" aria-label={uiCopy.viewer.action.previousPage} onClick={goPrevious} /> : null}
         <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"} style={previewPageWrapStyle}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={orderedUnits[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={orderedUnits[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>
-        {!isVertical ? <button type="button" className="preview-page-turn next" aria-label="下一页" onClick={goNext} /> : null}
+        {!isVertical ? <button type="button" className="preview-page-turn next" aria-label={uiCopy.viewer.action.nextPage} onClick={goNext} /> : null}
       </section>
 
-      <nav className={`preview-dock ${dockEntering ? "mode-entering" : ""} ${modeSwitching ? "mode-exiting" : ""}`} aria-label="预览工具">
-        <div className="preview-mode-toggle" aria-label="模式切换">
-          <button type="button" aria-label="回到创作模式" disabled={modeSwitching} onClick={returnToCanvas}><Icon name="ai" /></button>
-          <button type="button" className="active" aria-label="当前为预览模式"><Icon name="preview" /></button>
+      <nav className={`preview-dock ${dockEntering ? "mode-entering" : ""} ${modeSwitching ? "mode-exiting" : ""}`} aria-label={uiCopy.preview.toolbar.previewAria}>
+        <div className="preview-mode-toggle" aria-label={uiCopy.preview.toolbar.modeSwitchAria}>
+          <button type="button" aria-label={uiCopy.preview.toolbar.creationModeAria} disabled={modeSwitching} onClick={returnToCanvas}><Icon name="ai" /></button>
+          <button type="button" className="active" aria-label={uiCopy.preview.toolbar.currentModeAria}><Icon name="preview" /></button>
         </div>
-        {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? "切换为双页模式" : "切换为单页模式"} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}
+        {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? uiCopy.viewer.action.spread : uiCopy.viewer.action.singlePage} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}
         <div className="preview-save-tool">
-          <button type="button" aria-label="下载选项" aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
-          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? "准备下载…" : downloadsAsSpread ? "下载当前双页" : "下载当前页"}</button><button type="button" disabled={downloading} onClick={downloadLcd}>下载 LCD 文件</button><button type="button" disabled={downloading} onClick={() => void downloadChapterArchive()}>下载完整 LCD 资源</button></div> : null}
+          <button type="button" aria-label={uiCopy.preview.toolbar.downloadOptionsAria} aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
+          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? uiCopy.preview.progress.preparingDownload : downloadsAsSpread ? uiCopy.preview.action.downloadSpread : uiCopy.preview.action.downloadPage}</button><button type="button" disabled={downloading} onClick={downloadLcd}>{uiCopy.preview.action.downloadLcd}</button><button type="button" disabled={downloading} onClick={() => void downloadChapterArchive()}>{uiCopy.preview.action.downloadFullLcd}</button></div> : null}
         </div>
       </nav>
       {notice ? <div className="preview-notice" role="status">{notice}</div> : null}

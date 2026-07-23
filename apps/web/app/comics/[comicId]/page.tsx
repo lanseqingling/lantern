@@ -1,7 +1,8 @@
 import { ComicOverviewClient } from "@/app/components/ComicOverviewClient";
 import { RouteTransitionSurface } from "@/app/components/RouteTransitionSurface";
+import { uiCopy } from "@/app/lib/ui-copy";
 
-export const metadata = { title: "漫画详情" };
+export const metadata = { title: uiCopy.metadata.comicTitle };
 
 export default async function ComicPage({ params }: { params: Promise<{ comicId: string }> }) {
   const { comicId } = await params;

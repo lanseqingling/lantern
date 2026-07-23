@@ -16,6 +16,7 @@ import {
 import { createRuntimeBackup, restoreRuntimeBackup } from "@lantern/server/runtime-backup";
 import { defaultLanternDataDir, getRuntimePaths } from "@lantern/server/runtime-paths";
 import { getConfig, resetConfigForTests } from "@lantern/server/config";
+import { getGlobalSettings, updateGlobalSettings } from "@lantern/server/settings-service";
 import { initializeInitialData } from "../scripts/starter-data";
 
 test("platform data directories never default to the repository", () => {
@@ -84,6 +85,86 @@ test("runtime initialization preserves existing provider configuration", async (
     await ensureRuntimeLayout(paths);
     assert.equal(await readFile(paths.providerConfigFile, "utf8"), configured);
   } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime initialization imports a legacy model environment only once", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-runtime-legacy-provider-"));
+  const paths = getRuntimePaths(dataDir);
+  const previousKey = process.env.TEXT_MODEL_API_KEY;
+  try {
+    process.env.TEXT_MODEL_API_KEY = "legacy-key";
+    await ensureRuntimeLayout(paths);
+    assert.match(await readFile(paths.providerConfigFile, "utf8"), /TEXT_MODEL_API_KEY=\"legacy-key\"/);
+    await writeFile(paths.providerConfigFile, (await readFile(paths.providerConfigFile, "utf8")).replace("legacy-key", "settings-key"));
+    process.env.TEXT_MODEL_API_KEY = "different-legacy-key";
+    await ensureRuntimeLayout(paths);
+    const preserved = await readFile(paths.providerConfigFile, "utf8");
+    assert.match(preserved, /TEXT_MODEL_API_KEY=\"settings-key\"/);
+    assert.doesNotMatch(preserved, /different-legacy-key/);
+  } finally {
+    if (previousKey === undefined) delete process.env.TEXT_MODEL_API_KEY;
+    else process.env.TEXT_MODEL_API_KEY = previousKey;
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("global settings update model configuration without exposing stored keys", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-runtime-settings-"));
+  const paths = getRuntimePaths(dataDir);
+  const previousDataDir = process.env.LANTERN_DATA_DIR;
+  const modelEnvironmentKeys = [
+    "TEXT_MODEL_PROVIDER",
+    "TEXT_MODEL_BASE_URL",
+    "TEXT_MODEL_NAME",
+    "TEXT_MODEL_API_KEY",
+    "IMAGE_MODEL_PROVIDER",
+    "IMAGE_MODEL_BASE_URL",
+    "IMAGE_MODEL_NAME",
+    "IMAGE_MODEL_API_KEY",
+    "VISION_MODEL_PROVIDER",
+    "VISION_MODEL_BASE_URL",
+    "VISION_MODEL_NAME",
+    "VISION_MODEL_API_KEY",
+  ] as const;
+  const previousModelEnvironment = new Map(modelEnvironmentKeys.map((key) => [key, process.env[key]]));
+  try {
+    process.env.LANTERN_DATA_DIR = dataDir;
+    modelEnvironmentKeys.forEach((key) => delete process.env[key]);
+    await ensureRuntimeLayout(paths);
+    resetConfigForTests();
+    const before = getGlobalSettings();
+    const text = before.models.find((model) => model.capability === "text");
+    assert.ok(text);
+    assert.equal(text.providerOptions[0]?.id, "deepseek");
+    assert.equal(text.keyConfigured, false);
+
+    const updated = await updateGlobalSettings({
+      models: [{
+        capability: "text",
+        providerId: text.providerOptions[0].id,
+        baseUrl: "https://models.example.test/v1",
+        model: "creator-chat",
+        apiKey: "private-settings-key",
+      }],
+    });
+    const stored = await readFile(paths.providerConfigFile, "utf8");
+    assert.match(stored, /LANTERN_LOCAL_TOKEN=/);
+    assert.match(stored, /TEXT_MODEL_BASE_URL=\"https:\/\/models\.example\.test\/v1\"/);
+    assert.match(stored, /TEXT_MODEL_API_KEY=\"private-settings-key\"/);
+    assert.equal(updated.models.find((model) => model.capability === "text")?.keyConfigured, true);
+    assert.equal(JSON.stringify(updated).includes("private-settings-key"), false);
+    assert.equal(getConfig().TEXT_MODEL_NAME, "creator-chat");
+    if (process.platform !== "win32") assert.equal((await stat(paths.providerConfigFile)).mode & 0o777, 0o600);
+  } finally {
+    if (previousDataDir === undefined) delete process.env.LANTERN_DATA_DIR;
+    else process.env.LANTERN_DATA_DIR = previousDataDir;
+    for (const [key, value] of previousModelEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetConfigForTests();
     await rm(dataDir, { recursive: true, force: true });
   }
 });

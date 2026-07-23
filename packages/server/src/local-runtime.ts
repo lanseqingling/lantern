@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import dotenv from "dotenv";
 import { getRuntimePaths, type LanternRuntimePaths } from "./runtime-paths";
 
 export const LOCAL_USER_ID = "user-local-creator";
@@ -33,12 +34,42 @@ const providerDefaults = [
   "IMAGE_MODEL_NAME=qwen-image-2.0",
   "IMAGE_MODEL_API_KEY=",
   "",
+  "VISION_MODEL_PROVIDER=qwen",
   "VISION_MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1",
   "VISION_MODEL_NAME=qwen3.6-flash",
   "VISION_MODEL_API_KEY=",
 ] as const;
 
-async function writeRestricted(filePath: string, contents: string) {
+const legacyModelGroups = [
+  ["TEXT_MODEL_PROVIDER", "TEXT_MODEL_BASE_URL", "TEXT_MODEL_NAME", "TEXT_MODEL_API_KEY"],
+  ["IMAGE_MODEL_PROVIDER", "IMAGE_MODEL_BASE_URL", "IMAGE_MODEL_NAME", "IMAGE_MODEL_API_KEY"],
+  ["VISION_MODEL_PROVIDER", "VISION_MODEL_BASE_URL", "VISION_MODEL_NAME", "VISION_MODEL_API_KEY"],
+] as const;
+
+function replaceProviderValue(contents: string, key: string, value: string) {
+  const next = `${key}=${JSON.stringify(value)}`;
+  const pattern = new RegExp(`^${key}=.*$`, "m");
+  return pattern.test(contents)
+    ? contents.replace(pattern, next)
+    : `${contents.replace(/\s*$/, "\n")}${next}\n`;
+}
+
+function migrateLegacyModelEnvironment(contents: string) {
+  if (process.env.LANTERN_PROVIDER_ENV_OVERRIDE === "1") return contents;
+  const stored = dotenv.parse(contents);
+  let next = contents;
+  for (const group of legacyModelGroups) {
+    const apiKeyName = group.at(-1);
+    if (!apiKeyName || stored[apiKeyName]?.trim() || !process.env[apiKeyName]?.trim()) continue;
+    for (const key of group) {
+      const value = process.env[key]?.trim();
+      if (value) next = replaceProviderValue(next, key, value);
+    }
+  }
+  return next;
+}
+
+export async function writeRestrictedRuntimeFile(filePath: string, contents: string) {
   const temporary = `${filePath}.${process.pid}.tmp`;
   await writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
   await chmod(temporary, 0o600).catch(() => undefined);
@@ -80,7 +111,7 @@ export async function ensureRuntimeLayout(paths = getRuntimePaths()) {
           configVersion: defaultRuntimeConfig.configVersion,
           ...(stored.apiPort === 18787 && stored.webPort === 3000 ? { webPort: defaultRuntimeConfig.webPort } : {}),
         };
-        await writeRestricted(paths.runtimeConfigFile, `${JSON.stringify(migrated, null, 2)}\n`);
+        await writeRestrictedRuntimeFile(paths.runtimeConfigFile, `${JSON.stringify(migrated, null, 2)}\n`);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
@@ -101,11 +132,16 @@ export async function ensureRuntimeLayout(paths = getRuntimePaths()) {
     providerText = `${providerDefaults.join("\n")}\n`;
     providerChanged = true;
   }
+  const migratedProviderText = migrateLegacyModelEnvironment(providerText);
+  if (migratedProviderText !== providerText) {
+    providerText = migratedProviderText;
+    providerChanged = true;
+  }
   if (!/^LANTERN_LOCAL_TOKEN=/m.test(providerText)) {
     providerText = `LANTERN_LOCAL_TOKEN=${randomBytes(32).toString("base64url")}\n${providerText}`;
     providerChanged = true;
   }
-  if (providerChanged) await writeRestricted(paths.providerConfigFile, providerText);
+  if (providerChanged) await writeRestrictedRuntimeFile(paths.providerConfigFile, providerText);
   else await chmod(paths.providerConfigFile, 0o600).catch(() => undefined);
 
   await open(paths.mcpConfigFile, "wx", 0o600)
@@ -194,7 +230,7 @@ export async function acquireRuntimeLock(paths = getRuntimePaths()): Promise<Run
           }
           owner.services = services;
           owner.ports = ports;
-          await writeRestricted(paths.lockFile, `${JSON.stringify(owner)}\n`);
+          await writeRestrictedRuntimeFile(paths.lockFile, `${JSON.stringify(owner)}\n`);
         },
         async release() {
           await releaseRuntimeOwner(owner, paths);
@@ -232,7 +268,7 @@ export async function requestRuntimeStop(paths = getRuntimePaths()) {
     instanceId: owner.instanceId,
     requestedAt: new Date().toISOString(),
   };
-  await writeRestricted(paths.stopRequestFile, `${JSON.stringify(request)}\n`);
+  await writeRestrictedRuntimeFile(paths.stopRequestFile, `${JSON.stringify(request)}\n`);
   return owner;
 }
 

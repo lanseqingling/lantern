@@ -18,11 +18,13 @@
     "./external-upload-service": "./src/external-upload-service.ts",
     "./export-renderer": "./src/export-renderer.ts",
     "./local-runtime": "./src/local-runtime.ts",
+    "./model-provider-catalog": "./src/model-provider-catalog.ts",
     "./object-storage": "./src/object-storage.ts",
     "./runtime-backup": "./src/runtime-backup.ts",
     "./runtime-paths": "./src/runtime-paths.ts",
     "./resource-reference-service": "./src/resource-reference-service.ts",
     "./signed-assets": "./src/signed-assets.ts",
+    "./settings-service": "./src/settings-service.ts",
     "./workbench-agent-visibility": "./src/workbench-agent-visibility.ts",
     "./workbench-service": "./src/workbench-service.ts"
   },

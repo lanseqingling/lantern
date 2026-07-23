@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { MessageKind, MessageRole, TaskStatus, TaskType, type Prisma } from "@prisma/client";
 import { prisma } from "@lantern/server/db";
-import { AppError } from "@lantern/server/errors";
+import { AppError, providerConfigurationError } from "@lantern/server/errors";
 import { getConfig } from "@lantern/server/config";
 import { buildAgentContext } from "./context-builder";
 import type { WorkspaceReference } from "./schemas";
@@ -58,6 +58,7 @@ export type CreateTaskInput = {
   selection?: { type: string; id?: string; pageId?: string; label?: string; canvasX?: number; canvasY?: number };
   explicitReferences?: WorkspaceReference[];
   plannerTrace?: unknown;
+  replacementMessageId?: string;
   idempotencyKey: string;
 };
 
@@ -155,6 +156,12 @@ export async function invokeTaskCapability(input: CreateTaskInput, taskQueue: Ta
     if (active) throw new AppError("task_in_progress", "当前会话已有任务运行中。请等待完成或先取消任务。", 409, { taskId: active.id });
   }
 
+  const config = getConfig();
+  const needsText = capability.taskType === "storyboard" || capability.taskType === "asset_image_generate";
+  const needsImage = capability.taskType === "frame_image_generate" || capability.taskType === "asset_image_generate";
+  if (needsText && config.TEXT_MODEL_PROVIDER !== "test" && !config.TEXT_MODEL_API_KEY) throw providerConfigurationError("text");
+  if (needsImage && config.IMAGE_MODEL_PROVIDER !== "test" && !config.IMAGE_MODEL_API_KEY) throw providerConfigurationError("image");
+
   const context = await buildAgentContext({
     ownerUserId: input.ownerUserId,
     projectId: input.projectId,
@@ -172,13 +179,14 @@ export async function invokeTaskCapability(input: CreateTaskInput, taskQueue: Ta
     throw new AppError("invalid_target", message, 422);
   }
 
-  const config = getConfig();
   const catalog = semanticCapabilityCatalogManifest();
   const task = await prisma.generationTask.create({
     data: {
       ownerUserId: input.ownerUserId,
       projectId: input.projectId,
       conversationId: input.conversationId,
+      capabilityId: capability.id,
+      capabilityVersion: capability.version,
       type: persistedTaskType(capability.taskType),
       status: TaskStatus.CREATED,
       idempotencyKey: input.idempotencyKey,
@@ -210,26 +218,43 @@ export async function invokeTaskCapability(input: CreateTaskInput, taskQueue: Ta
   try {
     const queued = await prisma.generationTask.update({ where: { id: task.id }, data: { status: TaskStatus.QUEUED, progress: 5 } });
     if (input.conversationId) {
-      await prisma.message.create({
-        data: {
-          ownerUserId: input.ownerUserId,
-          projectId: input.projectId,
-          conversationId: input.conversationId,
-          role: MessageRole.AGENT,
-          kind: MessageKind.TASK,
-          content: "正在准备生成，当前工作稿不会被自动修改。",
-          metadata: {
-            taskId: task.id,
-            capabilityId: capability.id,
-            capabilityVersion: capability.version,
-            taskType: capability.taskType,
-            scope: capability.scope,
-            targetLabel: input.selection?.label,
-            instruction,
-            ...(input.plannerTrace ? { plannerTrace: input.plannerTrace } : {}),
+      const messageData = {
+        kind: MessageKind.TASK,
+        content: "正在准备生成，当前工作稿不会被自动修改。",
+        metadata: {
+          taskId: task.id,
+          capabilityId: capability.id,
+          capabilityVersion: capability.version,
+          taskType: capability.taskType,
+          scope: capability.scope,
+          targetLabel: input.selection?.label,
+          instruction,
+          ...(input.plannerTrace ? { plannerTrace: input.plannerTrace } : {}),
+        } as Prisma.InputJsonValue,
+      };
+      const replaced = input.replacementMessageId
+        ? await prisma.message.updateMany({
+          where: {
+            id: input.replacementMessageId,
+            ownerUserId: input.ownerUserId,
+            conversationId: input.conversationId,
+            role: MessageRole.AGENT,
+            kind: { in: [MessageKind.FAILED, MessageKind.CANCELED] },
           },
-        },
-      });
+          data: messageData,
+        })
+        : undefined;
+      if (!replaced?.count) {
+        await prisma.message.create({
+          data: {
+            ownerUserId: input.ownerUserId,
+            projectId: input.projectId,
+            conversationId: input.conversationId,
+            role: MessageRole.AGENT,
+            ...messageData,
+          },
+        });
+      }
     }
     await taskQueue.enqueue(task.id);
     return queued;
@@ -286,6 +311,18 @@ export async function retryTask(ownerUserId: string, taskId: string, idempotency
   if (typeof storedCapability.version === "number" && storedCapability.version !== capability.version) {
     throw new AppError("capability_version_conflict", "原任务使用的能力版本已经更新，请重新发起任务。", 409);
   }
+  const replacementMessage = task.conversationId
+    ? (await prisma.message.findMany({
+      where: {
+        ownerUserId,
+        conversationId: task.conversationId,
+        role: MessageRole.AGENT,
+        kind: { in: [MessageKind.FAILED, MessageKind.CANCELED] },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    })).find((message) => (message.metadata as { taskId?: string }).taskId === task.id)
+    : undefined;
   return invokeTaskCapability({
     ownerUserId,
     projectId: task.projectId,
@@ -300,6 +337,7 @@ export async function retryTask(ownerUserId: string, taskId: string, idempotency
     selection: task.target as CreateTaskInput["selection"],
     explicitReferences: Array.isArray(stored.explicitReferences) ? stored.explicitReferences as CreateTaskInput["explicitReferences"] : undefined,
     plannerTrace: stored.plannerTrace,
+    replacementMessageId: replacementMessage?.id,
     idempotencyKey,
   }, taskQueue);
 }

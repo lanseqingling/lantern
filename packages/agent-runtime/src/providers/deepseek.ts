@@ -1,6 +1,6 @@
 import { ZodError, type z } from "zod";
 import { getConfig } from "@lantern/server/config";
-import { AppError, safeProviderError } from "@lantern/server/errors";
+import { AppError, providerConfigurationError, safeProviderError } from "@lantern/server/errors";
 
 type JsonRequest<T extends z.ZodType> = {
   schema: T;
@@ -34,7 +34,8 @@ export class DeepSeekProvider {
   async generateJson<T extends z.ZodType>(request: JsonRequest<T>): Promise<z.infer<T>> {
     const config = getConfig();
     if (config.TEXT_MODEL_PROVIDER === "test") throw new Error("TEXT_PROVIDER_IS_TEST_ADAPTER");
-    if (!config.TEXT_MODEL_API_KEY) throw new Error("TEXT_MODEL_API_KEY_MISSING");
+    if (config.TEXT_MODEL_PROVIDER !== this.name) throw new AppError("unsupported_model_provider", "当前版本尚未接入所选对话模型提供方。", 400);
+    if (!config.TEXT_MODEL_API_KEY) throw providerConfigurationError("text");
 
     const requestContent = async (repair?: { content: string; reason: string }) => {
       const response = await fetch(`${config.TEXT_MODEL_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
@@ -97,7 +98,8 @@ export class DeepSeekProvider {
   async generateText(request: TextRequest) {
     const config = getConfig();
     if (config.TEXT_MODEL_PROVIDER === "test") throw new Error("TEXT_PROVIDER_IS_TEST_ADAPTER");
-    if (!config.TEXT_MODEL_API_KEY) throw new Error("TEXT_MODEL_API_KEY_MISSING");
+    if (config.TEXT_MODEL_PROVIDER !== this.name) throw new AppError("unsupported_model_provider", "当前版本尚未接入所选对话模型提供方。", 400);
+    if (!config.TEXT_MODEL_API_KEY) throw providerConfigurationError("text");
     try {
       const response = await fetch(`${config.TEXT_MODEL_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",

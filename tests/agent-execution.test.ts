@@ -38,7 +38,7 @@ test("the current canvas view discards a selection left on another page", () => 
 });
 
 test("P0 only registers single-frame storyboard and asset generation tasks", () => {
-  const taskTypes: AgentTaskType[] = ["storyboard", "frame_image_generate", "asset_parse"];
+  const taskTypes: AgentTaskType[] = ["storyboard", "frame_image_generate", "asset_image_generate"];
 
   for (const taskType of taskTypes) assert.doesNotThrow(() => assertTaskCreationAllowed(taskType));
   for (const taskType of ["page_layout", "frame_image_refine", "dialogue", "export"]) {
@@ -50,7 +50,7 @@ test("P0 only registers single-frame storyboard and asset generation tasks", () 
 });
 
 test("workbench recovery exposes every registered generation task and candidate result", () => {
-  assert.deepEqual(workbenchAgentTaskTypes, [TaskType.STORYBOARD, TaskType.FRAME_IMAGE_GENERATE, TaskType.ASSET_PARSE]);
+  assert.deepEqual(workbenchAgentTaskTypes, [TaskType.STORYBOARD, TaskType.FRAME_IMAGE_GENERATE, TaskType.ASSET_IMAGE_GENERATE]);
   assert.deepEqual(workbenchAgentCandidateKinds, [CandidateKind.STORYBOARD, CandidateKind.FRAME_IMAGE, CandidateKind.ASSET]);
   assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.FRAME_IMAGE, { mode: "place" }), true);
   assert.equal(isWorkbenchAgentCandidateVisible(CandidateKind.FRAME_IMAGE, { mode: "replace" }), true);
@@ -102,7 +102,7 @@ test("storyboard entry editing and frame-image generation are distinct capabilit
 test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
   const first = semanticCapabilityCatalogManifest();
   const second = semanticCapabilityCatalogManifest();
-  assert.equal(first.revision, 5);
+  assert.equal(first.revision, 6);
   assert.equal(first.hash, second.hash);
   assert.match(first.hash, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => JSON.stringify(first));
@@ -203,7 +203,7 @@ test("a semantic asset plan enters the registered asset task without a mode", ()
     capabilityId: "asset.generate_character_or_scene",
     message: "我会按当前描述生成一个可编辑的资产候选；确认后才保存到资产空间。",
     scope: "reference_only",
-    taskType: "asset_parse",
+    taskType: "asset_image_generate",
   });
 });
 

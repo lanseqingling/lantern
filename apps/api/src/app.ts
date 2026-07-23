@@ -14,7 +14,7 @@ import { registerWorkbenchRoutes } from "./routes/workbench";
 const loopbackWebOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/;
 
 const defaultLogger: FastifyServerOptions["logger"] = {
-  redact: ["req.headers.authorization", "req.body.input", "req.body.contextSnapshot"],
+  redact: ["req.headers.authorization", "req.body.input", "req.body.contextSnapshot", "req.body.models[*].apiKey"],
 };
 
 export async function createApiApp(options: { logger?: FastifyServerOptions["logger"] } = {}) {

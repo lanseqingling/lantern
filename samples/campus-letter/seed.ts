@@ -3,11 +3,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   AssetKind,
+  AssetVersionOrigin,
   CandidateKind,
   CandidateStatus,
   ComicFormat,
   MessageKind,
   MessageRole,
+  ReadingDirection,
   TaskStatus,
   TaskType,
   type Prisma,
@@ -237,10 +239,10 @@ async function clearPreviousComic() {
       prisma.agentConversation.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.canvasReferencePlacement.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.canvasAssetListItem.deleteMany({ where: { projectId: { in: projectIds } } }),
-      prisma.assetImage.deleteMany({ where: { asset: { projectId: { in: projectIds } } } }),
-      prisma.asset.updateMany({ where: { projectId: { in: projectIds } }, data: { variantOfAssetId: null } }),
-      prisma.assetVersion.deleteMany({ where: { asset: { projectId: { in: projectIds } } } }),
-      prisma.asset.deleteMany({ where: { projectId: { in: projectIds } } }),
+      prisma.assetImage.deleteMany({ where: { asset: { comicId: ids.comic } } }),
+      prisma.asset.updateMany({ where: { comicId: ids.comic }, data: { variantOfAssetId: null } }),
+      prisma.assetVersion.deleteMany({ where: { asset: { comicId: ids.comic } } }),
+      prisma.asset.deleteMany({ where: { comicId: ids.comic } }),
       prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: { in: projectIds } } } }),
       prisma.storyboardBeat.deleteMany({ where: { projectId: { in: projectIds } } }),
       prisma.savedSnapshot.deleteMany({ where: { projectId: { in: projectIds } } }),
@@ -274,19 +276,19 @@ export async function seedCampusLetter() {
 
   const cover = stored.get("breakout-rendezvous-v2.png")!;
   const chapterCover = stored.get("classroom-lesson-v2.png")!;
-  await prisma.comic.create({ data: { id: ids.comic, ownerUserId: owner.id, title: "风停之前", summary: "课堂里出现一封没有署名的信，夏葵循着仅有的两行字走向旧看台。", worldSummary: "当代校园。一个小花封印连接起没有说完的话；寄信人的身份和过去被刻意留白，只让一次克制的赴约浮出水面。", format: ComicFormat.PAGE, readingDirection: "ltr", styleSummary: "清新黑白日漫，人物和分镜接近首页宣传图；精细二次元线条、克制网点、明亮留白与安静校园氛围。", coverObjectKey: cover.objectKey, coverContentType: cover.contentType, coverWidth: cover.width, coverHeight: cover.height, isExample: true } });
+  await prisma.comic.create({ data: { id: ids.comic, ownerUserId: owner.id, title: "风停之前", summary: "课堂里出现一封没有署名的信，夏葵循着仅有的两行字走向旧看台。", worldSummary: "当代校园。一个小花封印连接起没有说完的话；寄信人的身份和过去被刻意留白，只让一次克制的赴约浮出水面。", format: ComicFormat.PAGE, defaultReadingDirection: ReadingDirection.LTR, styleSummary: "清新黑白日漫，人物和分镜接近首页宣传图；精细二次元线条、克制网点、明亮留白与安静校园氛围。", coverObjectKey: cover.objectKey, coverContentType: cover.contentType, coverWidth: cover.width, coverHeight: cover.height, isExample: true } });
   await prisma.chapter.create({ data: { id: ids.chapter, ownerUserId: owner.id, comicId: ids.comic, number: 1, title: "第 1 话 · 旧看台", summary: "夏葵在放学前发现花印信封，铃声之后走向操场边等待她的人。", coverObjectKey: chapterCover.objectKey, coverContentType: chapterCover.contentType, coverWidth: chapterCover.width, coverHeight: chapterCover.height } });
-  await prisma.project.create({ data: { id: ids.project, ownerUserId: owner.id, chapterId: ids.chapter, settings: { generationStyle: "首页宣传图式清新黑白校园日漫", defaultImageSize: "1536*1024", storyBrief: "没有署名的花印信封与风停之前的旧看台赴约" } } });
+  await prisma.project.create({ data: { id: ids.project, ownerUserId: owner.id, chapterId: ids.chapter } });
   await prisma.agentConversation.create({ data: { id: ids.conversation, ownerUserId: owner.id, projectId: ids.project, title: "风停之前 · 第一话创作" } });
 
   const contextSnapshot = { comic: { id: ids.comic, title: "风停之前" }, chapter: { id: ids.chapter, title: "第 1 话 · 旧看台" }, workingRevision: 1, storyboardBeats: [], assets: [], recentConversation: [] };
   const tasks = [
-    { id: ids.storyboardTask, type: TaskType.STORYBOARD, key: "sample:campus-letter:storyboard", baseRevision: 1, input: { instruction: "把课堂里的无署名信封与一次克制的操场赴约拆成四页短篇。" }, output: { kind: "storyboard", storyboardBeatCount: storyboardBeats.length }, provider: "sample-seed", model: "lantern-authored-storyboard" },
-    { id: ids.layoutTask, type: TaskType.PAGE_LAYOUT, key: "sample:campus-letter:layout", baseRevision: 2, input: { instruction: "前两页保持同一教室连续性，以连续特写衔接发冠破格；后两页用安全区内外格、左上跑步叠格、右下女同学回头特写和飞鸟跨页完成赴约。" }, output: { kind: "page_layout", physicalPages: 4, presentationUnits: 3, frameCount: 11, features: ["breakout", "spread", "cross_page", "nested_frames", "frame_overlap"] }, provider: "sample-seed", model: "lantern-layout-authored" },
-    { id: ids.imageTask, type: TaskType.FRAME_IMAGE_GENERATE, key: "sample:campus-letter:images", baseRevision: 3, input: { instruction: "参照首页宣传图生成统一人设和清新黑白校园日漫素材。", source: "Codex built-in imagegen" }, output: { kind: "frame_images", assetCount: imageFiles.length }, provider: "codex-imagegen", model: "gpt-image-2" },
+    { id: ids.storyboardTask, type: TaskType.STORYBOARD, capabilityId: "storyboard.compose", key: "sample:campus-letter:storyboard", baseRevision: 1, input: { instruction: "把课堂里的无署名信封与一次克制的操场赴约拆成四页短篇。" }, output: { kind: "storyboard", storyboardBeatCount: storyboardBeats.length }, provider: "sample-seed", model: "lantern-authored-storyboard" },
+    { id: ids.layoutTask, type: TaskType.PAGE_LAYOUT, capabilityId: "page_layout.generate", key: "sample:campus-letter:layout", baseRevision: 2, input: { instruction: "前两页保持同一教室连续性，以连续特写衔接发冠破格；后两页用安全区内外格、左上跑步叠格、右下女同学回头特写和飞鸟跨页完成赴约。" }, output: { kind: "page_layout", physicalPages: 4, presentationUnits: 3, frameCount: 11, features: ["breakout", "spread", "cross_page", "nested_frames", "frame_overlap"] }, provider: "sample-seed", model: "lantern-layout-authored" },
+    { id: ids.imageTask, type: TaskType.FRAME_IMAGE_GENERATE, capabilityId: "frame_image.generate_batch", key: "sample:campus-letter:images", baseRevision: 3, input: { instruction: "参照首页宣传图生成统一人设和清新黑白校园日漫素材。", source: "Codex built-in imagegen" }, output: { kind: "frame_images", assetCount: imageFiles.length }, provider: "codex-imagegen", model: "gpt-image-2" },
   ];
   for (const task of tasks) {
-    await prisma.generationTask.create({ data: { id: task.id, ownerUserId: owner.id, projectId: ids.project, conversationId: ids.conversation, type: task.type, status: TaskStatus.SUCCEEDED, idempotencyKey: task.key, baseRevision: task.baseRevision, scope: "whole_chapter", target: { type: "chapter", id: ids.chapter }, input: task.input, contextSnapshot, output: task.output, provider: task.provider, model: task.model, progress: 100, completedAt: now, attempts: { create: { attempt: 1, status: TaskStatus.SUCCEEDED, responseMeta: { seeded: true }, completedAt: now } } } });
+    await prisma.generationTask.create({ data: { id: task.id, ownerUserId: owner.id, projectId: ids.project, conversationId: ids.conversation, type: task.type, capabilityId: task.capabilityId, capabilityVersion: 1, status: TaskStatus.SUCCEEDED, idempotencyKey: task.key, baseRevision: task.baseRevision, scope: "whole_chapter", target: { type: "chapter", id: ids.chapter }, input: task.input, contextSnapshot, output: task.output, provider: task.provider, model: task.model, progress: 100, completedAt: now, attempts: { create: { attempt: 1, status: TaskStatus.SUCCEEDED, responseMeta: { seeded: true }, completedAt: now } } } });
   }
 
   for (const beat of storyboardBeats) {
@@ -296,15 +298,15 @@ export async function seedCampusLetter() {
     const definition = assetByFile[fileName];
     const image = stored.get(fileName)!;
     const versionId = `${definition.id}-v1`;
-    await prisma.asset.create({ data: { id: definition.id, ownerUserId: owner.id, projectId: ids.project, kind: definition.kind, name: definition.name, description: definition.description, versions: { create: { id: versionId, version: 1, objectKey: image.objectKey, contentType: image.contentType, byteSize: image.byteSize, width: image.width, height: image.height, checksum: image.checksum, source: "codex-imagegen", sourceTaskId: ids.imageTask } } } });
+    await prisma.asset.create({ data: { id: definition.id, ownerUserId: owner.id, comicId: ids.comic, kind: definition.kind, name: definition.name, description: definition.description, versions: { create: { id: versionId, version: 1, objectKey: image.objectKey, contentType: image.contentType, byteSize: image.byteSize, width: image.width, height: image.height, checksum: image.checksum, origin: AssetVersionOrigin.GENERATED, sourceTaskId: ids.imageTask } } } });
     await prisma.assetImage.create({ data: { assetId: definition.id, assetVersionId: versionId, label: "主图", sortIndex: 0 } });
   }
   const firstUnit = document.units[0];
   const blankDocument: ComicDocument = { ...document, reading: { ...document.reading, unitOrder: [firstUnit.id] }, units: [{ ...firstUnit, frames: [], overlayLayers: [], readingSequence: [] }], resources: [], dialogues: [] };
   await prisma.workingRevision.createMany({ data: [
     { projectId: ids.project, revision: 1, document: blankDocument as unknown as Prisma.InputJsonValue, storyboardBeats: [], storyboardBeatVersionHeads: {}, assetVersionHeads: {}, changeSet: { id: "campus-create", source: "manual", operations: [] } },
-    { projectId: ids.project, revision: 2, document: blankDocument as unknown as Prisma.InputJsonValue, storyboardBeats: storyboardBeats as unknown as Prisma.InputJsonValue, storyboardBeatVersionHeads: storyboardBeatHeads, assetVersionHeads: {}, changeSet: { id: "campus-storyboard-apply", source: "candidate", sourceCandidateId: "candidate-campus-storyboard", operations: [{ type: "replace_storyboard_beats" }] }, sourceCandidateId: "candidate-campus-storyboard" },
-    { projectId: ids.project, revision: 3, document: document as unknown as Prisma.InputJsonValue, storyboardBeats: storyboardBeats as unknown as Prisma.InputJsonValue, storyboardBeatVersionHeads: storyboardBeatHeads, assetVersionHeads: assetHeads, changeSet: { id: "campus-layout-apply", source: "candidate", sourceCandidateId: "candidate-campus-layout", commands: [{ type: "replace_chapter_presentation" }] }, sourceCandidateId: "candidate-campus-layout" },
+    { projectId: ids.project, revision: 2, document: blankDocument as unknown as Prisma.InputJsonValue, storyboardBeats: storyboardBeats as unknown as Prisma.InputJsonValue, storyboardBeatVersionHeads: storyboardBeatHeads, assetVersionHeads: {}, changeSet: { id: "campus-storyboard-apply", source: "candidate", sourceCandidateId: "candidate-campus-storyboard", operations: [{ type: "replace_storyboard_beats" }] } },
+    { projectId: ids.project, revision: 3, document: document as unknown as Prisma.InputJsonValue, storyboardBeats: storyboardBeats as unknown as Prisma.InputJsonValue, storyboardBeatVersionHeads: storyboardBeatHeads, assetVersionHeads: assetHeads, changeSet: { id: "campus-layout-apply", source: "candidate", sourceCandidateId: "candidate-campus-layout", commands: [{ type: "replace_chapter_presentation" }] } },
   ] });
   await prisma.savedSnapshot.create({ data: { ownerUserId: owner.id, chapterId: ids.chapter, projectId: ids.project, sourceWorkingRevision: 3, document: document as unknown as Prisma.InputJsonValue, storyboardBeatVersions: storyboardBeatHeads, assetVersions: assetHeads } });
 

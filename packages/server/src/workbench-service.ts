@@ -168,12 +168,6 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
         include: { asset: { include: { versions: { orderBy: { version: "desc" }, take: 12 }, images: { include: { assetVersion: true }, orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }] } } } },
         orderBy: [{ pinned: "desc" }, { sortIndex: "asc" }, { createdAt: "asc" }],
       },
-      assets: {
-        where: { archivedAt: null },
-        include: { versions: { orderBy: { version: "desc" }, take: 12 } },
-        orderBy: { updatedAt: "desc" },
-        take: 200,
-      },
       conversations: {
         where: { archivedAt: null },
         orderBy: { updatedAt: "desc" },
@@ -228,7 +222,7 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
     withResolvedResources(working.document),
     snapshot ? withResolvedResources(snapshot.document) : Promise.resolve(undefined),
     prisma.assetVersion.findMany({
-      where: { id: { in: attachmentVersionIds }, asset: { ownerUserId, projectId: project.id } },
+      where: { id: { in: attachmentVersionIds }, asset: { ownerUserId, comicId: project.chapter.comicId } },
       select: { id: true, assetId: true, objectKey: true },
     }),
   ]);
@@ -250,7 +244,7 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
     user: { ownerUserId },
     comic: project.chapter.comic,
     chapter: project.chapter,
-    project: { id: project.id, settings: project.settings },
+    project: { id: project.id },
     conversations: project.conversations.map((item) => ({ id: item.id, title: item.title, createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString() })),
     working: {
       documentId: working.id,
@@ -298,7 +292,7 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
       const currentVersion = item.asset.images[0]?.assetVersion ?? item.asset.versions[0];
       return {
         id: item.asset.id,
-        kind: item.displayKind.toLowerCase(),
+        kind: item.asset.kind.toLowerCase(),
         name: item.displayName,
         description: item.asset.description,
         canvasListItemId: item.id,
@@ -397,7 +391,6 @@ export async function revertCandidateApplication(ownerUserId: string, candidateI
         storyboardBeatVersionHeads: previous.storyboardBeatVersionHeads as Prisma.InputJsonValue,
         assetVersionHeads: previous.assetVersionHeads as Prisma.InputJsonValue,
         changeSet: { id: `revert:${candidate.id}`, projectId: candidate.projectId, baseRevision: current.revision, source: "undo", sourceCandidateId: candidate.id, operations: [] },
-        sourceCandidateId: candidate.id,
       },
     });
     await tx.candidate.update({ where: { id: candidate.id }, data: { status: "REVERTED" } });
@@ -461,7 +454,6 @@ export async function commitChangeSet(args: {
         storyboardBeatVersionHeads,
         assetVersionHeads,
         changeSet: args.changeSet as unknown as Prisma.InputJsonValue,
-        sourceCandidateId: args.candidateId,
       },
     });
     if (args.candidateId) {

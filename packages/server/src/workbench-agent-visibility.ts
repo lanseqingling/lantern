@@ -3,7 +3,7 @@ import { CandidateKind, TaskType } from "@prisma/client";
 export const workbenchAgentTaskTypes = [
   TaskType.STORYBOARD,
   TaskType.FRAME_IMAGE_GENERATE,
-  TaskType.ASSET_PARSE,
+  TaskType.ASSET_IMAGE_GENERATE,
 ] as const;
 
 export const workbenchAgentCandidateKinds = [

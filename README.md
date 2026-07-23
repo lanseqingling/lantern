@@ -30,7 +30,7 @@ Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑�
 - 受控编辑：UI 与产品内外的 Agent 共用语义能力和作品边界；普通编辑可撤销，生成、结构和多对象结果先形成 Candidate，由创作者决定是否应用。
 
 ```text
-工作台 / 内置 Agent / 外置 Agent（MCP + Skill）
+qu工作台 / 内置 Agent / 外置 Agent（MCP + Skill）
                 ↓
           受控语义能力
                 ↓
@@ -112,41 +112,6 @@ $actual -eq $expected
 ```
 
 校验通过后再解压源码包。
-
-</details>
-
-## 模型配置
-
-不配置模型 Key 仍可使用漫画画布和确定性编辑。Lantern 当前默认接入 DeepSeek 文本模型与 Qwen 图片、视觉模型，后续将扩展更多模型 Provider；对话、图片生成和视觉理解需要配置对应 Key。
-
-首次启动后，在 Lantern 数据目录中的 `config/providers.env` 填写：
-
-```dotenv
-TEXT_MODEL_API_KEY=你的 DeepSeek API Key
-IMAGE_MODEL_API_KEY=你的百炼 API Key
-VISION_MODEL_API_KEY=
-```
-
-保存后重新启动 Lantern。作品数据和图片存储在本地；使用 AI 能力时，请求所需的文本或图片会发送给用户配置的模型 Provider。
-
-<details>
-<summary>高级 Provider 配置</summary>
-
-```dotenv
-TEXT_MODEL_PROVIDER=deepseek
-TEXT_MODEL_BASE_URL=https://api.deepseek.com
-TEXT_MODEL_NAME=deepseek-v4-flash
-TEXT_MODEL_API_KEY=
-
-IMAGE_MODEL_PROVIDER=qwen
-IMAGE_MODEL_BASE_URL=https://dashscope.aliyuncs.com/api/v1
-IMAGE_MODEL_NAME=qwen-image-2.0
-IMAGE_MODEL_API_KEY=
-
-VISION_MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-VISION_MODEL_NAME=qwen3.6-flash
-VISION_MODEL_API_KEY=
-```
 
 </details>
 

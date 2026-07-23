@@ -3,9 +3,12 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import {
   AssetKind,
+  AssetVersionOrigin,
   CandidateKind,
   CandidateStatus,
   ComicFormat,
+  MessageKind,
+  MessageRole,
   TaskStatus,
   TaskType,
   type Prisma,
@@ -54,6 +57,8 @@ test("database candidate apply and revert preserve version heads atomically", as
     task: `it-task-${suffix}`,
     candidate: `it-candidate-${suffix}`,
     sibling: `it-sibling-${suffix}`,
+    conversation: `it-conversation-${suffix}`,
+    retryMessage: `it-retry-message-${suffix}`,
   };
   const storyboardBeat: StoryboardBeat = {
     id: ids.storyboardBeat,
@@ -88,34 +93,34 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.asset.create({ data: {
       id: ids.asset,
       ownerUserId: ids.user,
-      projectId: ids.project,
+      comicId: ids.comic,
       kind: AssetKind.CHARACTER,
       name: "测试角色",
       description: "必须在布局和对白修改后继续保留",
-      versions: { create: { id: ids.assetV1, version: 1, source: "integration_test", objectKey: assetObject.objectKey } },
+      versions: { create: { id: ids.assetV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: assetObject.objectKey } },
     } });
     await prisma.assetImage.create({ data: { id: ids.assetImage, assetId: ids.asset, assetVersionId: ids.assetV1, label: "主图", sortIndex: 0 } });
     await prisma.asset.create({ data: {
       id: ids.assetVariant,
       ownerUserId: ids.user,
-      projectId: ids.project,
+      comicId: ids.comic,
       kind: AssetKind.CHARACTER,
       name: "测试角色·回忆时期",
       description: "同一角色的回忆形态",
       variantOfAssetId: ids.asset,
       variantLabel: "回忆时期",
       variantSortIndex: 10,
-      versions: { create: { id: ids.assetVariantV1, version: 1, source: "integration_test", objectKey: variantObject.objectKey } },
+      versions: { create: { id: ids.assetVariantV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: variantObject.objectKey } },
     } });
     await prisma.assetImage.create({ data: { id: ids.assetVariantImage, assetId: ids.assetVariant, assetVersionId: ids.assetVariantV1, label: "主图", sortIndex: 0 } });
     await prisma.asset.create({ data: {
       id: ids.visualStyleAsset,
       ownerUserId: ids.user,
-      projectId: ids.project,
+      comicId: ids.comic,
       kind: AssetKind.STYLE,
       name: "视觉风格",
       description: "克制的蓝绿色水彩与电影感夜景。",
-      versions: { create: { id: ids.visualStyleV1, version: 1, source: "integration_test", objectKey: styleObject.objectKey } },
+      versions: { create: { id: ids.visualStyleV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: styleObject.objectKey } },
     } });
     await prisma.assetImage.create({ data: { id: ids.visualStyleImage, assetId: ids.visualStyleAsset, assetVersionId: ids.visualStyleV1, label: "雨夜色彩参考", sortIndex: 0 } });
 
@@ -138,7 +143,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(copiedSettings[0]?.title, "禁忌规则");
     assert.equal(copiedSettings[0]?.content, "午夜后不得直呼失踪者姓名。");
     const copiedAssets = await prisma.asset.findMany({
-      where: { project: { chapter: { comicId: copied.comicId } } },
+      where: { comicId: copied.comicId },
       include: { images: true },
       orderBy: { variantSortIndex: "asc" },
     });
@@ -149,7 +154,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(copiedRoot.images.length, 1);
     assert.equal(copiedVariant.images.length, 1);
     const assetObjectV2 = await putImage(png, `integration/${suffix}/asset-v2`);
-    await prisma.assetVersion.create({ data: { id: ids.assetV2, assetId: ids.asset, version: 2, source: "integration_test", objectKey: assetObjectV2.objectKey } });
+    await prisma.assetVersion.create({ data: { id: ids.assetV2, assetId: ids.asset, version: 2, origin: AssetVersionOrigin.UPLOAD, objectKey: assetObjectV2.objectKey } });
     await prisma.assetImage.create({ data: { id: ids.assetImage2, assetId: ids.asset, assetVersionId: ids.assetV2, label: "表情参考", sortIndex: 10 } });
     const reorderedAsset = await setPrimaryAssetImage(ids.user, ids.asset, ids.assetImage2);
     assert.equal(reorderedAsset.root.images[0]?.id, ids.assetImage2);
@@ -378,7 +383,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     }, {
       id: "storyboard.edit_single_entry",
       version: 1,
-      catalogRevision: 5,
+      catalogRevision: 6,
     });
     assert.match(invocationAudit.capability?.catalogHash ?? "", /^[a-f0-9]{64}$/);
     assert.deepEqual(invocationAudit.invocation && {
@@ -394,6 +399,29 @@ test("database candidate apply and revert preserve version heads atomically", as
       arguments: { instruction: "用同一个幂等键提交不同要求" },
     }, testTaskQueue), /这个幂等键已经用于其他调用/);
     assert.deepEqual(enqueuedTaskIds, [invokedTask.id]);
+    await prisma.agentConversation.create({ data: { id: ids.conversation, ownerUserId: ids.user, projectId: ids.project, title: "重试卡片测试" } });
+    await prisma.message.create({
+      data: {
+        id: ids.retryMessage,
+        ownerUserId: ids.user,
+        projectId: ids.project,
+        conversationId: ids.conversation,
+        role: MessageRole.AGENT,
+        kind: MessageKind.FAILED,
+        content: "生成失败",
+        metadata: { retryable: true },
+      },
+    });
+    const retriedTask = await invokeTaskCapability({
+      ...taskInvocation,
+      conversationId: ids.conversation,
+      replacementMessageId: ids.retryMessage,
+      idempotencyKey: `semantic-capability-retry:${suffix}`,
+    }, testTaskQueue);
+    const retriedMessage = await prisma.message.findUniqueOrThrow({ where: { id: ids.retryMessage } });
+    assert.equal(await prisma.message.count({ where: { conversationId: ids.conversation } }), 1);
+    assert.equal(retriedMessage.kind, MessageKind.TASK);
+    assert.equal((retriedMessage.metadata as { taskId?: string }).taskId, retriedTask.id);
     const frameContext = await buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,
@@ -435,7 +463,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     const assetContext = await buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,
-      taskType: "asset_parse",
+      taskType: "asset_image_generate",
       instruction: "创建一个符合漫画基线的新角色",
       scope: "reference_only",
       selection: { type: "none", pageId: document.units[0].id },
@@ -487,6 +515,8 @@ test("database candidate apply and revert preserve version heads atomically", as
       ownerUserId: ids.user,
       projectId: ids.project,
       type: TaskType.DIALOGUE,
+      capabilityId: "dialogue.generate",
+      capabilityVersion: 1,
       status: TaskStatus.SUCCEEDED,
       idempotencyKey: `integration:${suffix}`,
       baseRevision: 1,
@@ -544,7 +574,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal((await prisma.storyboardBeat.findUniqueOrThrow({ where: { id: ids.storyboardBeat } })).currentVersionNumber, 1);
     assert.equal((await prisma.candidate.findUniqueOrThrow({ where: { id: ids.candidate } })).status, CandidateStatus.REVERTED);
 
-    await prisma.canvasAssetListItem.create({ data: { ownerUserId: ids.user, projectId: ids.project, assetId: ids.asset, displayName: "测试角色", displayKind: AssetKind.CHARACTER } });
+    await prisma.canvasAssetListItem.create({ data: { ownerUserId: ids.user, projectId: ids.project, assetId: ids.asset, displayName: "测试角色" } });
     const placement = await prisma.canvasReferencePlacement.create({ data: { ownerUserId: ids.user, projectId: ids.project, assetId: ids.asset, assetVersionId: ids.assetV1, x: 120, y: 80 } });
     const archived = await archiveAssetFamily(ids.user, ids.assetVariant);
     assert.equal(archived.id, ids.asset);
@@ -569,10 +599,10 @@ test("database candidate apply and revert preserve version heads atomically", as
       await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: { in: copiedProjectIds } } } });
       await prisma.storyboardBeat.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
       await prisma.canvasAssetListItem.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
-      await prisma.assetImage.deleteMany({ where: { asset: { projectId: { in: copiedProjectIds } } } });
-      await prisma.assetVersion.deleteMany({ where: { asset: { projectId: { in: copiedProjectIds } } } });
-      await prisma.asset.updateMany({ where: { projectId: { in: copiedProjectIds } }, data: { variantOfAssetId: null } });
-      await prisma.asset.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
+      await prisma.assetImage.deleteMany({ where: { asset: { comicId: copiedComicId } } });
+      await prisma.assetVersion.deleteMany({ where: { asset: { comicId: copiedComicId } } });
+      await prisma.asset.updateMany({ where: { comicId: copiedComicId }, data: { variantOfAssetId: null } });
+      await prisma.asset.deleteMany({ where: { comicId: copiedComicId } });
       await prisma.workingRevision.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
       await prisma.project.deleteMany({ where: { id: { in: copiedProjectIds } } });
       await prisma.chapter.deleteMany({ where: { comicId: copiedComicId } });
@@ -582,15 +612,17 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.candidate.deleteMany({ where: { projectId: ids.project } });
     await prisma.generationAttempt.deleteMany({ where: { task: { projectId: ids.project } } });
     await prisma.generationTask.deleteMany({ where: { projectId: ids.project } });
+    await prisma.message.deleteMany({ where: { conversationId: ids.conversation } });
+    await prisma.agentConversation.deleteMany({ where: { id: ids.conversation } });
     await prisma.storyboardBeatVersion.deleteMany({ where: { storyboardBeat: { projectId: ids.project } } });
     await prisma.storyboardBeat.deleteMany({ where: { projectId: ids.project } });
     await prisma.canvasReferencePlacement.deleteMany({ where: { projectId: ids.project } });
     await prisma.canvasAssetListItem.deleteMany({ where: { projectId: ids.project } });
-    await prisma.externalAssetUpload.deleteMany({ where: { asset: { projectId: ids.project } } });
-    await prisma.assetImage.deleteMany({ where: { asset: { projectId: ids.project } } });
-    await prisma.assetVersion.deleteMany({ where: { asset: { projectId: ids.project } } });
-    await prisma.asset.updateMany({ where: { projectId: ids.project }, data: { variantOfAssetId: null } });
-    await prisma.asset.deleteMany({ where: { projectId: ids.project } });
+    await prisma.externalAssetUpload.deleteMany({ where: { asset: { comicId: ids.comic } } });
+    await prisma.assetImage.deleteMany({ where: { asset: { comicId: ids.comic } } });
+    await prisma.assetVersion.deleteMany({ where: { asset: { comicId: ids.comic } } });
+    await prisma.asset.updateMany({ where: { comicId: ids.comic }, data: { variantOfAssetId: null } });
+    await prisma.asset.deleteMany({ where: { comicId: ids.comic } });
     await prisma.workingRevision.deleteMany({ where: { projectId: ids.project } });
     await prisma.project.deleteMany({ where: { id: ids.project } });
     await prisma.chapter.deleteMany({ where: { id: ids.chapter } });
@@ -602,7 +634,7 @@ test("database candidate apply and revert preserve version heads atomically", as
   }
 });
 
-test("local task runner recovers interrupted and cancel-requested tasks from SQLite", async () => {
+test("local task runner recovers interrupted tasks and preserves canceled tasks in SQLite", async () => {
   await initializeDatabaseConnection();
   const suffix = randomUUID();
   const ids = {
@@ -623,6 +655,8 @@ test("local task runner recovers interrupted and cancel-requested tasks from SQL
       ownerUserId: ids.user,
       projectId: ids.project,
       type: TaskType.STORYBOARD,
+      capabilityId: "storyboard.edit_single_entry",
+      capabilityVersion: 1,
       baseRevision: 1,
       scope: "selected_comic_frame",
       target: { type: "comic_frame", id: "frame-1" },
@@ -632,7 +666,7 @@ test("local task runner recovers interrupted and cancel-requested tasks from SQL
       model: "test",
     } as const;
     await prisma.generationTask.create({ data: { ...taskData, id: ids.runningTask, status: TaskStatus.RUNNING, idempotencyKey: `runner:running:${suffix}`, attempts: { create: { attempt: 1, status: TaskStatus.RUNNING } } } });
-    await prisma.generationTask.create({ data: { ...taskData, id: ids.canceledTask, status: TaskStatus.CANCEL_REQUESTED, idempotencyKey: `runner:canceled:${suffix}` } });
+    await prisma.generationTask.create({ data: { ...taskData, id: ids.canceledTask, status: TaskStatus.CANCELED, idempotencyKey: `runner:canceled:${suffix}` } });
 
     await runner.start();
 

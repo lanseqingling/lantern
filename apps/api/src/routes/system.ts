@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "@lantern/server/db";
 import { localTaskRunner } from "@lantern/agent-runtime/local-task-runner";
+import { getGlobalSettings, updateGlobalSettings, updateSettingsSchema } from "@lantern/server/settings-service";
 import { currentUser, ok } from "../http";
 
 export function registerSystemRoutes(app: FastifyInstance) {
@@ -10,4 +11,14 @@ export function registerSystemRoutes(app: FastifyInstance) {
   });
 
   app.get("/v1/auth/me", async (request) => ok(request, await currentUser(request)));
+
+  app.get("/v1/settings", async (request) => {
+    await currentUser(request);
+    return ok(request, getGlobalSettings());
+  });
+
+  app.patch("/v1/settings", async (request) => {
+    await currentUser(request);
+    return ok(request, await updateGlobalSettings(updateSettingsSchema.parse(request.body)));
+  });
 }

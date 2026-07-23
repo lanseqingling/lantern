@@ -68,7 +68,7 @@ export async function prepareExternalAssetUpload(
       ownerUserId,
       archivedAt: null,
       libraryStatus: AssetLibraryStatus.LIBRARY,
-      project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+      comic: { archivedAt: null },
     },
     select: { id: true },
   });

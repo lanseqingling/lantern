@@ -144,7 +144,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     id: "asset.generate_character_or_scene",
     version: 1,
     execution: "asynchronous",
-    taskType: "asset_parse",
+    taskType: "asset_image_generate",
     description: "根据用户明确的生成要求创建一个角色或场景资产图片候选。讨论、设计或完善设定但未要求生成图片、卡片或资产时不调用。",
     inputSchema: assetGenerationInputSchema,
     outputSchema: taskOutputSchema,
@@ -162,7 +162,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 5;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 6;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });

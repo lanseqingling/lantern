@@ -1,5 +1,6 @@
 import {
   AssetKind,
+  AssetVersionOrigin,
   CandidateKind,
   CandidateStatus,
   MessageKind,
@@ -36,7 +37,7 @@ function creativeBaseline(context: AgentContextSnapshot) {
       id: context.comic.id,
       title: context.comic.title,
       format: context.comic.format,
-      readingDirection: context.comic.readingDirection,
+      defaultReadingDirection: context.comic.defaultReadingDirection,
     },
     visualStyle: {
       summary: context.comic.styleSummary,
@@ -70,7 +71,7 @@ async function persistCandidate({ task, ...draft }: CandidateDraft & { task: Awa
   await prisma.generationTask.update({ where: { id: task.id }, data: { progress: 72 } });
   return prisma.$transaction(async (tx) => {
     const fresh = await tx.generationTask.findUnique({ where: { id: task.id } });
-    if (!fresh || fresh.status === TaskStatus.CANCEL_REQUESTED || fresh.status === TaskStatus.CANCELED) {
+    if (!fresh || fresh.status === TaskStatus.CANCELED) {
       if (fresh && fresh.status !== TaskStatus.CANCELED) {
         await tx.generationTask.update({ where: { id: fresh.id }, data: { status: TaskStatus.CANCELED, completedAt: new Date() } });
       }
@@ -204,7 +205,7 @@ async function referenceDataUrls(context: AgentContextSnapshot, ownerUserId: str
   const versions = await prisma.assetVersion.findMany({
     where: {
       id: { in: preferredVersionIds.slice(0, 3) },
-      asset: { ownerUserId, project: { chapter: { comicId: context.comic.id, archivedAt: null } } },
+      asset: { ownerUserId, comicId: context.comic.id, comic: { archivedAt: null } },
     },
   });
   const urls: string[] = [];
@@ -251,12 +252,12 @@ async function processFrameImage(task: Awaited<ReturnType<typeof loadTask>>) {
   const stagingAsset = await prisma.asset.create({
     data: {
       ownerUserId: task.ownerUserId,
-      projectId: task.projectId,
+      comicId: context.comic.id,
       kind: AssetKind.GENERATED_IMAGE,
       name: `${context.selection.label ?? "选中画格"} · 未确认格内图片`,
       description: storyboardBeat?.description ?? taskInstruction(task),
       archivedAt: new Date(),
-      versions: { create: { version: 1, objectKey: stored.objectKey, contentType: stored.contentType, byteSize: stored.byteSize, width: stored.width, height: stored.height, checksum: stored.checksum, source: "frame_image_candidate", sourceTaskId: task.id } },
+      versions: { create: { version: 1, objectKey: stored.objectKey, contentType: stored.contentType, byteSize: stored.byteSize, width: stored.width, height: stored.height, checksum: stored.checksum, origin: AssetVersionOrigin.GENERATED, sourceTaskId: task.id } },
     },
     include: { versions: true },
   });
@@ -308,7 +309,7 @@ async function processFrameImage(task: Awaited<ReturnType<typeof loadTask>>) {
   });
 }
 
-async function processAssetParse(task: Awaited<ReturnType<typeof loadTask>>) {
+async function processAssetImageGeneration(task: Awaited<ReturnType<typeof loadTask>>) {
   const context = agentContextSnapshotSchema.parse(task.contextSnapshot);
   const draft = await new DeepSeekProvider().generateJson({
     schema: assetDraftSchema,
@@ -319,7 +320,7 @@ kind 只能是 character 或 scene。description 必须完整包含后续生成�
     user: JSON.stringify({ instruction: taskInstruction(task), creativeBaseline: creativeBaseline(context), relevantAssets: context.assets, recentConversation: context.recentConversation }),
   });
   const baselinePrompt = [
-    `漫画：${context.comic.title}（${context.comic.format}，阅读方向 ${context.comic.readingDirection}）`,
+    `漫画：${context.comic.title}（${context.comic.format}，默认阅读方向 ${context.comic.defaultReadingDirection}）`,
     context.comic.summary ? `故事核心：${context.comic.summary}` : "",
     context.comic.worldSummary ? `世界设定：${context.comic.worldSummary}` : "",
     ...context.comic.settings.map((setting) => `${setting.title}：${setting.content}`),
@@ -339,12 +340,12 @@ kind 只能是 character 或 scene。description 必须完整包含后续生成�
     const created = await tx.asset.create({
       data: {
         ownerUserId: task.ownerUserId,
-        projectId: task.projectId,
+        comicId: context.comic.id,
         kind: AssetKind.GENERATED_IMAGE,
         name: `${draft.name} · 未确认图片`,
         description: draft.description,
         archivedAt: new Date(),
-        versions: { create: { version: 1, objectKey: stored.objectKey, contentType: stored.contentType, byteSize: stored.byteSize, width: stored.width, height: stored.height, checksum: stored.checksum, source: "asset_candidate", sourceTaskId: task.id } },
+        versions: { create: { version: 1, objectKey: stored.objectKey, contentType: stored.contentType, byteSize: stored.byteSize, width: stored.width, height: stored.height, checksum: stored.checksum, origin: AssetVersionOrigin.GENERATED, sourceTaskId: task.id } },
       },
       include: { versions: true },
     });
@@ -366,7 +367,7 @@ kind 只能是 character 或 scene。description 必须完整包含后续生成�
 
 export async function processGenerationTask(taskId: string) {
   const task = await loadTask(taskId);
-  if (task.status === TaskStatus.CANCELED || task.status === TaskStatus.CANCEL_REQUESTED) return;
+  if (task.status === TaskStatus.CANCELED) return;
   const attemptCount = await prisma.generationAttempt.count({ where: { taskId } });
   const claimed = await prisma.$transaction(async (tx) => {
     const result = await tx.generationTask.updateMany({
@@ -383,8 +384,8 @@ export async function processGenerationTask(taskId: string) {
       ? await processStoryboard(task)
       : task.type === TaskType.FRAME_IMAGE_GENERATE
         ? await processFrameImage(task)
-      : task.type === TaskType.ASSET_PARSE
-        ? await processAssetParse(task)
+      : task.type === TaskType.ASSET_IMAGE_GENERATE
+        ? await processAssetImageGeneration(task)
         : (() => { throw new AppError("unsupported_task", "该任务类型尚未开放。", 422); })();
     await prisma.generationAttempt.update({
       where: { taskId_attempt: { taskId, attempt: attemptCount + 1 } },

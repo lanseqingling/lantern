@@ -146,19 +146,16 @@ export async function resolveResourceReference(
   }
 
   const asset = await prisma.asset.findFirst({
-    where: { id: parsed.id, ownerUserId, archivedAt: null, project: { chapter: { archivedAt: null, comic: { archivedAt: null } } } },
-    select: { id: true, name: true, projectId: true, project: { select: { chapter: { select: { id: true, comicId: true } } } } },
+    where: { id: parsed.id, ownerUserId, archivedAt: null, comic: { archivedAt: null } },
+    select: { id: true, name: true, comicId: true },
   });
-  if (!asset || (parsed.expectedComicId && parsed.expectedComicId !== asset.project.chapter.comicId)) throw notFound(parsed.type);
+  if (!asset || (parsed.expectedComicId && parsed.expectedComicId !== asset.comicId)) throw notFound(parsed.type);
   return {
     type: "asset",
     id: asset.id,
     canonicalUri: canonicalUri("asset", asset.id),
     displayName: asset.name,
-    comicId: asset.project.chapter.comicId,
-    chapterId: asset.project.chapter.id,
-    projectId: asset.projectId,
-    workingRevision: await latestWorkingRevision(asset.projectId),
+    comicId: asset.comicId,
   };
 }
 

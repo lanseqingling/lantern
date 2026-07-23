@@ -13,9 +13,9 @@ enum ComicFormat {
   FOUR_PANEL
 }
 
-enum CanvasPageMode {
-  SINGLE
-  SPREAD
+enum ReadingDirection {
+  LTR
+  RTL
 }
 
 enum AssetKind {
@@ -54,7 +54,7 @@ enum TaskType {
   PAGE_LAYOUT
   FRAME_IMAGE_GENERATE
   FRAME_IMAGE_REFINE
-  ASSET_PARSE
+  ASSET_IMAGE_GENERATE
   DIALOGUE
   EXPORT
 }
@@ -65,8 +65,15 @@ enum TaskStatus {
   RUNNING
   SUCCEEDED
   FAILED
-  CANCEL_REQUESTED
   CANCELED
+}
+
+enum AssetVersionOrigin {
+  UPLOAD
+  EXTERNAL_UPLOAD
+  GENERATED
+  CHAPTER_ARCHIVE_IMPORT
+  MIGRATION
 }
 
 enum CandidateKind {
@@ -122,27 +129,27 @@ model User {
 }
 
 model Comic {
-  id               String         @id @default(cuid())
-  ownerUserId      String
-  title            String
-  summary          String         @default("")
-  worldSummary     String         @default("")
-  format           ComicFormat    @default(PAGE)
-  canvasPageMode   CanvasPageMode @default(SINGLE)
-  readingDirection String         @default("ltr")
-  styleSummary     String         @default("")
-  coverObjectKey   String?
-  coverContentType String?
-  coverWidth       Int?
-  coverHeight      Int?
-  isExample        Boolean        @default(false)
-  archivedAt       DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                      String           @id @default(cuid())
+  ownerUserId             String
+  title                   String
+  summary                 String           @default("")
+  worldSummary            String           @default("")
+  format                  ComicFormat      @default(PAGE)
+  defaultReadingDirection ReadingDirection @default(LTR)
+  styleSummary            String           @default("")
+  coverObjectKey          String?
+  coverContentType        String?
+  coverWidth              Int?
+  coverHeight             Int?
+  isExample               Boolean          @default(false)
+  archivedAt              DateTime?
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
 
   owner    User           @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   chapters Chapter[]
   settings ComicSetting[]
+  assets   Asset[]
 
   @@index([ownerUserId, archivedAt])
 }
@@ -196,7 +203,6 @@ model Project {
   id          String   @id @default(cuid())
   ownerUserId String
   chapterId   String   @unique
-  settings    Json     @default(dbgenerated("'{}'"))
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -204,7 +210,6 @@ model Project {
   chapter          Chapter                    @relation(fields: [chapterId], references: [id], onDelete: Restrict)
   workingRevisions WorkingRevision[]
   storyboardBeats  StoryboardBeat[]
-  assets           Asset[]
   canvasAssetItems CanvasAssetListItem[]
   conversations    AgentConversation[]
   placements       CanvasReferencePlacement[]
@@ -224,7 +229,6 @@ model WorkingRevision {
   storyboardBeatVersionHeads Json     @default(dbgenerated("'{}'"))
   assetVersionHeads          Json     @default(dbgenerated("'{}'"))
   changeSet                  Json?
-  sourceCandidateId          String?
   createdAt                  DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
@@ -285,7 +289,7 @@ model StoryboardBeatVersion {
 model Asset {
   id                   String             @id @default(cuid())
   ownerUserId          String
-  projectId            String
+  comicId              String
   kind                 AssetKind
   name                 String
   description          String             @default("")
@@ -299,7 +303,7 @@ model Asset {
   updatedAt            DateTime           @updatedAt
 
   owner           User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
-  project         Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  comic           Comic                      @relation(fields: [comicId], references: [id], onDelete: Restrict)
   versions        AssetVersion[]
   images          AssetImage[]
   variantOf       Asset?                     @relation("AssetVariants", fields: [variantOfAssetId], references: [id], onDelete: Restrict)
@@ -308,7 +312,7 @@ model Asset {
   canvasListItems CanvasAssetListItem[]
   externalUploads ExternalAssetUpload[]
 
-  @@index([ownerUserId, projectId, kind, archivedAt])
+  @@index([ownerUserId, comicId, kind, archivedAt])
   @@index([variantOfAssetId, variantSortIndex, createdAt])
 }
 
@@ -321,7 +325,6 @@ model CanvasAssetListItem {
   projectId   String
   assetId     String
   displayName String
-  displayKind AssetKind
   sortIndex   Int       @default(0)
   pinned      Boolean   @default(false)
   hiddenAt    DateTime?
@@ -337,18 +340,18 @@ model CanvasAssetListItem {
 }
 
 model AssetVersion {
-  id           String   @id @default(cuid())
+  id           String             @id @default(cuid())
   assetId      String
   version      Int
-  objectKey    String?  @unique
+  objectKey    String?            @unique
   contentType  String?
   byteSize     Int?
   width        Int?
   height       Int?
   checksum     String?
-  source       String
+  origin       AssetVersionOrigin
   sourceTaskId String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime           @default(now())
 
   asset      Asset                      @relation(fields: [assetId], references: [id], onDelete: Restrict)
   imageSlot  AssetImage?
@@ -453,6 +456,8 @@ model GenerationTask {
   ownerUserId       String
   projectId         String
   conversationId    String?
+  capabilityId      String
+  capabilityVersion Int
   type              TaskType
   status            TaskStatus @default(CREATED)
   idempotencyKey    String

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ComicFormat, TaskStatus, type Prisma } from "@prisma/client";
+import { ComicFormat, ReadingDirection, TaskStatus, type Prisma } from "@prisma/client";
 import type { ComicDocument } from "@lantern/shared";
 import type { UploadedImage } from "./asset-service";
 import { prisma } from "./db";
@@ -42,7 +42,7 @@ function publicComic(comic: ComicWithChapters) {
     worldSummary: comic.worldSummary,
     styleSummary: comic.styleSummary,
     format: comic.format.toLowerCase(),
-    canvasPageMode: comic.canvasPageMode.toLowerCase(),
+    defaultReadingDirection: comic.defaultReadingDirection.toLowerCase(),
     isExample: comic.isExample,
     coverUrl: comicCoverPath(comic),
     chapters: comic.chapters.map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title, summary: chapter.summary, coverUrl: chapterCoverPath(chapter), updatedAt: chapter.updatedAt.toISOString() })),
@@ -93,16 +93,16 @@ export async function getComicChapter(ownerUserId: string, chapterId: string) {
   };
 }
 
-export async function createComic(ownerUserId: string, input: { title: string; summary: string; worldSummary?: string; styleSummary?: string; format: "page" | "vertical" | "four_panel"; canvasPageMode: "single" | "spread" }) {
+export async function createComic(ownerUserId: string, input: { title: string; summary: string; worldSummary?: string; styleSummary?: string; format: "page" | "vertical" | "four_panel"; defaultReadingDirection?: "ltr" | "rtl" }) {
   const format = ({ page: ComicFormat.PAGE, vertical: ComicFormat.VERTICAL, four_panel: ComicFormat.FOUR_PANEL } as const)[input.format];
-  const comic = await prisma.comic.create({ data: { ownerUserId, title: input.title, summary: input.summary, worldSummary: input.worldSummary ?? "", styleSummary: input.styleSummary ?? "", format, canvasPageMode: input.canvasPageMode === "spread" ? "SPREAD" : "SINGLE" } });
+  const comic = await prisma.comic.create({ data: { ownerUserId, title: input.title, summary: input.summary, worldSummary: input.worldSummary ?? "", styleSummary: input.styleSummary ?? "", format, defaultReadingDirection: input.defaultReadingDirection === "rtl" ? ReadingDirection.RTL : ReadingDirection.LTR } });
   return { comic: { id: comic.id, title: comic.title } };
 }
 
-export async function updateComic(ownerUserId: string, comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; canvasPageMode?: "single" | "spread" }) {
+export async function updateComic(ownerUserId: string, comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; defaultReadingDirection?: "ltr" | "rtl" }) {
   const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
   if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
-  return prisma.comic.update({ where: { id: comic.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}), ...(input.worldSummary !== undefined ? { worldSummary: input.worldSummary } : {}), ...(input.styleSummary !== undefined ? { styleSummary: input.styleSummary } : {}), ...(input.canvasPageMode !== undefined ? { canvasPageMode: input.canvasPageMode === "spread" ? "SPREAD" : "SINGLE" } : {}) } });
+  return prisma.comic.update({ where: { id: comic.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}), ...(input.worldSummary !== undefined ? { worldSummary: input.worldSummary } : {}), ...(input.styleSummary !== undefined ? { styleSummary: input.styleSummary } : {}), ...(input.defaultReadingDirection !== undefined ? { defaultReadingDirection: input.defaultReadingDirection === "rtl" ? ReadingDirection.RTL : ReadingDirection.LTR } : {}) } });
 }
 
 export async function getComicCover(ownerUserId: string, comicId: string) {
@@ -179,7 +179,7 @@ export async function archiveComicChapter(ownerUserId: string, comicId: string, 
   return { id: chapter.id, deleted: true };
 }
 
-function blankComicDocument(comicId: string, chapterId: string, format: "page" | "vertical" | "four_panel"): ComicDocument {
+function blankComicDocument(comicId: string, chapterId: string, format: "page" | "vertical" | "four_panel", defaultReadingDirection: ReadingDirection): ComicDocument {
   return {
     protocolVersion: "lcd-0.4",
     comicId,
@@ -187,7 +187,7 @@ function blankComicDocument(comicId: string, chapterId: string, format: "page" |
     format,
     reading: {
       viewer: format === "vertical" ? "scroll" : format === "four_panel" ? "unit" : "paged",
-      direction: format === "vertical" ? "ttb" : "ltr",
+      direction: format === "vertical" ? "ttb" : defaultReadingDirection.toLowerCase() as "ltr" | "rtl",
       unitOrder: [`${chapterId}-page-1`],
       showPageNumber: format === "page",
       gap: 24,
@@ -207,16 +207,16 @@ function blankComicDocument(comicId: string, chapterId: string, format: "page" |
   };
 }
 
-export async function createChapterWorkspace(ownerUserId: string, comic: { id: string; format: ComicFormat }, number: number, title: string, summary: string) {
+export async function createChapterWorkspace(ownerUserId: string, comic: { id: string; format: ComicFormat; defaultReadingDirection: ReadingDirection }, number: number, title: string, summary: string) {
   return prisma.$transaction(async (tx) => {
     const chapter = await tx.chapter.create({ data: { ownerUserId, comicId: comic.id, number, title, summary } });
-    const project = await tx.project.create({ data: { ownerUserId, chapterId: chapter.id, settings: { generationStyle: "", defaultImageSize: "1024*1024" } } });
+    const project = await tx.project.create({ data: { ownerUserId, chapterId: chapter.id } });
     const format = comic.format.toLowerCase() as "page" | "vertical" | "four_panel";
     await tx.workingRevision.create({
       data: {
         projectId: project.id,
         revision: 1,
-        document: blankComicDocument(comic.id, chapter.id, format) as unknown as Prisma.InputJsonValue,
+        document: blankComicDocument(comic.id, chapter.id, format, comic.defaultReadingDirection) as unknown as Prisma.InputJsonValue,
         storyboardBeats: [],
         storyboardBeatVersionHeads: {},
         assetVersionHeads: {},
@@ -259,6 +259,11 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
     where: { id: sourceComicId, ownerUserId, archivedAt: null },
     include: {
       settings: { where: { archivedAt: null }, orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }] },
+      assets: {
+        where: { archivedAt: null },
+        include: { versions: { orderBy: { version: "asc" } }, images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }] } },
+        orderBy: { createdAt: "asc" },
+      },
       chapters: {
         where: { archivedAt: null },
         orderBy: { number: "asc" },
@@ -268,8 +273,7 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
               workingRevisions: { orderBy: { revision: "asc" } },
               snapshots: { orderBy: { createdAt: "asc" } },
               storyboardBeats: { where: { archivedAt: null }, include: { versions: { orderBy: { version: "asc" } } }, orderBy: { createdAt: "asc" } },
-              assets: { where: { archivedAt: null }, include: { versions: { orderBy: { version: "asc" } }, images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }] } }, orderBy: { createdAt: "asc" } },
-              canvasAssetItems: { include: { asset: { include: { versions: { orderBy: { version: "asc" } }, images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }] } } } }, orderBy: { createdAt: "asc" } },
+              canvasAssetItems: { orderBy: { createdAt: "asc" } },
               placements: { orderBy: { createdAt: "asc" } },
             },
           },
@@ -281,6 +285,11 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
 
   const copiedComicId = randomUUID();
   const idMap = new Map<string, string>([[source.id, copiedComicId]]);
+  for (const asset of source.assets) {
+    idMap.set(asset.id, randomUUID());
+    for (const version of asset.versions) idMap.set(version.id, randomUUID());
+    for (const image of asset.images) idMap.set(image.id, randomUUID());
+  }
   for (const chapter of source.chapters) {
     idMap.set(chapter.id, randomUUID());
     if (!chapter.project) continue;
@@ -289,26 +298,11 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
       idMap.set(beat.id, randomUUID());
       for (const version of beat.versions) idMap.set(version.id, randomUUID());
     }
-    for (const asset of chapter.project.assets) {
-      idMap.set(asset.id, randomUUID());
-      for (const version of asset.versions) idMap.set(version.id, randomUUID());
-      for (const image of asset.images) idMap.set(image.id, randomUUID());
-    }
-    for (const item of chapter.project.canvasAssetItems) {
-      idMap.set(item.id, randomUUID());
-      if (!idMap.has(item.asset.id)) {
-        idMap.set(item.asset.id, randomUUID());
-        for (const version of item.asset.versions) idMap.set(version.id, randomUUID());
-        for (const image of item.asset.images) idMap.set(image.id, randomUUID());
-      }
-    }
+    for (const item of chapter.project.canvasAssetItems) idMap.set(item.id, randomUUID());
   }
 
   const objectNamespace = `comic-copies/${copiedComicId}`;
-  const sourceAssets = source.chapters.flatMap((chapter) => {
-    if (!chapter.project) return [];
-    return [...chapter.project.assets, ...chapter.project.canvasAssetItems.map((item) => item.asset)];
-  }).filter((asset, index, assets) => assets.findIndex((item) => item.id === asset.id) === index);
+  const sourceAssets = source.assets;
   const sourceAssetVersions = sourceAssets.flatMap((asset) => asset.versions);
   const [comicCover, chapterCoverEntries, assetObjectEntries] = await Promise.all([
     source.coverObjectKey ? copyImageObject(source.coverObjectKey, `${objectNamespace}/covers`) : undefined,
@@ -327,8 +321,7 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
         summary: source.summary,
         worldSummary: source.worldSummary,
         format: source.format,
-        canvasPageMode: source.canvasPageMode,
-        readingDirection: source.readingDirection,
+        defaultReadingDirection: source.defaultReadingDirection,
         styleSummary: source.styleSummary,
         coverObjectKey: comicCover?.objectKey,
         coverContentType: comicCover?.contentType,
@@ -348,6 +341,40 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
           contextEnabled: setting.contextEnabled,
           sortIndex: setting.sortIndex,
         })),
+      });
+    }
+
+    for (const sourceAsset of sourceAssets) {
+      await tx.asset.create({
+        data: {
+          id: idMap.get(sourceAsset.id)!,
+          ownerUserId,
+          comicId: copiedComicId,
+          kind: sourceAsset.kind,
+          name: sourceAsset.name,
+          description: sourceAsset.description,
+          libraryStatus: sourceAsset.libraryStatus,
+          currentVersionNumber: sourceAsset.currentVersionNumber,
+          variantLabel: sourceAsset.variantLabel,
+          variantSortIndex: sourceAsset.variantSortIndex,
+          versions: {
+            create: sourceAsset.versions.map((version) => {
+              const copiedObject = copiedAssetObjects.get(version.id);
+              return {
+                id: idMap.get(version.id)!,
+                version: version.version,
+                objectKey: copiedObject?.objectKey,
+                contentType: copiedObject?.contentType ?? version.contentType,
+                byteSize: copiedObject?.byteSize ?? version.byteSize,
+                width: copiedObject?.width ?? version.width,
+                height: copiedObject?.height ?? version.height,
+                checksum: copiedObject?.checksum ?? version.checksum,
+                origin: version.origin,
+                sourceTaskId: null,
+              };
+            }),
+          },
+        },
       });
     }
 
@@ -371,7 +398,7 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
       const sourceProject = sourceChapter.project;
       if (!sourceProject) continue;
       const copiedProjectId = idMap.get(sourceProject.id)!;
-      await tx.project.create({ data: { id: copiedProjectId, ownerUserId, chapterId: copiedChapterId, settings: remapCopiedJson(sourceProject.settings, idMap) } });
+      await tx.project.create({ data: { id: copiedProjectId, ownerUserId, chapterId: copiedChapterId } });
 
       for (const sourceBeat of sourceProject.storyboardBeats) {
         await tx.storyboardBeat.create({
@@ -382,38 +409,9 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
         });
       }
 
-      for (const sourceAsset of sourceProject.assets) {
-        await tx.asset.create({
-          data: {
-            id: idMap.get(sourceAsset.id)!, ownerUserId, projectId: copiedProjectId, kind: sourceAsset.kind, name: sourceAsset.name,
-            description: sourceAsset.description, libraryStatus: sourceAsset.libraryStatus,
-            currentVersionNumber: sourceAsset.currentVersionNumber, variantLabel: sourceAsset.variantLabel, variantSortIndex: sourceAsset.variantSortIndex,
-            versions: { create: sourceAsset.versions.map((version) => {
-              const copiedObject = copiedAssetObjects.get(version.id);
-              return { id: idMap.get(version.id)!, version: version.version, objectKey: copiedObject?.objectKey, contentType: copiedObject?.contentType ?? version.contentType, byteSize: copiedObject?.byteSize ?? version.byteSize, width: copiedObject?.width ?? version.width, height: copiedObject?.height ?? version.height, checksum: copiedObject?.checksum ?? version.checksum, source: version.source, sourceTaskId: null };
-            }) },
-          },
-        });
-      }
-
-      for (const sourceItem of sourceProject.canvasAssetItems) {
-        if (sourceProject.assets.some((asset) => asset.id === sourceItem.assetId)) continue;
-        await tx.asset.create({
-          data: {
-            id: idMap.get(sourceItem.assetId)!, ownerUserId, projectId: copiedProjectId, kind: sourceItem.asset.kind, name: sourceItem.asset.name,
-            description: sourceItem.asset.description, libraryStatus: sourceItem.asset.libraryStatus,
-            currentVersionNumber: sourceItem.asset.currentVersionNumber, variantLabel: sourceItem.asset.variantLabel, variantSortIndex: sourceItem.asset.variantSortIndex,
-            versions: { create: sourceItem.asset.versions.map((version) => {
-              const copiedObject = copiedAssetObjects.get(version.id);
-              return { id: idMap.get(version.id)!, version: version.version, objectKey: copiedObject?.objectKey, contentType: copiedObject?.contentType ?? version.contentType, byteSize: copiedObject?.byteSize ?? version.byteSize, width: copiedObject?.width ?? version.width, height: copiedObject?.height ?? version.height, checksum: copiedObject?.checksum ?? version.checksum, source: version.source, sourceTaskId: null };
-            }) },
-          },
-        });
-      }
-
       for (const sourceItem of sourceProject.canvasAssetItems) {
         await tx.canvasAssetListItem.create({
-          data: { id: idMap.get(sourceItem.id)!, ownerUserId, projectId: copiedProjectId, assetId: idMap.get(sourceItem.assetId)!, displayName: sourceItem.displayName, displayKind: sourceItem.displayKind, sortIndex: sourceItem.sortIndex, pinned: sourceItem.pinned, hiddenAt: sourceItem.hiddenAt },
+          data: { id: idMap.get(sourceItem.id)!, ownerUserId, projectId: copiedProjectId, assetId: idMap.get(sourceItem.assetId)!, displayName: sourceItem.displayName, sortIndex: sourceItem.sortIndex, pinned: sourceItem.pinned, hiddenAt: sourceItem.hiddenAt },
         });
       }
       for (const placement of sourceProject.placements) {
@@ -423,7 +421,7 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
       }
       for (const working of sourceProject.workingRevisions) {
         await tx.workingRevision.create({
-          data: { id: randomUUID(), projectId: copiedProjectId, revision: working.revision, document: remapCopiedJson(working.document, idMap), storyboardBeats: remapCopiedJson(working.storyboardBeats, idMap), storyboardBeatVersionHeads: remapCopiedJson(working.storyboardBeatVersionHeads, idMap), assetVersionHeads: remapCopiedJson(working.assetVersionHeads, idMap), changeSet: copiedChangeSet(working.changeSet, idMap), sourceCandidateId: null },
+          data: { id: randomUUID(), projectId: copiedProjectId, revision: working.revision, document: remapCopiedJson(working.document, idMap), storyboardBeats: remapCopiedJson(working.storyboardBeats, idMap), storyboardBeatVersionHeads: remapCopiedJson(working.storyboardBeatVersionHeads, idMap), assetVersionHeads: remapCopiedJson(working.assetVersionHeads, idMap), changeSet: copiedChangeSet(working.changeSet, idMap) },
         });
       }
       for (const snapshot of sourceProject.snapshots) {

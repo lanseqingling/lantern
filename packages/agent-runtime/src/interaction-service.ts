@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { MessageKind, MessageRole, type Prisma } from "@prisma/client";
 import { prisma } from "@lantern/server/db";
-import { AppError } from "@lantern/server/errors";
+import { getConfig } from "@lantern/server/config";
+import { AppError, providerConfigurationError } from "@lantern/server/errors";
 import { runAgentLoop, type AgentPlanner, type AgentTool } from "./agent-loop";
 import { compositionObservationSchema, loadWorkingCompositionObservation } from "./composition-observation";
 import { buildAgentContext } from "./context-builder";
@@ -43,6 +44,7 @@ export type AgentInteractionResult = {
 
 type AgentInteractionOptions = {
   existingUserMessageId?: string;
+  failureMessageId?: string;
 };
 
 function messageKind(decision: InteractionDecision) {
@@ -86,6 +88,8 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
   if (!conversation) throw new AppError("not_found", "当前对话不存在。", 404);
   const activeTask = await getActiveConversationTask(input.ownerUserId, conversation.id);
   if (activeTask) throw new AppError("task_in_progress", "当前会话已有任务运行中。可以继续编辑输入草稿，或先停止任务。", 409, { taskId: activeTask.id });
+  const config = getConfig();
+  if (config.TEXT_MODEL_PROVIDER !== "test" && !config.TEXT_MODEL_API_KEY) throw providerConfigurationError("text");
 
   const resolvedReferences = effectiveReferences(input);
 
@@ -140,7 +144,7 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
           id: planningSnapshot.comic.id,
           title: planningSnapshot.comic.title,
           format: planningSnapshot.comic.format,
-          readingDirection: planningSnapshot.comic.readingDirection,
+          defaultReadingDirection: planningSnapshot.comic.defaultReadingDirection,
         },
         storyCore: planningSnapshot.comic.summary,
         world: {
@@ -204,17 +208,34 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
     name: "present_interaction",
     async execute(rawDecision) {
       const decision = rawDecision as InteractionDecision;
-      await prisma.message.create({
-        data: {
-          ownerUserId: input.ownerUserId,
-          projectId: conversation.projectId,
-          conversationId: conversation.id,
-          role: MessageRole.AGENT,
-          kind: messageKind(decision),
-          content: decision.message,
-          metadata: decisionMetadata(decision, normalizedInput, plannerTraces),
-        },
-      });
+      const messageData = {
+        kind: messageKind(decision),
+        content: decision.message,
+        metadata: decisionMetadata(decision, normalizedInput, plannerTraces),
+      };
+      const replaced = options.failureMessageId
+        ? await prisma.message.updateMany({
+          where: {
+            id: options.failureMessageId,
+            ownerUserId: input.ownerUserId,
+            conversationId: conversation.id,
+            role: MessageRole.AGENT,
+            kind: MessageKind.FAILED,
+          },
+          data: messageData,
+        })
+        : undefined;
+      if (!replaced?.count) {
+        await prisma.message.create({
+          data: {
+            ownerUserId: input.ownerUserId,
+            projectId: conversation.projectId,
+            conversationId: conversation.id,
+            role: MessageRole.AGENT,
+            ...messageData,
+          },
+        });
+      }
       return { output: { decision } };
     },
   };
@@ -305,6 +326,7 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
         selection: targetSelection,
         explicitReferences: resolvedReferences,
         plannerTrace: plannerTraces,
+        replacementMessageId: options.failureMessageId,
         idempotencyKey: input.idempotencyKey,
       });
       return { output: { decision, task } };
@@ -326,17 +348,40 @@ export async function runAgentInteraction(input: AgentInteractionInput, options:
       },
     }) as AgentInteractionResult;
   } catch (error) {
-    await prisma.message.create({
-      data: {
-        ownerUserId: input.ownerUserId,
-        projectId: conversation.projectId,
-        conversationId: conversation.id,
-        role: MessageRole.AGENT,
-        kind: MessageKind.FAILED,
-        content: error instanceof AppError ? error.message : "Agent 暂时无法完成这次请求，工作稿没有改变。",
-        metadata: { turnId: userMessage.id, retryable: true },
-      },
-    });
+    const failureContent = error instanceof AppError ? error.message : "Agent 暂时无法完成这次请求，工作稿没有改变。";
+    if (options.failureMessageId) {
+      const existingFailure = await prisma.message.findFirst({
+        where: {
+          id: options.failureMessageId,
+          ownerUserId: input.ownerUserId,
+          conversationId: conversation.id,
+          role: MessageRole.AGENT,
+          kind: MessageKind.FAILED,
+        },
+      });
+      if (existingFailure) {
+        const metadata = existingFailure.metadata as Record<string, unknown>;
+        await prisma.message.update({
+          where: { id: existingFailure.id },
+          data: {
+            content: failureContent,
+            metadata: { ...metadata, turnId: userMessage.id, retryable: true, resolved: false } as Prisma.InputJsonValue,
+          },
+        });
+      }
+    } else {
+      await prisma.message.create({
+        data: {
+          ownerUserId: input.ownerUserId,
+          projectId: conversation.projectId,
+          conversationId: conversation.id,
+          role: MessageRole.AGENT,
+          kind: MessageKind.FAILED,
+          content: failureContent,
+          metadata: { turnId: userMessage.id, retryable: true },
+        },
+      });
+    }
     throw error;
   }
 }
@@ -378,10 +423,6 @@ export async function retryAgentInteraction(ownerUserId: string, failedMessageId
     explicitReferences,
     imageAttachments,
     idempotencyKey,
-  }, { existingUserMessageId: userMessage.id });
-  await prisma.message.update({
-    where: { id: failedMessage.id },
-    data: { metadata: { ...failedMetadata, resolved: true } as Prisma.InputJsonValue },
-  });
+  }, { existingUserMessageId: userMessage.id, failureMessageId: failedMessage.id });
   return result;
 }

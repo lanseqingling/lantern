@@ -7,7 +7,7 @@ export async function placeAssetOnCanvas(ownerUserId: string, projectId: string,
     const targetProject = await tx.project.findFirst({ where: { id: projectId, ownerUserId }, include: { chapter: { select: { comicId: true } } } });
     if (!targetProject) throw new AppError("not_found", "创作空间不存在。", 404);
     const asset = await tx.asset.findFirst({
-      where: { id: assetId, ownerUserId, archivedAt: null, project: { chapter: { comicId: targetProject.chapter.comicId, archivedAt: null } } },
+      where: { id: assetId, ownerUserId, archivedAt: null, comicId: targetProject.chapter.comicId },
       include: {
         images: { include: { assetVersion: true }, orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }], take: 1 },
         versions: { where: { objectKey: { not: null } }, orderBy: { version: "desc" }, take: 1 },
@@ -17,7 +17,7 @@ export async function placeAssetOnCanvas(ownerUserId: string, projectId: string,
     if (!asset || !version) throw new AppError("invalid_asset", "这个资产还没有可放到画布的确认图片。", 422);
     await tx.canvasAssetListItem.upsert({
       where: { projectId_assetId: { projectId: targetProject.id, assetId: asset.id } },
-      create: { ownerUserId, projectId: targetProject.id, assetId: asset.id, displayName: asset.name, displayKind: asset.kind },
+      create: { ownerUserId, projectId: targetProject.id, assetId: asset.id, displayName: asset.name },
       update: { hiddenAt: null },
     });
     return tx.canvasReferencePlacement.create({
@@ -48,7 +48,7 @@ export async function saveCanvasAssetToLibrary(ownerUserId: string, itemId: stri
     const kind = input.kind ? ({ character: AssetKind.CHARACTER, scene: AssetKind.SCENE, prop: AssetKind.PROP, reference_image: AssetKind.REFERENCE_IMAGE } as const)[input.kind] : item.asset.kind;
     const name = input.name?.trim().slice(0, 120) || item.asset.name;
     const asset = await tx.asset.update({ where: { id: item.assetId }, data: { libraryStatus: AssetLibraryStatus.LIBRARY, kind, name, ...(input.description !== undefined ? { description: input.description.trim().slice(0, 2000) } : {}) } });
-    await tx.canvasAssetListItem.update({ where: { id: item.id }, data: { displayName: name, displayKind: kind } });
+    await tx.canvasAssetListItem.update({ where: { id: item.id }, data: { displayName: name } });
     return { itemId: item.id, assetId: asset.id, libraryStatus: asset.libraryStatus.toLowerCase(), kind: asset.kind.toLowerCase() };
   });
 }

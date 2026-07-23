@@ -96,7 +96,7 @@ type ExternalTargetHandlePayload = z.infer<typeof externalTargetHandlePayloadSch
 export const externalProjectsListOutputSchema = z.object({
   projects: z.array(z.object({
     projectId: z.string(),
-    comic: z.object({ id: z.string(), title: z.string(), format: z.string(), readingDirection: z.string() }),
+    comic: z.object({ id: z.string(), title: z.string(), format: z.string(), defaultReadingDirection: z.string() }),
     chapter: z.object({ id: z.string(), number: z.number().int(), title: z.string(), summary: z.string() }),
     workingRevision: z.number().int().positive().nullable(),
     updatedAt: z.string(),
@@ -130,7 +130,7 @@ export const externalContextGetOutputSchema = z.object({
     summary: z.string(),
     worldSummary: z.string(),
     format: z.string(),
-    readingDirection: z.string(),
+    defaultReadingDirection: z.string(),
     styleSummary: z.string(),
     settings: z.array(z.object({ id: z.string(), title: z.string(), content: z.string() })),
   }),
@@ -208,7 +208,7 @@ export async function listExternalAgentProjects(ownerUserId: string) {
         id: project.chapter.comic.id,
         title: project.chapter.comic.title,
         format: project.chapter.comic.format.toLowerCase(),
-        readingDirection: project.chapter.comic.readingDirection,
+        defaultReadingDirection: project.chapter.comic.defaultReadingDirection.toLowerCase(),
       },
       chapter: {
         id: project.chapter.id,
@@ -511,7 +511,7 @@ export async function invokeExternalResourceCapability(
 
 function contextRequestForProfile(profile: AgentCapabilityContextProfile) {
   return profile === "asset_generation"
-    ? { taskType: "asset_parse", scope: "reference_only" }
+    ? { taskType: "asset_image_generate", scope: "reference_only" }
     : { taskType: "interaction", scope: "current_page" };
 }
 

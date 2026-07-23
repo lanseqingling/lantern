@@ -32,12 +32,17 @@ export async function analyzeImageVersions(input: {
 }) {
   const versionIds = [...new Set(input.versionIds)].slice(0, 3);
   if (!versionIds.length) return undefined;
+  const project = await prisma.project.findFirst({
+    where: { id: input.projectId, ownerUserId: input.ownerUserId },
+    select: { chapter: { select: { comicId: true } } },
+  });
+  if (!project) return undefined;
   const versions = await prisma.assetVersion.findMany({
     where: {
       id: { in: versionIds },
       objectKey: { not: null },
       contentType: { startsWith: "image/" },
-      asset: { ownerUserId: input.ownerUserId, projectId: input.projectId },
+      asset: { ownerUserId: input.ownerUserId, comicId: project.chapter.comicId },
     },
   });
   const byId = new Map(versions.map((version) => [version.id, version]));

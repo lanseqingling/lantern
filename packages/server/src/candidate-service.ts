@@ -1,4 +1,4 @@
-import { AssetKind, CandidateKind, CandidateStatus, type Prisma } from "@prisma/client";
+import { AssetKind, AssetVersionOrigin, CandidateKind, CandidateStatus, type Prisma } from "@prisma/client";
 import { normalizeStoryboardBeats, type WorkspaceOperation } from "@lantern/shared";
 import { prisma } from "./db";
 import { AppError } from "./errors";
@@ -59,7 +59,10 @@ async function applyAssetCandidate(userId: string, candidateId: string, expected
     throw new AppError("conflict", "资产候选已过期。", 409);
   }
   return prisma.$transaction(async (tx) => {
-    const candidate = await tx.candidate.findFirst({ where: { id: candidateId, ownerUserId: userId, kind: CandidateKind.ASSET } });
+    const candidate = await tx.candidate.findFirst({
+      where: { id: candidateId, ownerUserId: userId, kind: CandidateKind.ASSET },
+      include: { project: { select: { chapter: { select: { comicId: true } } } } },
+    });
     if (!candidate) throw new AppError("not_found", "资产候选不存在。", 404);
     const working = await tx.workingRevision.findFirst({ where: { projectId: candidate.projectId }, orderBy: { revision: "desc" } });
     if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
@@ -74,7 +77,7 @@ async function applyAssetCandidate(userId: string, candidateId: string, expected
         : undefined;
     if (!kind) throw new AppError("validation", "资产候选只支持角色或场景。", 422);
     const sourceVersion = draft.sourceAssetVersionIds?.[0]
-      ? await tx.assetVersion.findFirst({ where: { id: draft.sourceAssetVersionIds[0], asset: { ownerUserId: userId, projectId: candidate.projectId } } })
+      ? await tx.assetVersion.findFirst({ where: { id: draft.sourceAssetVersionIds[0], asset: { ownerUserId: userId, comicId: candidate.project.chapter.comicId } } })
       : undefined;
     // Generated candidates already own the stored image through an archived staging
     // asset. Confirm that exact asset instead of duplicating its globally unique
@@ -93,11 +96,11 @@ async function applyAssetCandidate(userId: string, candidateId: string, expected
       : await tx.asset.create({
           data: {
             ownerUserId: userId,
-            projectId: candidate.projectId,
+            comicId: candidate.project.chapter.comicId,
             kind,
             name: draft.name,
             description: draft.description,
-            versions: { create: { version: 1, source: "text_candidate", sourceTaskId: candidate.taskId } },
+            versions: { create: { version: 1, origin: AssetVersionOrigin.GENERATED, sourceTaskId: candidate.taskId } },
           },
           include: { versions: true },
         });
@@ -118,7 +121,6 @@ async function applyAssetCandidate(userId: string, candidateId: string, expected
         storyboardBeatVersionHeads: working.storyboardBeatVersionHeads as Prisma.InputJsonValue,
         assetVersionHeads: heads,
         changeSet: { source: "candidate", sourceCandidateId: candidate.id, operations: [{ type: "create_asset", assetId: asset.id }] },
-        sourceCandidateId: candidate.id,
       },
     });
     await tx.candidate.update({
@@ -165,7 +167,6 @@ export async function applyCandidate(
       projectId: candidate.projectId,
       baseRevision: candidate.baseRevision,
       source: "candidate",
-      sourceCandidateId: candidate.id,
       commands: operations,
     },
   });

@@ -72,10 +72,6 @@ export class LocalTaskRunner {
         where: { status: TaskStatus.CREATED },
         data: { status: TaskStatus.QUEUED, progress: 5 },
       });
-      await tx.generationTask.updateMany({
-        where: { status: TaskStatus.CANCEL_REQUESTED },
-        data: { status: TaskStatus.CANCELED, completedAt: new Date() },
-      });
     });
   }
 

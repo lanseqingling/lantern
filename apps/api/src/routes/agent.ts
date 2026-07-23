@@ -38,7 +38,7 @@ const imageAttachmentsSchema = z.array(z.object({
 const taskRequestSchema = z.object({
   projectId: z.string().min(1),
   conversationId: z.string().min(1).optional(),
-  taskType: z.enum(["storyboard", "frame_image_generate", "asset_parse"]),
+  taskType: z.enum(["storyboard", "frame_image_generate", "asset_image_generate"]),
   instruction: z.string().min(1).max(20_000),
   scope: z.string().min(1),
   selection: selectionSchema.optional(),

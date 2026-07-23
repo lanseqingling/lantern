@@ -1,5 +1,5 @@
 import { getConfig } from "@lantern/server/config";
-import { safeProviderError } from "@lantern/server/errors";
+import { AppError, providerConfigurationError, safeProviderError } from "@lantern/server/errors";
 
 export type QwenVisionRequest = {
   question: string;
@@ -12,8 +12,10 @@ export class QwenVisionProvider {
 
   async analyze(request: QwenVisionRequest) {
     const config = getConfig();
+    if (config.VISION_MODEL_PROVIDER === "test") throw new Error("VISION_PROVIDER_IS_TEST_ADAPTER");
+    if (config.VISION_MODEL_PROVIDER !== "qwen") throw new AppError("unsupported_model_provider", "当前版本尚未接入所选视觉理解模型提供方。", 400);
     const apiKey = config.VISION_MODEL_API_KEY ?? config.IMAGE_MODEL_API_KEY;
-    if (!apiKey) throw new Error("VISION_MODEL_API_KEY_MISSING");
+    if (!apiKey) throw providerConfigurationError("vision");
     if (!request.imageUrls.length) throw new Error("VISION_INPUT_MISSING");
 
     try {

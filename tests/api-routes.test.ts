@@ -70,6 +70,21 @@ test("protected API routes resolve the stable local user", async () => {
   assert.equal(body.data.email, LOCAL_USER_EMAIL);
 });
 
+test("global settings expose provider choices without returning API keys", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/settings",
+    headers: { authorization },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.deepEqual(body.data.models.map((model: { capability: string }) => model.capability), ["text", "image", "vision"]);
+  assert.equal(body.data.models[0].providerOptions[0].id, "deepseek");
+  assert.equal("apiKey" in body.data.models[0], false);
+  assert.equal(JSON.stringify(body).includes("LANTERN_LOCAL_TOKEN"), false);
+});
+
 test("MCP uses an independent loopback credential and rejects browser origins", async () => {
   const payload = {
     jsonrpc: "2.0",
@@ -161,7 +176,7 @@ test("registered domain routes preserve validation and response envelopes", asyn
     method: "POST",
     url: "/v1/comics",
     headers: { authorization, "content-type": "application/json" },
-    payload: { title: "服务边界测试", summary: "验证 API 只负责传输映射。", format: "page", canvasPageMode: "single" },
+    payload: { title: "服务边界测试", summary: "验证 API 只负责传输映射。", format: "page", defaultReadingDirection: "ltr" },
   });
   assert.equal(created.statusCode, 200);
   const comicId = created.json().data.comic.id as string;

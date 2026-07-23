@@ -25,7 +25,7 @@ const comicCreateSchema = z.strictObject({
   worldSummary: z.string().trim().max(4000).optional(),
   styleSummary: z.string().trim().max(4000).optional(),
   format: z.enum(["page", "vertical", "four_panel"]).default("page"),
-  canvasPageMode: z.enum(["single", "spread"]).default("single"),
+  defaultReadingDirection: z.enum(["ltr", "rtl"]).default("ltr"),
   idempotencyKey: idempotencyKeySchema,
 });
 
@@ -35,9 +35,9 @@ const comicUpdateSchema = z.strictObject({
   summary: z.string().trim().min(1).max(2000).optional(),
   worldSummary: z.string().trim().max(4000).optional(),
   styleSummary: z.string().trim().max(4000).optional(),
-  canvasPageMode: z.enum(["single", "spread"]).optional(),
+  defaultReadingDirection: z.enum(["ltr", "rtl"]).optional(),
   idempotencyKey: idempotencyKeySchema,
-}).refine((value) => value.title !== undefined || value.summary !== undefined || value.worldSummary !== undefined || value.styleSummary !== undefined || value.canvasPageMode !== undefined, {
+}).refine((value) => value.title !== undefined || value.summary !== undefined || value.worldSummary !== undefined || value.styleSummary !== undefined || value.defaultReadingDirection !== undefined, {
   message: "至少提供一个要更新的漫画字段。",
 });
 

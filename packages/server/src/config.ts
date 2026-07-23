@@ -2,8 +2,27 @@ import { readFileSync } from "node:fs";
 import dotenv from "dotenv";
 import { z } from "zod";
 import { getRuntimePaths } from "./runtime-paths";
+import { defaultModelProvider } from "./model-provider-catalog";
+
+const defaultTextProvider = defaultModelProvider("text");
+const defaultImageProvider = defaultModelProvider("image");
+const defaultVisionProvider = defaultModelProvider("vision");
 
 const optionalSecret = z.preprocess((value) => value === "" ? undefined : value, z.string().optional());
+const modelEnvironmentKeys = [
+  "TEXT_MODEL_PROVIDER",
+  "TEXT_MODEL_BASE_URL",
+  "TEXT_MODEL_NAME",
+  "TEXT_MODEL_API_KEY",
+  "IMAGE_MODEL_PROVIDER",
+  "IMAGE_MODEL_BASE_URL",
+  "IMAGE_MODEL_NAME",
+  "IMAGE_MODEL_API_KEY",
+  "VISION_MODEL_PROVIDER",
+  "VISION_MODEL_BASE_URL",
+  "VISION_MODEL_NAME",
+  "VISION_MODEL_API_KEY",
+] as const;
 const runtimeConfigSchema = z.object({
   configVersion: z.number().int().positive().default(1),
   apiPort: z.number().int().positive(),
@@ -17,16 +36,17 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().int().positive().default(18787),
   LANTERN_LOCAL_TOKEN: z.string().min(32),
   LANTERN_MCP_TOKEN: z.string().min(32),
-  TEXT_MODEL_PROVIDER: z.enum(["deepseek", "test"]).default("deepseek"),
-  TEXT_MODEL_BASE_URL: z.string().url().default("https://api.deepseek.com"),
-  TEXT_MODEL_NAME: z.string().default("deepseek-v4-flash"),
+  TEXT_MODEL_PROVIDER: z.string().min(1).default(defaultTextProvider.id),
+  TEXT_MODEL_BASE_URL: z.string().url().default(defaultTextProvider.defaultBaseUrl),
+  TEXT_MODEL_NAME: z.string().min(1).default(defaultTextProvider.defaultModel),
   TEXT_MODEL_API_KEY: optionalSecret,
-  IMAGE_MODEL_PROVIDER: z.enum(["qwen", "test"]).default("qwen"),
-  IMAGE_MODEL_BASE_URL: z.string().url().default("https://dashscope.aliyuncs.com/api/v1"),
-  IMAGE_MODEL_NAME: z.string().default("qwen-image-2.0"),
+  IMAGE_MODEL_PROVIDER: z.string().min(1).default(defaultImageProvider.id),
+  IMAGE_MODEL_BASE_URL: z.string().url().default(defaultImageProvider.defaultBaseUrl),
+  IMAGE_MODEL_NAME: z.string().min(1).default(defaultImageProvider.defaultModel),
   IMAGE_MODEL_API_KEY: optionalSecret,
-  VISION_MODEL_BASE_URL: z.string().url().default("https://dashscope.aliyuncs.com/compatible-mode/v1"),
-  VISION_MODEL_NAME: z.string().default("qwen3.6-flash"),
+  VISION_MODEL_PROVIDER: z.string().min(1).default(defaultVisionProvider.id),
+  VISION_MODEL_BASE_URL: z.string().url().default(defaultVisionProvider.defaultBaseUrl),
+  VISION_MODEL_NAME: z.string().min(1).default(defaultVisionProvider.defaultModel),
   VISION_MODEL_API_KEY: optionalSecret,
 });
 
@@ -34,7 +54,7 @@ export type LanternConfig = z.infer<typeof envSchema>;
 
 let cachedConfig: LanternConfig | undefined;
 
-function fileEnvironment() {
+function fileEnvironment(): Record<string, string | number | undefined> {
   const paths = getRuntimePaths();
   let runtime: z.infer<typeof runtimeConfigSchema> | undefined;
   let providers: Record<string, string> = {};
@@ -68,13 +88,20 @@ function fileEnvironment() {
 }
 
 export function getConfig() {
-  const merged: Record<string, string | number | undefined> = { ...fileEnvironment(), ...process.env };
+  const files = fileEnvironment();
+  const merged: Record<string, string | number | undefined> = { ...files, ...process.env };
+  if (process.env.LANTERN_PROVIDER_ENV_OVERRIDE !== "1" && merged.APP_ENV !== "test") {
+    for (const key of modelEnvironmentKeys) {
+      if (files[key] !== undefined) merged[key] = files[key];
+    }
+  }
   if (!process.env.WEB_ORIGIN && process.env.WEB_PORT) merged.WEB_ORIGIN = `http://localhost:${process.env.WEB_PORT}`;
   if (merged.APP_ENV === "test") {
     merged.LANTERN_LOCAL_TOKEN ??= "lantern-test-token-000000000000000000000000";
     merged.LANTERN_MCP_TOKEN ??= "lantern-test-mcp-token-00000000000000000000";
     merged.TEXT_MODEL_PROVIDER ??= "test";
     merged.IMAGE_MODEL_PROVIDER ??= "test";
+    merged.VISION_MODEL_PROVIDER ??= "test";
   }
   cachedConfig ??= envSchema.parse(merged);
   return cachedConfig;
@@ -82,4 +109,9 @@ export function getConfig() {
 
 export function resetConfigForTests() {
   cachedConfig = undefined;
+}
+
+export function reloadConfig() {
+  cachedConfig = undefined;
+  return getConfig();
 }

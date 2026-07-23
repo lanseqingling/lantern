@@ -197,7 +197,10 @@ export default function ComicAssetsPage() {
   return <main className="comic-asset-studio-page">
     <header className="asset-studio-page-head">
       <button type="button" aria-label="返回" onClick={goBack}><Icon name="collapse" /></button>
-      <div><small>ASSET SPACE</small><h1>资产空间</h1></div>
+      <div className="asset-studio-page-title">
+        <span><Icon name="folder" /></span>
+        <div><small>ASSET SPACE</small><h1>资产空间</h1></div>
+      </div>
     </header>
     <section className="comic-brief-section" aria-labelledby="comic-brief-title">
       <header>

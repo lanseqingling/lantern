@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { AssetKind, type Prisma } from "@prisma/client";
+import { AssetKind, AssetVersionOrigin, type Prisma } from "@prisma/client";
 import { strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 import {
   chapterArchiveFileNames,
@@ -210,10 +210,10 @@ export async function exportChapterArchive(ownerUserId: string, chapterId: strin
   if (document.resources.some((resource) => resource.kind !== "image")) throw new AppError("unsupported_archive_resource", "当前完整归档只支持 LCD 中的图片资源。", 422);
   const assetIds = collectIdsByKey(document, "assetId");
   collectIdsByKey(document, "speakerAssetId").forEach((assetId) => assetIds.add(assetId));
-  const assets = assetIds.size ? await prisma.asset.findMany({ where: { id: { in: [...assetIds] }, projectId: project.id, ownerUserId } }) : [];
+  const assets = assetIds.size ? await prisma.asset.findMany({ where: { id: { in: [...assetIds] }, comicId: project.chapter.comicId, ownerUserId } }) : [];
   if (assets.length !== assetIds.size) throw new AppError("archive_incomplete", "已保存版本引用的资产不完整，无法创建完整归档。", 422);
   const versionIds = document.resources.map((resource) => resource.assetVersionId);
-  const versions = versionIds.length ? await prisma.assetVersion.findMany({ where: { id: { in: versionIds }, asset: { projectId: project.id, ownerUserId } } }) : [];
+  const versions = versionIds.length ? await prisma.assetVersion.findMany({ where: { id: { in: versionIds }, asset: { comicId: project.chapter.comicId, ownerUserId } } }) : [];
   if (versions.length !== new Set(versionIds).size) throw new AppError("archive_incomplete", "已保存版本引用的图片资源不完整，无法创建完整归档。", 422);
   const versionById = new Map(versions.map((version) => [version.id, version]));
   const beatHeads = json<Record<string, string>>(snapshot.storyboardBeatVersions);
@@ -259,7 +259,7 @@ export async function importChapterArchive(args: { ownerUserId: string; chapterI
   if (!current) throw new AppError("not_found", "目标一话没有工作稿。", 404);
   if (current.revision !== args.expectedRevision) throw new AppError("conflict", "工作稿已变化，请重新加载后再导入。", 409, { currentRevision: current.revision });
   const activeTask = await prisma.generationTask.findFirst({
-    where: { projectId: project.id, ownerUserId: args.ownerUserId, status: { in: ["CREATED", "QUEUED", "RUNNING", "CANCEL_REQUESTED"] } },
+    where: { projectId: project.id, ownerUserId: args.ownerUserId, status: { in: ["CREATED", "QUEUED", "RUNNING"] } },
     select: { id: true },
   });
   if (activeTask) throw new AppError("task_in_progress", "请先等待或停止当前 Agent 任务，再导入完整 LCD 资源。", 409);
@@ -310,7 +310,7 @@ export async function importChapterArchive(args: { ownerUserId: string; chapterI
       const latest = await tx.workingRevision.findFirst({ where: { projectId: project.id }, orderBy: { revision: "desc" } });
       if (!latest || latest.revision !== args.expectedRevision) throw new AppError("conflict", "工作稿已变化，请重新加载后再导入。", 409, { currentRevision: latest?.revision });
       const runningTask = await tx.generationTask.findFirst({
-        where: { projectId: project.id, ownerUserId: args.ownerUserId, status: { in: ["CREATED", "QUEUED", "RUNNING", "CANCEL_REQUESTED"] } },
+        where: { projectId: project.id, ownerUserId: args.ownerUserId, status: { in: ["CREATED", "QUEUED", "RUNNING"] } },
         select: { id: true },
       });
       if (runningTask) throw new AppError("task_in_progress", "请先等待或停止当前 Agent 任务，再导入完整 LCD 资源。", 409);
@@ -321,7 +321,7 @@ export async function importChapterArchive(args: { ownerUserId: string; chapterI
           data: {
             id: idMap.get(sourceAsset.assetId)!,
             ownerUserId: args.ownerUserId,
-            projectId: project.id,
+            comicId: project.chapter.comicId,
             kind: assetKind(sourceAsset.kind),
             name: sourceAsset.name,
             description: sourceAsset.description,
@@ -336,7 +336,7 @@ export async function importChapterArchive(args: { ownerUserId: string; chapterI
               width: resource.stored.width,
               height: resource.stored.height,
               checksum: resource.stored.checksum,
-              source: "chapter_archive_import",
+              origin: AssetVersionOrigin.CHAPTER_ARCHIVE_IMPORT,
             })) } : undefined,
           },
         });

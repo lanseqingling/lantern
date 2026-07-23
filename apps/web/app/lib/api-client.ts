@@ -3,7 +3,7 @@ import type { ActiveTaskLike, AgentMessage, PersistedWorkbench } from "@/app/lib
 import { normalizeResolvedResourceUrls } from "@/app/lib/document-asset-urls";
 
 type ApiEnvelope<T> = { data: T; requestId: string };
-type ApiFailure = { error?: { code?: string; message?: string } };
+type ApiFailure = { error?: { code?: string; message?: string; details?: unknown } };
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_CHAPTER_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const SUPPORTED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp"]);
@@ -25,7 +25,7 @@ export type WorkbenchLoad = {
   state: PersistedWorkbench;
   ids: RuntimeIds;
   activeTask: ActiveTaskLike | null;
-  comic: { id: string; title: string; summary: string; canvasPageMode: "single" | "spread" };
+  comic: { id: string; title: string; summary: string; defaultReadingDirection: "ltr" | "rtl" };
   chapter: { id: string; number: number; title: string; summary: string };
 };
 
@@ -46,7 +46,7 @@ export type ComicListItem = {
   worldSummary: string;
   styleSummary: string;
   format: "page" | "vertical" | "four_panel";
-  canvasPageMode: "single" | "spread";
+  defaultReadingDirection: "ltr" | "rtl";
   isExample: boolean;
   coverUrl?: string;
   updatedAt: string;
@@ -55,7 +55,6 @@ export type ComicListItem = {
 
 export type ComicAssetListItem = {
   id: string;
-  chapterId: string;
   kind: "character" | "scene" | "style" | "prop" | "reference_image" | "sketch" | "generated_image";
   name: string;
   description: string;
@@ -174,12 +173,12 @@ export function apiDeleteAsset(assetId: string) {
   return api<{ id: string; deleted: boolean; archivedAssetIds: string[] }>(`/v1/assets/${encodeURIComponent(assetId)}`, { method: "DELETE" });
 }
 
-export function apiCreateComic(input: { title: string; summary?: string; worldSummary?: string; styleSummary?: string; format?: "page" | "vertical" | "four_panel"; canvasPageMode?: "single" | "spread" }) {
+export function apiCreateComic(input: { title: string; summary?: string; worldSummary?: string; styleSummary?: string; format?: "page" | "vertical" | "four_panel"; defaultReadingDirection?: "ltr" | "rtl" }) {
   return api<{ comic: { id: string; title: string } }>("/v1/comics", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function apiUpdateComic(comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; canvasPageMode?: "single" | "spread" }) {
-  return api<{ id: string; title: string; summary: string; worldSummary: string; styleSummary: string; canvasPageMode: "SINGLE" | "SPREAD" }>(`/v1/comics/${encodeURIComponent(comicId)}`, { method: "PATCH", body: JSON.stringify(input) });
+export function apiUpdateComic(comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; defaultReadingDirection?: "ltr" | "rtl" }) {
+  return api<{ id: string; title: string; summary: string; worldSummary: string; styleSummary: string; defaultReadingDirection: "LTR" | "RTL" }>(`/v1/comics/${encodeURIComponent(comicId)}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function apiDeleteComic(comicId: string) {
@@ -251,8 +250,58 @@ async function api<T>(path: string, init?: RequestInit) {
     credentials: "include",
   });
   const body = await readApiResponse<T>(response, `Lantern API ${response.status}`);
-  if (!response.ok) throw new Error(body.error?.message ?? `Lantern API ${response.status}`);
+  if (!response.ok) throw new LanternApiError(body.error?.message ?? `Lantern API ${response.status}`, body.error?.code, body.error?.details);
   return body.data;
+}
+
+export class LanternApiError extends Error {
+  constructor(message: string, public readonly code?: string, public readonly details?: unknown) {
+    super(message);
+    this.name = "LanternApiError";
+  }
+}
+
+export type ModelCapability = "text" | "image" | "vision";
+
+export type GlobalSettings = {
+  models: Array<{
+    capability: ModelCapability;
+    label: string;
+    description: string;
+    providerId: string;
+    baseUrl: string;
+    model: string;
+    keyConfigured: boolean;
+    usesFallbackKey: boolean;
+    environmentOverride: boolean;
+    providerOptions: Array<{
+      id: string;
+      label: string;
+      description: string;
+      defaultBaseUrl: string;
+      defaultModel: string;
+    }>;
+  }>;
+  runtime: {
+    dataDirectory: string;
+    apiPort: number;
+    webPort: number;
+    objectStorage: string;
+  };
+};
+
+export function apiGetGlobalSettings() {
+  return api<GlobalSettings>("/v1/settings");
+}
+
+export function apiUpdateGlobalSettings(models: Array<{
+  capability: ModelCapability;
+  providerId: string;
+  baseUrl: string;
+  model: string;
+  apiKey?: string | null;
+}>) {
+  return api<GlobalSettings>("/v1/settings", { method: "PATCH", body: JSON.stringify({ models }) });
 }
 
 async function readApiResponse<T>(response: Response, fallbackMessage: string) {
@@ -269,7 +318,7 @@ async function readApiResponse<T>(response: Response, fallbackMessage: string) {
 }
 
 type WorkbenchResponse = {
-  comic: { id: string; title: string; summary: string; canvasPageMode: "SINGLE" | "SPREAD" };
+  comic: { id: string; title: string; summary: string; defaultReadingDirection: "LTR" | "RTL" };
   project: { id: string };
   conversations: Array<{ id: string; title: string; createdAt: string; updatedAt: string }>;
   chapter: { id: string; number: number; title: string; summary: string };
@@ -380,7 +429,7 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
   const activeTask = running ? {
     id: running.id,
     name: running.type,
-    label: running.type === "asset_parse" ? "创建角色或场景" : running.type === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
+    label: running.type === "asset_image_generate" ? "创建角色或场景" : running.type === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
     scope: running.target?.label ?? "当前创作范围",
     progress: running.progress,
     status: "running" as const,
@@ -430,7 +479,7 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
       conversationId: data.conversation?.id ?? "",
     },
     activeTask,
-    comic: { ...data.comic, canvasPageMode: data.comic.canvasPageMode.toLowerCase() as "single" | "spread" },
+    comic: { ...data.comic, defaultReadingDirection: data.comic.defaultReadingDirection.toLowerCase() as "ltr" | "rtl" },
     chapter: data.chapter,
   };
 }
@@ -533,7 +582,7 @@ export async function apiStreamInteraction(ids: RuntimeIds, body: AgentInteracti
   });
   if (!response.ok || !response.body) {
     const failure = await readApiResponse<never>(response, `Lantern API ${response.status}`);
-    throw new Error(failure.error?.message ?? `Lantern API ${response.status}`);
+    throw new LanternApiError(failure.error?.message ?? `Lantern API ${response.status}`, failure.error?.code, failure.error?.details);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -578,7 +627,7 @@ export function apiRetryTask(taskId: string) {
 }
 
 export async function apiCreateTask(ids: RuntimeIds, body: {
-  taskType: "storyboard" | "frame_image_generate" | "asset_parse";
+  taskType: "storyboard" | "frame_image_generate" | "asset_image_generate";
   instruction: string;
   scope: string;
   selection: { type: string; id?: string; pageId?: string; label?: string; canvasX?: number; canvasY?: number };

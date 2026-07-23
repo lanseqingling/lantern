@@ -54,6 +54,7 @@ import {
   apiDeletePlacement,
   apiDownloadImage,
   apiImportChapterArchive,
+  LanternApiError,
   apiDiscardCandidate,
   apiGetContextDebugSnapshot,
   apiLoadWorkbench,
@@ -322,6 +323,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [composerReferenceOrder, setComposerReferenceOrder] = useState<string[]>([]);
   const [activeTask, setActiveTask] = useState<ActiveTask | null>(null);
   const [taskCancelConfirmOpen, setTaskCancelConfirmOpen] = useState(false);
+  const [modelSettingsPromptOpen, setModelSettingsPromptOpen] = useState(false);
   const [streamingTurn, setStreamingTurn] = useState<StreamingAgentTurn | null>(null);
   const [resolvedCardIds, setResolvedCardIds] = useState<Set<string>>(() => new Set());
   const [expandedTerminalCandidateIds, setExpandedTerminalCandidateIds] = useState<Set<string>>(() => new Set());
@@ -1895,11 +1897,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const runTask = (name = "storyboard", option?: string, explicitInstruction?: string, explicitScope?: string, explicitSelection?: Selection) => {
-    if (name !== "storyboard" && name !== "frame_image_generate" && name !== "asset_parse") {
+    if (name !== "storyboard" && name !== "frame_image_generate" && name !== "asset_image_generate") {
       setToast("这个 Agent 任务当前未开放");
       return;
     }
-    const label = name === "asset_parse" ? "创建角色或场景资产" : name === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目";
+    const label = name === "asset_image_generate" ? "创建角色或场景资产" : name === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目";
     const taskScope = explicitScope ?? scope;
     const instruction = explicitInstruction ?? option ?? [...state.messages].reverse().find((message) => message.role === "user")?.text ?? label;
     const currentSelection = explicitSelection ?? selection;
@@ -1928,6 +1930,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       selection: { type: currentSelection.type, id: currentSelection.id, pageId: currentSelection.pageId, label: currentSelection.label },
     }).then(() => refreshServerWorkbench()).catch((error) => {
       setActiveTask(null);
+      if (error instanceof LanternApiError && error.code === "provider_not_configured") setModelSettingsPromptOpen(true);
       setToast(error instanceof Error ? error.message : "任务创建失败");
     });
   };
@@ -1978,7 +1981,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           const nextActiveTask: ActiveTask = {
             id: result.task.id,
             name: taskType,
-            label: taskType === "asset_parse" ? "创建角色或场景" : taskType === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
+            label: taskType === "asset_image_generate" ? "创建角色或场景" : taskType === "frame_image_generate" ? "生成单格画面" : "编辑分镜条目",
             scope: interactionSelection.label ?? result.task.scope,
             progress: result.task.progress,
             status: "running",
@@ -1997,6 +2000,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         }
       }).catch((error) => {
         void refreshServerWorkbench().catch(() => undefined);
+        if (error instanceof LanternApiError && error.code === "provider_not_configured") setModelSettingsPromptOpen(true);
         setToast(error instanceof Error ? error.message : "Agent 暂时不可用");
       }).finally(() => {
         setStreamingTurn((current) => current?.id === streamingId ? null : current);
@@ -3555,7 +3559,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const retryAgentTask = (message: AgentMessage) => {
     if (runtimeAdapter === "server" && message.taskId) {
       setResolvedCardIds((current) => new Set(current).add(message.id));
-      void apiRetryTask(message.taskId).then(() => apiResolveAgentMessage(message.id)).then(() => refreshServerWorkbench()).catch((error) => {
+      void apiRetryTask(message.taskId).then(() => {
+        setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
+        return refreshServerWorkbench();
+      }).catch((error) => {
         setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
         setToast(error instanceof Error ? error.message : "重试失败");
       });
@@ -3563,7 +3570,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     if (runtimeAdapter === "server") {
       setResolvedCardIds((current) => new Set(current).add(message.id));
-      void apiRetryAgentInteraction(message.id).then(() => refreshServerWorkbench()).catch((error) => {
+      void apiRetryAgentInteraction(message.id).then(() => {
+        setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
+        return refreshServerWorkbench();
+      }).catch((error) => {
         setResolvedCardIds((current) => { const next = new Set(current); next.delete(message.id); return next; });
         void refreshServerWorkbench().catch(() => undefined);
         setToast(error instanceof Error ? error.message : "重试失败");
@@ -3916,6 +3926,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       {comicDeleteTarget && comicDeleteSelection ? <DeleteConfirmDialog dialogId="comic-delete" title={comicDeleteTitle} description={comicDeleteDescription} confirmLabel={comicDeleteTarget.kind === "image" ? "确认移除" : "确认删除"} onCancel={() => setComicDeleteTarget(null)} onConfirm={confirmComicDelete} /> : null}
       {archiveImportFile ? <DeleteConfirmDialog dialogId="chapter-archive-import" title="覆盖当前一话内容？" description={`导入「${archiveImportFile.name}」会把完整 LCD、分镜条目和图片资源写入当前一话，并保存为新的稳定版本。现有历史版本不会删除。`} confirmLabel="确认导入" onCancel={() => setArchiveImportFile(null)} onConfirm={() => { const file = archiveImportFile; setArchiveImportFile(null); void importChapterArchive(file); }} /> : null}
+      {modelSettingsPromptOpen ? <DeleteConfirmDialog dialogId="model-settings-required" tone="neutral" icon="settings" title="配置模型后继续" description="当前 AI 能力还没有可用的 API Key。画布编辑不受影响，配置完成后可以直接重试。" confirmLabel="前往设置" onCancel={() => setModelSettingsPromptOpen(false)} onConfirm={() => router.push(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)} /> : null}
 
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
       {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>请输入文本</div> : null}
@@ -3923,7 +3934,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />对白 {String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭对白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>对白<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>文字样式<CustomSelect ariaLabel="文字样式" className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>字号<NumberStepper ariaLabel="对话字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>边框粗细<NumberStepper ariaLabel="气泡边框粗细" step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
       {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />旁白 {String(selectedNarrationNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭旁白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>文字<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>字号<NumberStepper ariaLabel="旁白字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
 
-      <div className="canvas-global-actions" aria-label="全局入口"><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setLeftOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label="用户页" onClick={() => setToast("个人中心即将支持")}><Icon name="user" /></button><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => setToast("全局设置即将支持")}><Icon name="settings" /></button></div>
+      <div className="canvas-global-actions" aria-label="全局入口"><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setLeftOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => router.push(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label="Agent 对话">
         <div className="agent-head">
           <div className="agent-head-actions"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label="打开当前画布的会话列表" aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><button type="button" aria-label="收起 Agent 工作区" onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>

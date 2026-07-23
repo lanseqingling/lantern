@@ -1,5 +1,5 @@
 import { getConfig } from "@lantern/server/config";
-import { safeProviderError } from "@lantern/server/errors";
+import { AppError, providerConfigurationError, safeProviderError } from "@lantern/server/errors";
 
 export type QwenImageRequest = {
   prompt: string;
@@ -23,7 +23,8 @@ export class QwenImageProvider {
   async generate(request: QwenImageRequest): Promise<QwenImageResult> {
     const config = getConfig();
     if (config.IMAGE_MODEL_PROVIDER === "test") throw new Error("IMAGE_PROVIDER_IS_TEST_ADAPTER");
-    if (!config.IMAGE_MODEL_API_KEY) throw new Error("IMAGE_MODEL_API_KEY_MISSING");
+    if (config.IMAGE_MODEL_PROVIDER !== this.name) throw new AppError("unsupported_model_provider", "当前版本尚未接入所选生图模型提供方。", 400);
+    if (!config.IMAGE_MODEL_API_KEY) throw providerConfigurationError("image");
     const content = [
       ...(request.referenceUrls ?? []).slice(0, 3).map((image) => ({ image })),
       { text: request.prompt },

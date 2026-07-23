@@ -72,7 +72,7 @@ export const agentContextSnapshotSchema = z.object({
     summary: z.string(),
     worldSummary: z.string(),
     format: z.enum(["page", "vertical", "four_panel"]),
-    readingDirection: z.string().min(1),
+    defaultReadingDirection: z.string().min(1),
     styleSummary: z.string(),
     settings: z.array(z.object({
       id: z.string().min(1),
@@ -158,7 +158,7 @@ export const interactionDecisionSchema = z.discriminatedUnion("kind", [
     capabilityId: z.enum(agentCapabilityIds),
     message: z.string().min(1),
     scope: z.enum(["reference_only", "selected_storyboard_beat", "selected_comic_frame", "selected_element", "current_page", "after_current", "whole_chapter"]),
-    taskType: z.enum(["storyboard", "frame_image_generate", "asset_parse"]),
+    taskType: z.enum(["storyboard", "frame_image_generate", "asset_image_generate"]),
   }),
 ]);
 

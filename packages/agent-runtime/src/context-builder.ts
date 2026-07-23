@@ -173,17 +173,17 @@ export async function buildAgentContext(request: ContextRequest) {
                 orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }],
                 take: 25,
               },
+              assets: {
+                where: { archivedAt: null, kind: { not: AssetKind.STYLE } },
+                orderBy: { updatedAt: "desc" },
+                take: 24,
+                include: {
+                  versions: { orderBy: { version: "desc" }, take: 1 },
+                  images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }], take: 12 },
+                },
+              },
             },
           },
-        },
-      },
-      assets: {
-        where: { archivedAt: null },
-        orderBy: { updatedAt: "desc" },
-        take: 24,
-        include: {
-          versions: { orderBy: { version: "desc" }, take: 1 },
-          images: { orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }], take: 12 },
         },
       },
       conversations: {
@@ -201,11 +201,11 @@ export async function buildAgentContext(request: ContextRequest) {
   const comicStyleAssets = await prisma.asset.findMany({
     where: {
       ownerUserId: request.ownerUserId,
+      comicId: project.chapter.comic.id,
       kind: AssetKind.STYLE,
       libraryStatus: AssetLibraryStatus.LIBRARY,
       variantOfAssetId: null,
       archivedAt: null,
-      project: { chapter: { comicId: project.chapter.comic.id, archivedAt: null } },
     },
     include: {
       versions: { orderBy: { version: "desc" }, take: 1 },
@@ -214,7 +214,7 @@ export async function buildAgentContext(request: ContextRequest) {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 1,
   });
-  const regularAssets = project.assets.filter((asset) => asset.kind !== AssetKind.STYLE);
+  const regularAssets = project.chapter.comic.assets;
   const availableContextAssets = comicStyleAssets.length
     ? [...regularAssets.slice(0, 23), ...comicStyleAssets]
     : regularAssets.slice(0, 24);
@@ -236,7 +236,7 @@ export async function buildAgentContext(request: ContextRequest) {
         where: {
           id: reference.versionId,
           assetId: reference.objectId,
-          asset: { ownerUserId: request.ownerUserId, projectId: project.id },
+          asset: { ownerUserId: request.ownerUserId, comicId: project.chapter.comicId },
         },
         include: { asset: { select: { kind: true } } },
       });
@@ -367,7 +367,7 @@ export async function buildAgentContext(request: ContextRequest) {
     }];
   });
   const pageContextTask = request.taskType === "storyboard" || request.taskType === "frame_image_generate" || interactionPlanning;
-  const basicContextTask = request.taskType === "asset_parse" || pageContextTask;
+  const basicContextTask = request.taskType === "asset_image_generate" || pageContextTask;
   const settingsLimit = basicContextTask ? 6 : 12;
   const settingContentLimit = basicContextTask ? 1200 : 4000;
   const comicSettings = project.chapter.comic.settings.slice(0, settingsLimit).map((setting) => ({
@@ -401,7 +401,7 @@ export async function buildAgentContext(request: ContextRequest) {
     ...allCurrentPageTargets.filter((target) => target.type !== "presentation_unit"),
   ].slice(0, 64);
   const includeCurrentPageLcd = request.taskType === "storyboard" || request.taskType === "frame_image_generate" || interactionPlanning;
-  const contextStoryboardBeats = request.taskType === "asset_parse" ? [] : localStoryboardBeats;
+  const contextStoryboardBeats = request.taskType === "asset_image_generate" ? [] : localStoryboardBeats;
   const omittedContext = [
     ...(storyboardBeats.length > contextStoryboardBeats.length ? [{ type: "storyboard_beat", reason: contextStoryboardBeats.length ? `仅发送与当前任务最相关的 ${contextStoryboardBeats.length} 个分镜条目` : "当前任务不需要分镜历史，未发送分镜条目" }] : []),
     ...(project.chapter.comic.settings.length > comicSettings.length ? [{ type: "comic_setting", reason: `仅发送排序最前的 ${comicSettings.length} 张漫画设定卡` }] : []),
@@ -420,7 +420,7 @@ export async function buildAgentContext(request: ContextRequest) {
       summary: project.chapter.comic.summary,
       worldSummary: project.chapter.comic.worldSummary,
       format: project.chapter.comic.format.toLowerCase(),
-      readingDirection: project.chapter.comic.readingDirection,
+      defaultReadingDirection: project.chapter.comic.defaultReadingDirection.toLowerCase(),
       styleSummary: project.chapter.comic.styleSummary,
       settings: comicSettings,
     },
@@ -656,7 +656,7 @@ export async function buildAgentContextDebugSnapshot(request: ContextRequest, cl
       },
       layout: {
         format: modelInput.comic.format,
-        readingDirection: modelInput.comic.readingDirection,
+        defaultReadingDirection: modelInput.comic.defaultReadingDirection,
         currentView: modelInput.currentView,
         currentPage: modelInput.currentPage,
         currentPageTargets: modelInput.currentPageTargets,

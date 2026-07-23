@@ -26,15 +26,15 @@ const comicCreateSchema = z.object({
   worldSummary: z.string().trim().max(4000).optional(),
   styleSummary: z.string().trim().max(4000).optional(),
   format: z.enum(["page", "vertical", "four_panel"]).default("page"),
-  canvasPageMode: z.enum(["single", "spread"]).default("single"),
+  defaultReadingDirection: z.enum(["ltr", "rtl"]).default("ltr"),
 });
 const comicUpdateSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   summary: z.string().trim().min(1).max(2000).optional(),
   worldSummary: z.string().trim().max(4000).optional(),
   styleSummary: z.string().trim().max(4000).optional(),
-  canvasPageMode: z.enum(["single", "spread"]).optional(),
-}).refine((value) => value.title !== undefined || value.summary !== undefined || value.worldSummary !== undefined || value.styleSummary !== undefined || value.canvasPageMode !== undefined);
+  defaultReadingDirection: z.enum(["ltr", "rtl"]).optional(),
+}).refine((value) => value.title !== undefined || value.summary !== undefined || value.worldSummary !== undefined || value.styleSummary !== undefined || value.defaultReadingDirection !== undefined);
 const chapterCreateSchema = z.object({ title: z.string().trim().min(1).max(120), summary: z.string().trim().min(1).max(2000) });
 const chapterUpdateSchema = z.object({ title: z.string().trim().min(1).max(120).optional(), summary: z.string().trim().min(1).max(2000).optional() })
   .refine((value) => value.title !== undefined || value.summary !== undefined);

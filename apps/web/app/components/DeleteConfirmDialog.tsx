@@ -1,6 +1,6 @@
 "use client";
 
-import { Icon } from "@lantern/ui";
+import { Icon, type IconName } from "@lantern/ui";
 
 export function DeleteConfirmDialog({
   dialogId,
@@ -18,7 +18,7 @@ export function DeleteConfirmDialog({
   description: string;
   confirmLabel?: string;
   tone?: "danger" | "neutral";
-  icon?: "trash" | "pages" | "x";
+  icon?: IconName;
   disabled?: boolean;
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;

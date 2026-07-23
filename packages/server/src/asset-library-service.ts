@@ -1,4 +1,4 @@
-import { AssetKind, AssetLibraryStatus, ExternalUploadStatus, type Prisma } from "@prisma/client";
+import { AssetKind, AssetLibraryStatus, AssetVersionOrigin, ExternalUploadStatus, type Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 import { deleteObject, deleteTemporaryObject, getTemporaryObject, putImage } from "./object-storage";
@@ -40,7 +40,7 @@ function serializedImages(asset: AssetWithGallery) {
 async function requireOwnedLibraryAsset(ownerUserId: string, assetId: string) {
   const asset = await prisma.asset.findFirst({
     where: { id: assetId, ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY },
-    select: { id: true, currentVersionNumber: true, projectId: true },
+    select: { id: true, currentVersionNumber: true, comicId: true },
   });
   if (!asset) throw new AppError("not_found", "资产不存在。", 404);
   return asset;
@@ -54,7 +54,8 @@ async function findComicVisualStyleAsset(ownerUserId: string, comicId: string) {
       libraryStatus: AssetLibraryStatus.LIBRARY,
       variantOfAssetId: null,
       archivedAt: null,
-      project: { chapter: { comicId, archivedAt: null } },
+      comicId,
+      comic: { archivedAt: null },
     },
     include: { images: { include: galleryImageInclude, orderBy: galleryOrder } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -74,15 +75,7 @@ export async function getComicVisualStyle(ownerUserId: string, comicId: string) 
 export async function appendComicVisualStyleImage(ownerUserId: string, comicId: string, uploaded: UploadedImage) {
   const comic = await prisma.comic.findFirst({
     where: { id: comicId, ownerUserId, archivedAt: null },
-    select: {
-      id: true,
-      chapters: {
-        where: { archivedAt: null, project: { isNot: null } },
-        orderBy: { number: "asc" },
-        take: 1,
-        select: { project: { select: { id: true } } },
-      },
-    },
+    select: { id: true },
   });
   if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
   const existing = await findComicVisualStyleAsset(ownerUserId, comic.id);
@@ -90,14 +83,11 @@ export async function appendComicVisualStyleImage(ownerUserId: string, comicId: 
     await appendOwnedAssetImageData(existing, uploaded);
     return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comic.id));
   }
-  const projectId = comic.chapters[0]?.project?.id;
-  if (!projectId) throw new AppError("invalid_state", "请先创建一个漫画章节，再上传视觉风格图片。", 422);
-
   await prisma.$transaction(async (tx) => {
     const asset = await tx.asset.create({
       data: {
         ownerUserId,
-        projectId,
+        comicId: comic.id,
         kind: AssetKind.STYLE,
         libraryStatus: AssetLibraryStatus.LIBRARY,
         name: "视觉风格",
@@ -111,7 +101,7 @@ export async function appendComicVisualStyleImage(ownerUserId: string, comicId: 
             width: uploaded.stored.width,
             height: uploaded.stored.height,
             checksum: uploaded.stored.checksum,
-            source: "upload",
+            origin: AssetVersionOrigin.UPLOAD,
           },
         },
       },
@@ -157,7 +147,7 @@ async function appendOwnedAssetImageData(asset: { id: string; currentVersionNumb
         width: uploaded.stored.width,
         height: uploaded.stored.height,
         checksum: uploaded.stored.checksum,
-        source: "upload",
+        origin: AssetVersionOrigin.UPLOAD,
       },
     });
     await tx.assetImage.create({
@@ -221,7 +211,7 @@ export async function attachExternalAssetImage(ownerUserId: string, assetId: str
           width: stored.width,
           height: stored.height,
           checksum: stored.checksum,
-          source: "external_upload",
+          origin: AssetVersionOrigin.EXTERNAL_UPLOAD,
         },
       });
       const image = await tx.assetImage.create({
@@ -318,9 +308,9 @@ export async function createAssetVariant(
       archivedAt: null,
       variantOfAssetId: null,
       libraryStatus: AssetLibraryStatus.LIBRARY,
-      project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+      comic: { archivedAt: null },
     },
-    select: { id: true, projectId: true, kind: true, name: true, description: true },
+    select: { id: true, comicId: true, kind: true, name: true, description: true },
   });
   if (!root) throw new AppError("not_found", "资产不存在。", 404);
   const lastVariant = await prisma.asset.findFirst({
@@ -331,7 +321,7 @@ export async function createAssetVariant(
   const created = await prisma.asset.create({
     data: {
       ownerUserId,
-      projectId: root.projectId,
+      comicId: root.comicId,
       kind: root.kind,
       libraryStatus: AssetLibraryStatus.LIBRARY,
       currentVersionNumber: 0,
@@ -397,7 +387,7 @@ export async function restoreAssetToCanvasList(ownerUserId: string, projectId: s
     if (!project) throw new AppError("not_found", "创作空间不存在。", 404);
 
     const asset = await tx.asset.findFirst({
-      where: { id: assetId, ownerUserId, project: { chapter: { comicId: project.chapter.comicId, archivedAt: null } } },
+      where: { id: assetId, ownerUserId, comicId: project.chapter.comicId },
       select: { id: true, name: true, kind: true, libraryStatus: true, archivedAt: true, variantOfAssetId: true },
     });
     if (!asset || (asset.archivedAt && asset.libraryStatus !== AssetLibraryStatus.LIBRARY)) throw new AppError("not_found", "资产不存在。", 404);
@@ -416,7 +406,7 @@ export async function restoreAssetToCanvasList(ownerUserId: string, projectId: s
 
     return tx.canvasAssetListItem.upsert({
       where: { projectId_assetId: { projectId: project.id, assetId: asset.id } },
-      create: { ownerUserId, projectId: project.id, assetId: asset.id, displayName: asset.name, displayKind: asset.kind },
+      create: { ownerUserId, projectId: project.id, assetId: asset.id, displayName: asset.name },
       update: { hiddenAt: null },
     });
   });
@@ -445,15 +435,14 @@ export async function listComicAssetCards(ownerUserId: string, comicId: string) 
       variantOfAssetId: null,
       kind: { notIn: [AssetKind.GENERATED_IMAGE, AssetKind.STYLE] },
       libraryStatus: AssetLibraryStatus.LIBRARY,
-      project: { chapter: { comicId: comic.id, archivedAt: null } },
+      comicId: comic.id,
     },
     include: {
-      project: { select: { chapterId: true } },
       images: { include: galleryImageInclude, orderBy: galleryOrder },
       _count: {
         select: {
           variants: {
-            where: { ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY, project: { chapter: { comicId: comic.id, archivedAt: null } } },
+            where: { ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY, comicId: comic.id },
           },
         },
       },
@@ -465,7 +454,6 @@ export async function listComicAssetCards(ownerUserId: string, comicId: string) 
     const cover = serializedImages(asset)[0];
     return {
       id: asset.id,
-      chapterId: asset.project.chapterId,
       kind: asset.kind.toLowerCase(),
       name: asset.name,
       description: asset.description,
@@ -484,19 +472,9 @@ export async function createComicLibraryAsset(
 ) {
   const comic = await prisma.comic.findFirst({
     where: { id: comicId, ownerUserId, archivedAt: null },
-    select: {
-      id: true,
-      chapters: {
-        where: { archivedAt: null, project: { isNot: null } },
-        orderBy: { number: "asc" },
-        take: 1,
-        select: { project: { select: { id: true } } },
-      },
-    },
+    select: { id: true },
   });
   if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
-  const projectId = comic.chapters[0]?.project?.id;
-  if (!projectId) throw new AppError("invalid_state", "请先为漫画创建一话，再保存资产资料。", 422);
   const kind = ({
     character: AssetKind.CHARACTER,
     scene: AssetKind.SCENE,
@@ -506,7 +484,7 @@ export async function createComicLibraryAsset(
   const created = await prisma.asset.create({
     data: {
       ownerUserId,
-      projectId,
+      comicId: comic.id,
       kind,
       libraryStatus: AssetLibraryStatus.LIBRARY,
       currentVersionNumber: 0,
@@ -520,9 +498,9 @@ export async function createComicLibraryAsset(
 export async function getAssetFamilyDetail(ownerUserId: string, assetId: string) {
   const requested = await prisma.asset.findFirst({
     where: { id: assetId, ownerUserId, archivedAt: null, libraryStatus: AssetLibraryStatus.LIBRARY },
-    select: { id: true, variantOfAssetId: true, project: { select: { chapter: { select: { comicId: true, archivedAt: true } } } } },
+    select: { id: true, comicId: true, variantOfAssetId: true, comic: { select: { archivedAt: true } } },
   });
-  if (!requested || requested.project.chapter.archivedAt) throw new AppError("not_found", "资产不存在。", 404);
+  if (!requested || requested.comic.archivedAt) throw new AppError("not_found", "资产不存在。", 404);
 
   const rootId = requested.variantOfAssetId ?? requested.id;
   const root = await prisma.asset.findFirst({
@@ -533,7 +511,7 @@ export async function getAssetFamilyDetail(ownerUserId: string, assetId: string)
       variantOfAssetId: null,
       kind: { not: AssetKind.GENERATED_IMAGE },
       libraryStatus: AssetLibraryStatus.LIBRARY,
-      project: { chapter: { comicId: requested.project.chapter.comicId, archivedAt: null } },
+      comicId: requested.comicId,
     },
     include: {
       images: { include: galleryImageInclude, orderBy: galleryOrder },
@@ -542,7 +520,7 @@ export async function getAssetFamilyDetail(ownerUserId: string, assetId: string)
           ownerUserId,
           archivedAt: null,
           libraryStatus: AssetLibraryStatus.LIBRARY,
-          project: { chapter: { comicId: requested.project.chapter.comicId, archivedAt: null } },
+          comicId: requested.comicId,
         },
         include: {
           images: { include: galleryImageInclude, orderBy: galleryOrder },

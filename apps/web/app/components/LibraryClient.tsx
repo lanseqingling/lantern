@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiCreateComic, apiListComics, type ComicListItem } from "@/app/lib/api-client";
+import { navigateWithContentTransition } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
 
 function creationStatusLabel(status: ComicListItem["status"]) {
@@ -54,7 +55,7 @@ export function LibraryClient() {
     setError("");
     try {
       const created = await apiCreateComic({ ...draft, format: draft.format === "four_panel" ? "page" : draft.format, title: draft.title.trim(), summary: draft.summary.trim() });
-      router.push(`/comics/${created.comic.id}`);
+      navigateWithContentTransition("forward", () => router.push(`/comics/${created.comic.id}`));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建漫画失败");
       setSubmitting(false);
@@ -68,7 +69,7 @@ export function LibraryClient() {
       {comics.map((comic) => {
         const latest = comic.chapters.at(-1);
         return <article className="comic-library-card" key={comic.id}>
-          <button type="button" className="comic-library-open" onClick={() => router.push(`/comics/${comic.id}`)}>
+          <button type="button" className="comic-library-open" onClick={() => navigateWithContentTransition("forward", () => router.push(`/comics/${comic.id}`))}>
             <div className="comic-cover">{comic.coverUrl ? <img src={comic.coverUrl} alt={`${comic.title}漫画封面`} loading="lazy" decoding="async" /> : <div className="comic-cover-placeholder" aria-label="尚未设置漫画封面"><b>{comic.title.slice(0, 2)}</b></div>}{comic.isExample ? <span className="example">示例漫画</span> : <span className={`comic-status ${comic.status}`}>{creationStatusLabel(comic.status)}</span>}</div>
             <div><small>{comic.format === "vertical" ? "条漫" : comic.format === "four_panel" ? "四格" : "页漫"}</small><h2>{comic.title}</h2><p>{comic.summary || "还没有故事简介。"}</p><strong>{latest ? `查看 ${comic.chapters.length} 话` : "先新建一话"} <span>→</span></strong></div>
           </button>

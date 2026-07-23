@@ -16,6 +16,7 @@ import {
   type ComicListItem,
 } from "@/app/lib/api-client";
 import { Icon } from "@lantern/ui";
+import { navigateWithContentTransition } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
@@ -34,6 +35,7 @@ function creationStatusLabel(status: "in_progress" | "completed") {
 
 export function ComicOverviewClient({ comicId }: { comicId: string }) {
   const router = useRouter();
+  const navigate = (href: string, direction: "forward" | "back" = "forward") => navigateWithContentTransition(direction, () => router.push(href));
   const comicCoverInputRef = useRef<HTMLInputElement>(null);
   const chapterCoverInputRef = useRef<HTMLInputElement>(null);
   const comicMenuRef = useRef<HTMLDivElement>(null);
@@ -130,7 +132,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
     setError("");
     try {
       const created = await apiCreateChapter(comicId, { title: draft.title.trim(), summary: draft.summary.trim() });
-      router.push(`/comics/${comicId}/chapters/${created.chapterId}`);
+      navigate(`/comics/${comicId}/chapters/${created.chapterId}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建新一话失败");
       setSubmitting(false);
@@ -229,7 +231,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
     try {
       await apiDeleteComic(comic.id);
       notify("已删除漫画。");
-      router.push("/workspace");
+      navigate("/workspace", "back");
     } catch (cause) {
       notify(deleteErrorMessage(cause));
       setDeletingComic(false);
@@ -245,7 +247,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
       const copied = await apiDuplicateComic(comic.id);
       notify("已复制为一部全新的漫画。");
       setMenuOpen(false);
-      router.push(`/comics/${copied.comicId}`);
+      navigate(`/comics/${copied.comicId}`);
     } catch (cause) {
       notify(cause instanceof Error ? cause.message : "复制漫画失败，请稍后再试。");
     } finally {
@@ -259,13 +261,13 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
   return <>
     <header>
       <div className="chapter-top-left">
-        <Link href="/workspace" className="chapter-back-icon app-page-corner-button" aria-label="返回我的漫画"><Icon name="collapse" /></Link>
-        <Link href={`/comics/${comic.id}/assets`} className="chapter-back-icon chapter-asset-space-icon app-page-corner-button" aria-label="进入资产空间"><Icon name="folder" /></Link>
+        <Link href="/workspace" className="chapter-back-icon app-page-corner-button" aria-label="返回我的漫画" onClick={(event) => { event.preventDefault(); navigate("/workspace", "back"); }}><Icon name="collapse" /></Link>
+        <Link href={`/comics/${comic.id}/assets`} className="chapter-back-icon chapter-asset-space-icon app-page-corner-button" aria-label="进入资产空间" onClick={(event) => { event.preventDefault(); navigate(`/comics/${comic.id}/assets`); }}><Icon name="folder" /></Link>
         <div className="comic-settings-wrap" ref={comicMenuRef}>
           <button type="button" className="comic-settings-trigger app-page-corner-button" aria-label="漫画设置" onClick={() => { setMenuOpen((open) => !open); setChapterMenuId(null); }}><span className="settings-mark comic-settings-mark" aria-hidden="true" /></button>
           {menuOpen ? <div className="comic-settings-menu" role="menu">
             <button type="button" onClick={() => { setSettingsDraft({ title: comic.title, summary: comic.summary, defaultReadingDirection: comic.defaultReadingDirection, status: comic.status }); setSettingsOpen(true); setMenuOpen(false); }}><span className="menu-item-glyph menu-item-glyph-settings" aria-hidden="true" /><span>漫画设置</span></button>
-            <button type="button" onClick={() => router.push(`/comics/${comic.id}/assets`)}><Icon name="folder" /><span>资产空间</span></button>
+            <button type="button" onClick={() => navigate(`/comics/${comic.id}/assets`)}><Icon name="folder" /><span>资产空间</span></button>
             <button type="button" disabled={duplicatingComic} onClick={() => void duplicateComic()}><Icon name="copy" /><span>{duplicatingComic ? "复制中" : "复制漫画"}</span></button>
             <button type="button" disabled={deletingComic} onClick={() => setConfirmDelete({ type: "comic" })}><Icon name="trash" /><span>{deletingComic ? "删除中" : "删除漫画"}</span></button>
           </div> : null}
@@ -273,7 +275,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
       </div>
       <div className="chapter-top-right">
         <div className="global-header-actions" aria-label="全局入口">
-          <button type="button" className="global-icon-button app-page-corner-button" aria-label="全局设置" onClick={() => router.push(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}`)}`)}><Icon name="settings" /></button>
+          <button type="button" className="global-icon-button app-page-corner-button" aria-label="全局设置" onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}`)}`)}><Icon name="settings" /></button>
         </div>
       </div>
     </header>
@@ -287,15 +289,15 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
       <div className="chapter-list-head"><h2>章节</h2><button type="button" className="chapter-add-button" aria-label="新建一话" onClick={() => { setDraft({ title: `第 ${comic.chapters.length + 1} 话`, summary: "" }); setCreating(true); }}><span aria-hidden="true" /></button></div>
       {error ? <p className="chapter-list-error">{error}</p> : null}
       {comic.chapters.length ? comic.chapters.map((chapter) => <article className="chapter-list-card" key={chapter.id}>
-        <button type="button" className="chapter-list-open" onClick={() => router.push(`/comics/${comic.id}/chapters/${chapter.id}${chapter.status === "completed" ? "/preview" : ""}`)}>
+        <button type="button" className="chapter-list-open" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}${chapter.status === "completed" ? "/preview" : ""}`)}>
           {chapter.coverUrl ? <img src={chapter.coverUrl} alt={`第 ${chapter.number} 话封面`} loading="lazy" decoding="async"/> : <div className="chapter-thumb-placeholder"><span>{chapter.number}</span></div>}
           <span><small>第 {chapter.number} 话</small><strong>{chapter.title}</strong><em><b className={`chapter-status ${chapter.status}`}>{creationStatusLabel(chapter.status)}</b>{chapter.summary}</em></span>
         </button>
         <div className="chapter-more-wrap" ref={chapterMenuId === chapter.id ? chapterMenuRef : null}>
           <button type="button" className="chapter-more-button" aria-label={`第 ${chapter.number} 话更多选项`} onClick={() => { setChapterMenuId((current) => current === chapter.id ? null : chapter.id); setMenuOpen(false); }}><Icon name="more" /></button>
           {chapterMenuId === chapter.id ? <div className={`chapter-more-menu ${chapterMenuOpensUpward ? "opens-upward" : ""}`} role="menu">
-            <button type="button" onClick={() => router.push(`/comics/${comic.id}/chapters/${chapter.id}`)}><Icon name="ai" /><span>进入工作台</span></button>
-            <button type="button" onClick={() => router.push(`/comics/${comic.id}/chapters/${chapter.id}/preview`)}><Icon name="preview" /><span>阅读预览</span></button>
+            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}`)}><Icon name="ai" /><span>进入工作台</span></button>
+            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}/preview`)}><Icon name="preview" /><span>阅读预览</span></button>
             <button type="button" onClick={() => { setChapterSettingsId(chapter.id); setChapterSettingsDraft({ title: chapter.title, summary: chapter.summary, status: chapter.status }); }}><span className="menu-item-glyph menu-item-glyph-settings" aria-hidden="true" /><span>修改设置</span></button>
             <button type="button" className="chapter-delete-action" disabled={deletingChapterId === chapter.id} onClick={() => setConfirmDelete({ type: "chapter", chapter })}><Icon name="trash" /><span>{deletingChapterId === chapter.id ? "删除中" : "删除一话"}</span></button>
           </div> : null}

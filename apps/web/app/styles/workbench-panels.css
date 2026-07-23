@@ -273,6 +273,18 @@ html[data-lantern-route-transition="landing"] .landing-route-transition { animat
 html[data-lantern-route-transition="workspace"] .workspace-route-transition { animation: workspaceRouteEnter 460ms cubic-bezier(.2,.8,.2,1) both; }
 @keyframes workspaceRouteEnter { from { opacity: 0; transform: translateY(7vh); } to { opacity: 1; transform: translateY(0); } }
 .library-page.is-leaving { opacity: 0; filter: blur(3px); pointer-events: none; transform: translateY(9vh); }
+.route-page-transition { will-change: opacity, transform; }
+html[data-lantern-content-route-transition="forward"] .route-page-transition { animation: contentRouteExitForward 180ms cubic-bezier(.2,.8,.2,1) both; pointer-events: none; }
+html[data-lantern-content-route-transition="back"] .route-page-transition { animation: contentRouteExitBack 180ms cubic-bezier(.2,.8,.2,1) both; pointer-events: none; }
+.route-page-transition.route-page-enter-forward { animation: contentRouteEnterForward 180ms cubic-bezier(.2,.8,.2,1) both; }
+.route-page-transition.route-page-enter-back { animation: contentRouteEnterBack 180ms cubic-bezier(.2,.8,.2,1) both; }
+@keyframes contentRouteExitForward { to { opacity: 0; transform: translateY(-8px); filter: blur(2px); } }
+@keyframes contentRouteExitBack { to { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
+@keyframes contentRouteEnterForward { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@keyframes contentRouteEnterBack { from { opacity: 0; transform: translateY(-8px); filter: blur(2px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .route-page-transition, .route-page-transition.route-page-enter-forward, .route-page-transition.route-page-enter-back { animation: none; }
+}
 .library-header, .chapter-page > header { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; }
 .library-header, .chapter-page > header { position: fixed; z-index: 90; top: var(--app-page-corner-top); left: var(--app-page-corner-inset); right: var(--app-page-corner-inset); }
 .library-brand { display: flex; align-items: center; gap: 8px; }

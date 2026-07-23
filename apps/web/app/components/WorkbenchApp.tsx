@@ -42,6 +42,7 @@ import { saveUploadedImage } from "@/app/lib/local-assets-client";
 import { assetKindTag, isAssetVisibleInAssetSpace } from "@/app/lib/asset-kind";
 import { buildFrameImageChoices, type FrameImageChoice } from "@/app/lib/frame-image-choices";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
+import { navigateWithContentTransition, prepareContentRouteEntry, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { fitVerticalNavigatorPaper, fitVerticalViewportWidth, nextVerticalViewportMode, verticalNavigatorWindow, verticalViewportModeMeta, type VerticalViewportMode } from "@/app/lib/vertical-workspace";
 import { findAvailableFrameImageCandidateForTask, isCandidatePreviewTargetVisible, resolveReadingUnitIndex, resolveWorkbenchPageIndex } from "@/app/lib/workbench-location";
 import {
@@ -305,6 +306,8 @@ function isFloatingCanvasControl(target: EventTarget | null) {
 
 export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterId: string }) {
   const router = useRouter();
+  const entryTransition = useContentRouteEntryTransition();
+  const navigate = (href: string, direction: "forward" | "back" = "forward") => navigateWithContentTransition(direction, () => router.push(href));
   const searchParams = useSearchParams();
   const assetCreateIntent = searchParams.get("assetCreate");
   const previewRoute = `/comics/${comicId}/chapters/${chapterId}/preview`;
@@ -2754,7 +2757,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     try {
       await apiSaveCanvasAssetToLibrary(asset.canvasListItemId, { name, kind: assetSaveDraft.kind });
       setAssetSaveFormId(null);
-      router.push(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&filter=${assetSaveDraft.kind === "reference_image" ? "reference" : assetSaveDraft.kind}`);
+      navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&filter=${assetSaveDraft.kind === "reference_image" ? "reference" : assetSaveDraft.kind}`);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "保存到资产空间失败");
     } finally {
@@ -3371,6 +3374,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setProjectMenu(false);
     setDockEntering(false);
     setModeSwitching(true);
+    prepareContentRouteEntry("forward");
     window.setTimeout(() => router.push(previewRoute), modeSwitchMotionDelay());
   };
   const toolbarStyle: CSSProperties | undefined = toolbarPlacement ? { left: toolbarPlacement.x, top: toolbarPlacement.y } : undefined;
@@ -3645,7 +3649,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         return next;
       });
       const openSavedAsset = candidate.metadata?.outputAssetId
-        ? () => router.push(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&asset=${encodeURIComponent(candidate.metadata?.outputAssetId ?? "")}`)
+        ? () => navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}&asset=${encodeURIComponent(candidate.metadata?.outputAssetId ?? "")}`)
         : undefined;
       const candidateStatusLabel = candidate.status === "available"
         ? isStoryboard ? "待应用" : candidate.targetLabel
@@ -3687,10 +3691,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }
 
   return (
-    <WorkbenchShell className={`mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
+    <WorkbenchShell className={`route-page-transition ${entryTransition} mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <header className="project-chip" data-testid="project-chip">
-        <button className="project-back app-page-corner-button" type="button" aria-label="返回漫画" onClick={() => router.push(`/comics/${comicId}`)}><Icon name="collapse" /></button>
+        <button className="project-back app-page-corner-button" type="button" aria-label="返回漫画" onClick={() => navigate(`/comics/${comicId}`, "back")}><Icon name="collapse" /></button>
         <button className="project-main" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label="打开项目菜单">
           <span className="project-main-card">
             <span><strong>Lantern AI</strong><small className="project-subtitle" data-full-text={projectSubtitle} tabIndex={0}><span>{projectSubtitle}</span></small></span>
@@ -3699,11 +3703,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </button>
         {projectMenu ? (
           <div className="project-menu" role="menu">
-            <button type="button" className="route-item" onClick={() => router.push("/workspace")}><span className="menu-action-label"><Icon name="home" />返回首页</span></button>
-            <button type="button" className="route-item" onClick={() => router.push(`/comics/${comicId}`)}><span className="menu-action-label"><Icon name="comic" />返回漫画</span></button>
+            <button type="button" className="route-item" onClick={() => navigate("/workspace", "back")}><span className="menu-action-label"><Icon name="home" />返回首页</span></button>
+            <button type="button" className="route-item" onClick={() => navigate(`/comics/${comicId}`, "back")}><span className="menu-action-label"><Icon name="comic" />返回漫画</span></button>
             <button type="button" className="route-item" onClick={() => {
               setProjectMenu(false);
-              router.push(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`);
+              navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`);
             }}><span className="menu-action-label"><Icon name="folder" />资产空间</span></button>
             <i className="project-menu-divider" />
             <button type="button" onClick={saveChapter}><span className="menu-action-label"><Icon name="save" />保存</span></button>
@@ -3726,7 +3730,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </nav>
         <div className={`drawer-main ${leftView === "assets" ? "assets-view" : ""} ${leftView === "storyboard" ? "storyboard-view" : ""}`}>
         {leftView === "assets" ? <section className="drawer-view asset-reference-list">
-          <div className="asset-sidebar-head"><h2><span><Icon name="asset" /></span>资产</h2><div className="asset-sidebar-actions"><button type="button" className="asset-studio-entry" onClick={() => router.push(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`)}><Icon name="folder" /><span>资产空间</span></button><button type="button" className="drawer-add-page asset-upload-button" aria-label="上传图片资产并放到画布" onClick={() => dockUploadRef.current?.click()}><Icon name="add" /></button></div></div>
+          <div className="asset-sidebar-head"><h2><span><Icon name="asset" /></span>资产</h2><div className="asset-sidebar-actions"><button type="button" className="asset-studio-entry" onClick={() => navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`)}><Icon name="folder" /><span>资产空间</span></button><button type="button" className="drawer-add-page asset-upload-button" aria-label="上传图片资产并放到画布" onClick={() => dockUploadRef.current?.click()}><Icon name="add" /></button></div></div>
           <div className="asset-reference-items">
             {canvasAssetLibrary.map((asset) => {
               const placement = canvasReferences.find((reference) => reference.assetId === asset.id);
@@ -3950,7 +3954,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       {comicDeleteTarget && comicDeleteSelection ? <DeleteConfirmDialog dialogId="comic-delete" title={comicDeleteTitle} description={comicDeleteDescription} confirmLabel={comicDeleteTarget.kind === "image" ? "确认移除" : "确认删除"} onCancel={() => setComicDeleteTarget(null)} onConfirm={confirmComicDelete} /> : null}
       {archiveImportFile ? <DeleteConfirmDialog dialogId="chapter-archive-import" title="覆盖当前一话内容？" description={`导入「${archiveImportFile.name}」会把完整 LCD、分镜条目和图片资源写入当前一话，并保存为新的稳定版本。现有历史版本不会删除。`} confirmLabel="确认导入" onCancel={() => setArchiveImportFile(null)} onConfirm={() => { const file = archiveImportFile; setArchiveImportFile(null); void importChapterArchive(file); }} /> : null}
-      {modelSettingsPromptOpen ? <DeleteConfirmDialog dialogId="model-settings-required" tone="neutral" icon="settings" title="配置模型后继续" description="当前 AI 能力还没有可用的 API Key。画布编辑不受影响，配置完成后可以直接重试。" confirmLabel="前往设置" onCancel={() => setModelSettingsPromptOpen(false)} onConfirm={() => router.push(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)} /> : null}
+      {modelSettingsPromptOpen ? <DeleteConfirmDialog dialogId="model-settings-required" tone="neutral" icon="settings" title="配置模型后继续" description="当前 AI 能力还没有可用的 API Key。画布编辑不受影响，配置完成后可以直接重试。" confirmLabel="前往设置" onCancel={() => setModelSettingsPromptOpen(false)} onConfirm={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)} /> : null}
 
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
       {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>请输入文本</div> : null}
@@ -3958,7 +3962,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />对白 {String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭对白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>对白<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>文字样式<CustomSelect ariaLabel="文字样式" className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>字号<NumberStepper ariaLabel="对话字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>边框粗细<NumberStepper ariaLabel="气泡边框粗细" step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
       {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />旁白 {String(selectedNarrationNumber || 1).padStart(2, "0")}</span><button type="button" aria-label="关闭旁白编辑" onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>文字<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>字号<NumberStepper ariaLabel="旁白字号" value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>保存</button></div></aside> : null}
 
-      <div className="canvas-global-actions" aria-label="全局入口"><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => router.push(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
+      <div className="canvas-global-actions" aria-label="全局入口"><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label="全局设置" onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label="Agent 对话">
         <div className="agent-head">
           <div className="agent-head-actions"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label="打开当前画布的会话列表" aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><button type="button" aria-label="收起 Agent 工作区" onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>

@@ -6,6 +6,7 @@ import { Icon } from "@lantern/ui";
 import { AssetDetailDialog } from "@/app/components/AssetDetailDialog";
 import { ComicBriefDialog } from "@/app/components/ComicBriefDialog";
 import { assetKindLabel, assetKindTag } from "@/app/lib/asset-kind";
+import { navigateWithContentTransition, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { apiDeleteAsset, apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
 
 type AssetFilter = "all" | "character" | "scene" | "prop" | "reference";
@@ -26,6 +27,7 @@ const filterIcons = { all: "assetAll", character: "user", scene: "scene", prop: 
 /** Comic-level reusable assets. A chapter only stores its own canvas placements. */
 export default function ComicAssetsPage() {
   const router = useRouter();
+  const entryTransition = useContentRouteEntryTransition();
   const params = useParams<{ comicId: string }>();
   const query = useSearchParams();
   const comicId = params.comicId;
@@ -73,7 +75,8 @@ export default function ComicAssetsPage() {
   const currentDetailResult = detailResult?.assetId === selectedId && detailResult.requestKey === detailRequestKey ? detailResult : null;
   const detailLoading = Boolean(selectedId && !currentDetailResult);
 
-  const goBack = () => router.push(returnToWorkbench ? `/comics/${comicId}/chapters/${chapterId}` : `/comics/${comicId}`);
+  const navigate = (href: string, direction: "forward" | "back" = "forward") => navigateWithContentTransition(direction, () => router.push(href));
+  const goBack = () => navigate(returnToWorkbench ? `/comics/${comicId}/chapters/${chapterId}` : `/comics/${comicId}`, "back");
   const addKind = filter === "all" ? "asset" : filter;
   const addLabel = ({ all: "添加资产", character: "添加角色", scene: "添加场景", prop: "添加道具", reference: "添加图片" } as const)[filter];
   const openAssetCreate = () => {
@@ -81,7 +84,7 @@ export default function ComicAssetsPage() {
       setNotice("请先进入一话工作区，再创建或上传资产。");
       return;
     }
-    router.push(`/comics/${comicId}/chapters/${chapterId}?assetCreate=${encodeURIComponent(addKind)}`);
+    navigate(`/comics/${comicId}/chapters/${chapterId}?assetCreate=${encodeURIComponent(addKind)}`);
   };
 
   const openAssetDetail = (assetId: string, trigger: HTMLButtonElement) => {
@@ -194,10 +197,10 @@ export default function ComicAssetsPage() {
     setNotice(`已删除资产“${assetName}”`);
   };
 
-  return <main className="comic-asset-studio-page app-surface">
+  return <main className={`comic-asset-studio-page app-surface route-page-transition ${entryTransition}`}>
     <header className="asset-studio-page-head app-page-wide">
       <button type="button" className="asset-studio-back app-page-corner-button" aria-label="返回" onClick={goBack}><Icon name="collapse" /></button>
-      <button type="button" className="asset-studio-global-settings app-page-corner-button" aria-label="全局设置" onClick={() => router.push(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}/assets`)}`)}><Icon name="settings" /></button>
+      <button type="button" className="asset-studio-global-settings app-page-corner-button" aria-label="全局设置" onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(`/comics/${comicId}/assets`)}`)}><Icon name="settings" /></button>
       <div className="asset-studio-page-title app-page-title">
         <span><Icon name="folder" /></span>
         <div><small>ASSET SPACE</small><h1>资产空间</h1></div>

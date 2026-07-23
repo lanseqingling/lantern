@@ -2,6 +2,7 @@
 
 import { type PropsWithChildren, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { navigateWithContentTransition, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 
 const RETURN_SCROLL_THRESHOLD = 180;
 const RETURN_TOUCH_DISTANCE = 112;
@@ -13,6 +14,7 @@ export function WorkspaceRouteTransition({ children }: PropsWithChildren) {
   const transitionStarted = useRef(false);
   const upwardScrollDistance = useRef(0);
   const upwardScrollReset = useRef<number | null>(null);
+  const entryTransition = useContentRouteEntryTransition();
 
   const returnToLanding = useCallback(() => {
     if (leaving || transitionStarted.current) return;
@@ -82,10 +84,17 @@ export function WorkspaceRouteTransition({ children }: PropsWithChildren) {
     };
   }, [returnToLanding]);
 
-  return <main className={`library-page app-surface workspace-route-transition${leaving ? " is-leaving" : ""}`} aria-busy={leaving} onClickCapture={(event) => {
-    const target = event.target instanceof Element ? event.target.closest('a[href="/"]') : null;
+  return <main className={`library-page app-surface workspace-route-transition route-page-transition ${entryTransition}${leaving ? " is-leaving" : ""}`} aria-busy={leaving} onClickCapture={(event) => {
+    const target = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (!target) return;
-    event.preventDefault();
-    returnToLanding();
+    const href = target.getAttribute("href");
+    if (href === "/") {
+      event.preventDefault();
+      returnToLanding();
+    }
+    if (href?.startsWith("/settings")) {
+      event.preventDefault();
+      navigateWithContentTransition("forward", () => router.push(href));
+    }
   }}>{children}</main>;
 }

@@ -7,10 +7,12 @@ import { createBlankWorkbench, loadDemoWorkbench, type PersistedWorkbench } from
 import { Icon } from "@lantern/ui";
 import { apiDownloadChapterArchive, apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
+import { prepareContentRouteEntry, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageDisplayMode } from "@lantern/shared";
 
 export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId: string }) {
   const router = useRouter();
+  const entryTransition = useContentRouteEntryTransition();
   const [state, setState] = useState<PersistedWorkbench>(() => createBlankWorkbench());
   const [loaded, setLoaded] = useState(false);
   const [dockEntering, setDockEntering] = useState(false);
@@ -113,6 +115,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     setDownloadMenuOpen(false);
     setDockEntering(false);
     setModeSwitching(true);
+    prepareContentRouteEntry("back");
     window.setTimeout(() => router.push(`${editUrl}&storyboardBeat=agent`), modeSwitchMotionDelay());
   };
 
@@ -198,10 +201,10 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
 
   if (loadError) return <main className="runtime-unavailable" role="alert"><section><span>LANTERN API</span><h1>预览暂时无法载入</h1><p>{loadError}</p><button type="button" onClick={() => window.location.reload()}>重新连接</button></section></main>;
   if (!loaded) return <main className="runtime-unavailable"><section><span>LANTERN PREVIEW</span><h1>正在载入已保存版本</h1></section></main>;
-  if (!sourceEnvelope) return <main className="runtime-unavailable" role="status"><section><span>LANTERN PREVIEW</span><h1>还没有已保存版本</h1><p>请先返回工作台保存当前一话，再进入阅读预览。</p><button type="button" onClick={() => router.push(editUrl)}>返回工作台</button></section></main>;
+  if (!sourceEnvelope) return <main className={`runtime-unavailable route-page-transition ${entryTransition}`} role="status"><section><span>LANTERN PREVIEW</span><h1>还没有已保存版本</h1><p>请先返回工作台保存当前一话，再进入阅读预览。</p><button type="button" onClick={() => { prepareContentRouteEntry("back"); router.push(editUrl); }}>返回工作台</button></section></main>;
 
   return (
-    <main className={`preview-shell ${isVertical ? "format-vertical" : "format-page"}`}>
+    <main className={`preview-shell route-page-transition ${entryTransition} ${isVertical ? "format-vertical" : "format-page"}`}>
       <section ref={isVertical ? verticalReaderRef : undefined} onScroll={isVertical ? handleVerticalScroll : undefined} className={`reader paged-reader ${isVertical ? "vertical-reader" : displayedPageIndices.length === 2 || currentGroup?.trueSpread ? "is-spread" : "is-single"} ${currentGroup?.trueSpread ? "is-true-spread" : ""}`} data-testid="preview-reader">
         {!isVertical ? <button type="button" className="preview-page-turn previous" aria-label="上一页" onClick={goPrevious} /> : null}
         <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"} style={previewPageWrapStyle}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={orderedUnits[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={orderedUnits[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>

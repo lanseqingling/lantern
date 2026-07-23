@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@lantern/ui";
+import { navigateWithContentTransition, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
 import {
   apiGetGlobalSettings,
@@ -33,6 +34,7 @@ function secretMask(draft: ModelDraft) {
 
 export function SettingsClient() {
   const router = useRouter();
+  const entryTransition = useContentRouteEntryTransition();
   const searchParams = useSearchParams();
   const returnTo = safeReturnTo(searchParams.get("returnTo"));
   const [settings, setSettings] = useState<GlobalSettings | null>(null);
@@ -123,9 +125,9 @@ export function SettingsClient() {
   };
 
   return (
-    <main className="settings-page app-surface">
+    <main className={`settings-page app-surface route-page-transition ${entryTransition}`}>
       <header className="settings-header">
-        <button type="button" className="settings-back app-page-corner-button" aria-label="返回" onClick={() => router.push(returnTo)}><Icon name="collapse" /></button>
+        <button type="button" className="settings-back app-page-corner-button" aria-label="返回" onClick={() => navigateWithContentTransition("back", () => router.push(returnTo))}><Icon name="collapse" /></button>
       </header>
 
       <section className="settings-shell app-page-narrow">

@@ -30,7 +30,7 @@ Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑�
 - 受控编辑：UI 与产品内外的 Agent 共用语义能力和作品边界；普通编辑可撤销，生成、结构和多对象结果先形成 Candidate，由创作者决定是否应用。
 
 ```text
-工作台 / 内置 Agent / 外置 Agent
+工作台 / 内置 Agent / 外置 Agent（MCP + Skill）
                 ↓
           受控语义能力
                 ↓

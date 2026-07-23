@@ -40,12 +40,14 @@ export function CustomSelect({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   ariaLabel: string;
   className?: string;
   options: CustomSelectOption[];
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -68,14 +70,15 @@ export function CustomSelect({
   }, [open]);
 
   return (
-    <div className={`custom-select ${className ?? ""} ${open ? "open" : ""}`} ref={ref}>
+    <div className={`custom-select ${className ?? ""} ${open ? "open" : ""} ${disabled ? "disabled" : ""}`} ref={ref}>
       <button
         type="button"
         className="custom-select-trigger"
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        disabled={disabled}
+        onClick={() => { if (!disabled) setOpen((current) => !current); }}
       >
         <span className="custom-select-trigger-label">
           {selected?.icon ? <SelectOptionIcon name={selected.icon} /> : null}

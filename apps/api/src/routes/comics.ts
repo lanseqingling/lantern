@@ -28,16 +28,18 @@ const comicCreateSchema = z.object({
   format: z.enum(["page", "vertical", "four_panel"]).default("page"),
   defaultReadingDirection: z.enum(["ltr", "rtl"]).default("ltr"),
 });
+const creationStatusSchema = z.enum(["in_progress", "completed"]);
 const comicUpdateSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   summary: z.string().trim().min(1).max(2000).optional(),
   worldSummary: z.string().trim().max(4000).optional(),
   styleSummary: z.string().trim().max(4000).optional(),
   defaultReadingDirection: z.enum(["ltr", "rtl"]).optional(),
-}).refine((value) => value.title !== undefined || value.summary !== undefined || value.worldSummary !== undefined || value.styleSummary !== undefined || value.defaultReadingDirection !== undefined);
+  status: creationStatusSchema.optional(),
+}).refine((value) => value.title !== undefined || value.summary !== undefined || value.worldSummary !== undefined || value.styleSummary !== undefined || value.defaultReadingDirection !== undefined || value.status !== undefined);
 const chapterCreateSchema = z.object({ title: z.string().trim().min(1).max(120), summary: z.string().trim().min(1).max(2000) });
-const chapterUpdateSchema = z.object({ title: z.string().trim().min(1).max(120).optional(), summary: z.string().trim().min(1).max(2000).optional() })
-  .refine((value) => value.title !== undefined || value.summary !== undefined);
+const chapterUpdateSchema = z.object({ title: z.string().trim().min(1).max(120).optional(), summary: z.string().trim().min(1).max(2000).optional(), status: creationStatusSchema.optional() })
+  .refine((value) => value.title !== undefined || value.summary !== undefined || value.status !== undefined);
 
 export function registerComicRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { cursor?: string; limit?: string } }>("/v1/comics", async (request) => {

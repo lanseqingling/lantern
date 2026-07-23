@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ComicFormat, ReadingDirection, TaskStatus, type Prisma } from "@prisma/client";
+import { ComicFormat, CreationStatus, ReadingDirection, TaskStatus, type Prisma } from "@prisma/client";
 import type { ComicDocument } from "@lantern/shared";
 import type { UploadedImage } from "./asset-service";
 import { prisma } from "./db";
@@ -43,9 +43,10 @@ function publicComic(comic: ComicWithChapters) {
     styleSummary: comic.styleSummary,
     format: comic.format.toLowerCase(),
     defaultReadingDirection: comic.defaultReadingDirection.toLowerCase(),
+    status: comic.status.toLowerCase(),
     isExample: comic.isExample,
     coverUrl: comicCoverPath(comic),
-    chapters: comic.chapters.map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title, summary: chapter.summary, coverUrl: chapterCoverPath(chapter), updatedAt: chapter.updatedAt.toISOString() })),
+    chapters: comic.chapters.map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title, summary: chapter.summary, status: chapter.status.toLowerCase(), coverUrl: chapterCoverPath(chapter), updatedAt: chapter.updatedAt.toISOString() })),
     updatedAt: comic.updatedAt.toISOString(),
   };
 }
@@ -86,6 +87,7 @@ export async function getComicChapter(ownerUserId: string, chapterId: string) {
     number: chapter.number,
     title: chapter.title,
     summary: chapter.summary,
+    status: chapter.status.toLowerCase(),
     coverUrl: chapterCoverPath(chapter),
     projectId: chapter.project?.id,
     workingRevision: chapter.project?.workingRevisions[0]?.revision,
@@ -99,10 +101,11 @@ export async function createComic(ownerUserId: string, input: { title: string; s
   return { comic: { id: comic.id, title: comic.title } };
 }
 
-export async function updateComic(ownerUserId: string, comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; defaultReadingDirection?: "ltr" | "rtl" }) {
+export async function updateComic(ownerUserId: string, comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; defaultReadingDirection?: "ltr" | "rtl"; status?: "in_progress" | "completed" }) {
   const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
   if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
-  return prisma.comic.update({ where: { id: comic.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}), ...(input.worldSummary !== undefined ? { worldSummary: input.worldSummary } : {}), ...(input.styleSummary !== undefined ? { styleSummary: input.styleSummary } : {}), ...(input.defaultReadingDirection !== undefined ? { defaultReadingDirection: input.defaultReadingDirection === "rtl" ? ReadingDirection.RTL : ReadingDirection.LTR } : {}) } });
+  if (comic.isExample && input.status !== undefined && input.status !== comic.status.toLowerCase()) throw new AppError("validation", "示例漫画的创作阶段不可修改。", 400);
+  return prisma.comic.update({ where: { id: comic.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}), ...(input.worldSummary !== undefined ? { worldSummary: input.worldSummary } : {}), ...(input.styleSummary !== undefined ? { styleSummary: input.styleSummary } : {}), ...(input.defaultReadingDirection !== undefined ? { defaultReadingDirection: input.defaultReadingDirection === "rtl" ? ReadingDirection.RTL : ReadingDirection.LTR } : {}), ...(input.status !== undefined ? { status: input.status === "completed" ? CreationStatus.COMPLETED : CreationStatus.IN_PROGRESS } : {}) } });
 }
 
 export async function getComicCover(ownerUserId: string, comicId: string) {
@@ -125,10 +128,10 @@ export async function createComicChapter(ownerUserId: string, comicId: string, i
   return createChapterWorkspace(ownerUserId, comic, (last?.number ?? 0) + 1, input.title, input.summary);
 }
 
-export async function updateComicChapter(ownerUserId: string, comicId: string, chapterId: string, input: { title?: string; summary?: string }) {
+export async function updateComicChapter(ownerUserId: string, comicId: string, chapterId: string, input: { title?: string; summary?: string; status?: "in_progress" | "completed" }) {
   const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, comicId, ownerUserId, archivedAt: null, comic: { archivedAt: null } } });
   if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
-  return prisma.chapter.update({ where: { id: chapter.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}) } });
+  return prisma.chapter.update({ where: { id: chapter.id }, data: { ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}), ...(input.status !== undefined ? { status: input.status === "completed" ? CreationStatus.COMPLETED : CreationStatus.IN_PROGRESS } : {}) } });
 }
 
 export async function getChapterCover(ownerUserId: string, chapterId: string) {
@@ -323,6 +326,7 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
         format: source.format,
         defaultReadingDirection: source.defaultReadingDirection,
         styleSummary: source.styleSummary,
+        status: source.status,
         coverObjectKey: comicCover?.objectKey,
         coverContentType: comicCover?.contentType,
         coverWidth: comicCover?.width,
@@ -389,6 +393,7 @@ export async function duplicateComic(ownerUserId: string, sourceComicId: string)
           number: sourceChapter.number,
           title: sourceChapter.title,
           summary: sourceChapter.summary,
+          status: sourceChapter.status,
           coverObjectKey: chapterCover?.objectKey,
           coverContentType: chapterCover?.contentType,
           coverWidth: chapterCover?.width,

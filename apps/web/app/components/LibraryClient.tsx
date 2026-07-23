@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { apiCreateComic, apiListComics, type ComicListItem } from "@/app/lib/api-client";
 import { CustomSelect } from "./CustomSelect";
 
+function creationStatusLabel(status: ComicListItem["status"]) {
+  return status === "completed" ? "已完成" : "创作中";
+}
+
 export function LibraryClient() {
   const router = useRouter();
   const [comics, setComics] = useState<ComicListItem[]>([]);
@@ -65,7 +69,7 @@ export function LibraryClient() {
         const latest = comic.chapters.at(-1);
         return <article className="comic-library-card" key={comic.id}>
           <button type="button" className="comic-library-open" onClick={() => router.push(`/comics/${comic.id}`)}>
-            <div className="comic-cover">{comic.coverUrl ? <img src={comic.coverUrl} alt={`${comic.title}漫画封面`} loading="lazy" decoding="async" /> : <div className="comic-cover-placeholder" aria-label="尚未设置漫画封面"><b>{comic.title.slice(0, 2)}</b></div>}<span className={comic.isExample ? "example" : undefined}>{comic.isExample ? "示例漫画" : comic.chapters.length ? "创作中" : "待建章节"}</span></div>
+            <div className="comic-cover">{comic.coverUrl ? <img src={comic.coverUrl} alt={`${comic.title}漫画封面`} loading="lazy" decoding="async" /> : <div className="comic-cover-placeholder" aria-label="尚未设置漫画封面"><b>{comic.title.slice(0, 2)}</b></div>}{comic.isExample ? <span className="example">示例漫画</span> : <span className={`comic-status ${comic.status}`}>{creationStatusLabel(comic.status)}</span>}</div>
             <div><small>{comic.format === "vertical" ? "条漫" : comic.format === "four_panel" ? "四格" : "页漫"}</small><h2>{comic.title}</h2><p>{comic.summary || "还没有故事简介。"}</p><strong>{latest ? `查看 ${comic.chapters.length} 话` : "先新建一话"} <span>→</span></strong></div>
           </button>
         </article>;

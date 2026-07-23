@@ -207,17 +207,27 @@ test("registered domain routes preserve validation and response envelopes", asyn
   assert.equal(fetched.statusCode, 200);
   assert.equal(fetched.json().data.title, "服务边界测试");
   assert.equal(fetched.json().data.worldSummary, "资源引用测试世界观");
+  assert.equal(fetched.json().data.status, "in_progress");
 
   const updated = await app.inject({
     method: "PATCH",
     url: `/v1/comics/${comicId}`,
     headers: { authorization, "content-type": "application/json" },
-    payload: { title: "服务边界测试·已更新" },
+    payload: { title: "服务边界测试·已更新", status: "completed" },
   });
   assert.equal(updated.statusCode, 200);
   assert.equal(updated.json().data.title, "服务边界测试·已更新");
+  assert.equal(updated.json().data.status, "COMPLETED");
 
-  await createComicChapter(LOCAL_USER_ID, comicId, { title: "上传测试一话", summary: "验证外置 Agent 图片上传边界。" });
+  const chapter = await createComicChapter(LOCAL_USER_ID, comicId, { title: "上传测试一话", summary: "验证外置 Agent 图片上传边界。" });
+  const completedChapter = await app.inject({
+    method: "PATCH",
+    url: `/v1/comics/${comicId}/chapters/${chapter.chapterId}`,
+    headers: { authorization, "content-type": "application/json" },
+    payload: { status: "completed" },
+  });
+  assert.equal(completedChapter.statusCode, 200);
+  assert.equal(completedChapter.json().data.status, "COMPLETED");
   const asset = await createComicLibraryAsset(LOCAL_USER_ID, comicId, {
     kind: "character",
     name: "上传测试角色",

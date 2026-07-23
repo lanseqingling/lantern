@@ -47,10 +47,11 @@ export type ComicListItem = {
   styleSummary: string;
   format: "page" | "vertical" | "four_panel";
   defaultReadingDirection: "ltr" | "rtl";
+  status: "in_progress" | "completed";
   isExample: boolean;
   coverUrl?: string;
   updatedAt: string;
-  chapters: Array<{ id: string; number: number; title: string; summary: string; coverUrl?: string; updatedAt: string }>;
+  chapters: Array<{ id: string; number: number; title: string; summary: string; status: "in_progress" | "completed"; coverUrl?: string; updatedAt: string }>;
 };
 
 export type ComicAssetListItem = {
@@ -177,8 +178,8 @@ export function apiCreateComic(input: { title: string; summary?: string; worldSu
   return api<{ comic: { id: string; title: string } }>("/v1/comics", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function apiUpdateComic(comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; defaultReadingDirection?: "ltr" | "rtl" }) {
-  return api<{ id: string; title: string; summary: string; worldSummary: string; styleSummary: string; defaultReadingDirection: "LTR" | "RTL" }>(`/v1/comics/${encodeURIComponent(comicId)}`, { method: "PATCH", body: JSON.stringify(input) });
+export function apiUpdateComic(comicId: string, input: { title?: string; summary?: string; worldSummary?: string; styleSummary?: string; defaultReadingDirection?: "ltr" | "rtl"; status?: "in_progress" | "completed" }) {
+  return api<{ id: string; title: string; summary: string; worldSummary: string; styleSummary: string; defaultReadingDirection: "LTR" | "RTL"; status: "IN_PROGRESS" | "COMPLETED" }>(`/v1/comics/${encodeURIComponent(comicId)}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function apiDeleteComic(comicId: string) {
@@ -195,8 +196,8 @@ export function apiCreateChapter(comicId: string, input: { title: string; summar
   return api<{ comicId: string; chapterId: string; number: number; title: string }>(`/v1/comics/${encodeURIComponent(comicId)}/chapters`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function apiUpdateChapter(comicId: string, chapterId: string, input: { title?: string; summary?: string }) {
-  return api<{ id: string; title: string; summary: string }>(`/v1/comics/${encodeURIComponent(comicId)}/chapters/${encodeURIComponent(chapterId)}`, { method: "PATCH", body: JSON.stringify(input) });
+export function apiUpdateChapter(comicId: string, chapterId: string, input: { title?: string; summary?: string; status?: "in_progress" | "completed" }) {
+  return api<{ id: string; title: string; summary: string; status: "IN_PROGRESS" | "COMPLETED" }>(`/v1/comics/${encodeURIComponent(comicId)}/chapters/${encodeURIComponent(chapterId)}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function apiDeleteChapter(comicId: string, chapterId: string) {

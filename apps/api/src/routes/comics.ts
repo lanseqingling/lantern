@@ -16,7 +16,7 @@ import {
   updateComicChapter,
   updateComicCover,
 } from "@lantern/server/comic-service";
-import { appendComicVisualStyleImage, getComicVisualStyle, listComicAssetCards } from "@lantern/server/asset-library-service";
+import { appendComicVisualStyleImage, createComicLibraryAsset, getComicVisualStyle, listComicAssetCards } from "@lantern/server/asset-library-service";
 import { currentUser, ok } from "../http";
 import { readUploadedImage, uploadedImage } from "../upload";
 
@@ -40,6 +40,11 @@ const comicUpdateSchema = z.object({
 const chapterCreateSchema = z.object({ title: z.string().trim().min(1).max(120), summary: z.string().trim().min(1).max(2000) });
 const chapterUpdateSchema = z.object({ title: z.string().trim().min(1).max(120).optional(), summary: z.string().trim().min(1).max(2000).optional(), status: creationStatusSchema.optional() })
   .refine((value) => value.title !== undefined || value.summary !== undefined || value.status !== undefined);
+const comicAssetCreateSchema = z.object({
+  kind: z.enum(["character", "scene", "prop", "reference_image"]),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(4000),
+});
 
 export function registerComicRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { cursor?: string; limit?: string } }>("/v1/comics", async (request) => {
@@ -61,6 +66,11 @@ export function registerComicRoutes(app: FastifyInstance) {
   app.get<{ Params: { comicId: string } }>("/v1/comics/:comicId/assets", async (request) => {
     const user = await currentUser(request);
     return ok(request, await listComicAssetCards(user.id, request.params.comicId));
+  });
+
+  app.post<{ Params: { comicId: string } }>("/v1/comics/:comicId/assets", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await createComicLibraryAsset(user.id, request.params.comicId, comicAssetCreateSchema.parse(request.body ?? {})));
   });
 
   app.get<{ Params: { comicId: string } }>("/v1/comics/:comicId/visual-style", async (request) => {

@@ -42,7 +42,7 @@ import { saveUploadedImage } from "@/app/lib/local-assets-client";
 import { assetKindTag, isAssetVisibleInAssetSpace } from "@/app/lib/asset-kind";
 import { buildFrameImageChoices, type FrameImageChoice } from "@/app/lib/frame-image-choices";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
-import { navigateWithContentTransition, prepareContentRouteEntry, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
+import { navigateWithContentTransition, prepareContentRouteEntry, useContentRouteEntryTransition, useDelayedLoadingIndicator } from "@/app/lib/content-route-transition";
 import { fitVerticalNavigatorPaper, fitVerticalViewportWidth, nextVerticalViewportMode, verticalNavigatorWindow, verticalViewportModeMeta, type VerticalViewportMode } from "@/app/lib/vertical-workspace";
 import { findAvailableFrameImageCandidateForTask, isCandidatePreviewTargetVisible, resolveReadingUnitIndex, resolveWorkbenchPageIndex } from "@/app/lib/workbench-location";
 import {
@@ -310,6 +310,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const navigate = (href: string, direction: "forward" | "back" = "forward") => navigateWithContentTransition(direction, () => router.push(href));
   const searchParams = useSearchParams();
   const assetCreateIntent = searchParams.get("assetCreate");
+  const assetCreateDraft = searchParams.get("assetDraft");
   const previewRoute = `/comics/${comicId}/chapters/${chapterId}/preview`;
   const [state, setState] = useState<PersistedWorkbench>(() => createBlankWorkbench());
   const [hydrated, setHydrated] = useState(false);
@@ -317,6 +318,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [modeSwitching, setModeSwitching] = useState(false);
   const [runtimeAdapter, setRuntimeAdapter] = useState<"loading" | "server" | "demo">("loading");
   const [runtimeError, setRuntimeError] = useState("");
+  const showInitialLoading = useDelayedLoadingIndicator(!hydrated && !runtimeError);
   const [runtimeIds, setRuntimeIds] = useState<RuntimeIds | null>(null);
   const [workbenchMeta, setWorkbenchMeta] = useState({ comicTitle: "正在载入", chapterTitle: "当前一话" });
   const [selection, setSelection] = useState<Selection>(noSelection);
@@ -401,7 +403,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [contextDebugSection, setContextDebugSection] = useState<ContextDebugSection>("raw");
   const [contextDebugError, setContextDebugError] = useState("");
   const [editDraft, setEditDraft] = useState<Record<string, string>>({});
+  const [creationListOverflows, setCreationListOverflows] = useState(false);
   const chatUploadRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const creationListRef = useRef<HTMLDivElement>(null);
   const dockUploadRef = useRef<HTMLInputElement>(null);
   const archiveImportRef = useRef<HTMLInputElement>(null);
   const agentMessagesRef = useRef<HTMLDivElement>(null);
@@ -450,6 +455,36 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   useOutsidePointerDismiss(Boolean(pageMenuId), ".draft-page-more, .page-item-menu-floating", () => setPageMenuId(null));
   useOutsidePointerDismiss(Boolean(pageEditor), ".page-edit-card-floating, .delete-confirm-overlay", () => setPageEditor(null));
   useOutsidePointerDismiss(Boolean(frameImageTarget), ".frame-image-picker", () => setFrameImageTarget(null));
+
+  useLayoutEffect(() => {
+    const input = composerInputRef.current;
+    if (!input) return;
+    const style = window.getComputedStyle(input);
+    const lineHeight = Number.parseFloat(style.lineHeight);
+    const verticalPadding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+    const maxHeight = (Number.isFinite(lineHeight) ? lineHeight : 18.6) * 8 + verticalPadding;
+    input.style.height = "0px";
+    const nextHeight = Math.min(maxHeight, Math.max(52, input.scrollHeight));
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = input.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [composer]);
+
+  useLayoutEffect(() => {
+    const list = creationListRef.current;
+    if (!list) return;
+    // The scroll rail extends through the card's visual bottom padding. Do not
+    // treat that small reserved space as content overflow.
+    const updateOverflow = () => setCreationListOverflows(list.scrollHeight - list.clientHeight > 12);
+    updateOverflow();
+    const resizeObserver = new ResizeObserver(updateOverflow);
+    const mutationObserver = new MutationObserver(updateOverflow);
+    resizeObserver.observe(list);
+    mutationObserver.observe(list, { childList: true, subtree: true, characterData: true });
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [leftView, state.assets, state.fixture.working.document]);
 
   useLayoutEffect(() => {
     if (!pageMenuId) return;
@@ -518,7 +553,20 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   useEffect(() => {
     if (!hydrated || !assetCreateIntent) return;
-    const copy = assetCreateIntent === "character" ? "创建一个角色" : assetCreateIntent === "scene" ? "创建一个场景" : assetCreateIntent === "prop" ? "创建一个道具" : assetCreateIntent === "reference" ? "我想添加一张图片" : "创建一个新资产";
+    let copy = assetCreateIntent === "character" ? "创建一个角色" : assetCreateIntent === "scene" ? "创建一个场景" : assetCreateIntent === "prop" ? "创建一个道具" : assetCreateIntent === "reference" ? "我想添加一张图片" : "创建一个新资产";
+    if (assetCreateDraft) {
+      try {
+        const draft = JSON.parse(assetCreateDraft) as { kind?: string; name?: string; description?: string };
+        const kind = draft.kind === "character" ? "角色" : draft.kind === "scene" ? "场景" : draft.kind === "prop" ? "道具" : draft.kind === "reference_image" ? "图片" : "资产";
+        copy = [
+          `创建一个${kind}：`,
+          draft.name?.trim() ? `名称：${draft.name.trim()}` : "",
+          draft.description?.trim() ? `描述：${draft.description.trim()}` : "",
+        ].filter(Boolean).join("\n");
+      } catch {
+        // Keep the intent-only draft when a stale route parameter cannot be parsed.
+      }
+    }
     const timer = window.setTimeout(() => {
       setComposer(copy);
       setScope("当前漫画资产");
@@ -527,12 +575,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setToast("已准备好创建资产，补充描述后发送给 Agent。");
       const params = new URLSearchParams(window.location.search);
       params.delete("assetCreate");
+      params.delete("assetDraft");
       if (runtimeIds?.conversationId) params.set("conversationId", runtimeIds.conversationId);
       const query = params.toString();
       router.replace(`/comics/${comicId}/chapters/${chapterId}${query ? `?${query}` : ""}`, { scroll: false });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [assetCreateIntent, chapterId, comicId, hydrated, router, runtimeIds?.conversationId]);
+  }, [assetCreateDraft, assetCreateIntent, chapterId, comicId, hydrated, router, runtimeIds?.conversationId]);
 
   const resolvedExplicitReferences = () => [...new Map(explicitReferences.map(({ objectType, objectId, versionId, label }) => {
     const normalizedLabel = label.trim().slice(0, 120);
@@ -3687,6 +3736,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }
 
   if (!hydrated) {
+    if (!showInitialLoading) return <main className="workbench-loading-blank" aria-busy="true" />;
     return <main className="runtime-unavailable"><section><span>LANTERN WORKBENCH</span><h1>正在载入工作稿</h1></section></main>;
   }
 
@@ -3728,7 +3778,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         <nav className="drawer-tabs" aria-label="创作空间分类">
           {([['assets', '资产'], ['storyboard', '分镜']] as Array<[LeftView, string]>).map(([value, label]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => setLeftView(value)}>{label}</button>)}
         </nav>
-        <div className={`drawer-main ${leftView === "assets" ? "assets-view" : ""} ${leftView === "storyboard" ? "storyboard-view" : ""}`}>
+        <div ref={creationListRef} className={`drawer-main ${leftView === "assets" ? "assets-view" : ""} ${leftView === "storyboard" ? "storyboard-view" : ""} ${creationListOverflows ? "has-scroll-overflow" : ""}`}>
         {leftView === "assets" ? <section className="drawer-view asset-reference-list">
           <div className="asset-sidebar-head"><h2><span><Icon name="asset" /></span>资产</h2><div className="asset-sidebar-actions"><button type="button" className="asset-studio-entry" onClick={() => navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`)}><Icon name="folder" /><span>资产空间</span></button><button type="button" className="drawer-add-page asset-upload-button" aria-label="上传图片资产并放到画布" onClick={() => dockUploadRef.current?.click()}><Icon name="add" /></button></div></div>
           <div className="asset-reference-items">
@@ -3999,7 +4049,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </div>
         <div className="composer-box" data-tour-id="agent-composer">
           <div className="reference-tags">{composerReferenceItems.map((item) => { if (item.type === "attachment") { const attachment = item.value; return <div className={`composer-image-reference ${attachment.status}`} key={item.key}><button type="button" className="composer-image-reference-preview" aria-label={`查看${attachment.name}`} onClick={() => setImageViewer({ images: [{ id: attachment.id, src: attachment.imageUrl, alt: `${attachment.name} 待发送` }] })}><img src={attachment.imageUrl} alt={`${attachment.name} 待发送`} /><span>{attachment.status === "uploading" ? "上传中…" : attachment.status === "failed" ? "上传失败" : attachment.name}</span></button><button type="button" className="composer-image-reference-remove" aria-label={`取消引用${attachment.name}`} onClick={() => removeComposerAttachment(attachment.id)}><Icon name="x" /></button></div>; } const reference = item.value; const removeReference = () => { setExplicitReferences((items) => items.filter((current) => current.id !== reference.id)); setComposerReferenceOrder((items) => items.filter((key) => key !== item.key)); }; return reference.kind === "comic_frame" ? <button type="button" className="composer-frame-reference" key={item.key} onClick={removeReference}>{reference.imageUrl ? <img src={reference.imageUrl} alt={`${reference.label} 缩略图`} /> : <span className="frame-reference-placeholder"><Icon name="layout" /></span>}<span>{reference.label}</span><Icon name="x" /></button> : reference.kind === "speech_balloon" ? <button type="button" className="composer-dialogue-reference" key={item.key} onClick={removeReference}><Icon name="reference" /><span>对白 {String(reference.balloonNumber ?? 1).padStart(2, "0")}</span><Icon name="x" /></button> : <button type="button" key={item.key} onClick={removeReference}><Icon name="reference" /> {reference.label} <Icon name="x" /></button>; })}</div>
-          <textarea data-testid="agent-input" value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? "可以继续准备下一条消息；任务结束后再发送" : "描述你想让 AI 生成、修改或确认的内容…"} />
+          <textarea ref={composerInputRef} data-testid="agent-input" value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? "可以继续准备下一条消息；任务结束后再发送" : "描述你想让 AI 生成、修改或确认的内容…"} />
           <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" aria-label="添加对话引用或 Agent 选项" onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><span className="composer-mode-label"><Icon name="ai" />创作</span><button type="button" className="at-button" aria-label="引用当前对象" onClick={() => addSelectionReference()}><Icon name="reference" /><span>引用</span></button><button type="button" className="send" aria-label={activeTask?.status === "running" ? "任务运行中" : composerAttachments.some((attachment) => attachment.status === "uploading") ? "图片上传中" : "发送"} disabled={activeTask?.status === "running" || composerAttachments.some((attachment) => attachment.status === "uploading")} onClick={sendMessage}><Icon name="send" /></button></div>
         </div>
       </AgentWorkspace>

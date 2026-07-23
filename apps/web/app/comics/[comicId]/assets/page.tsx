@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@lantern/ui";
+import { AssetCreateDialog } from "@/app/components/AssetCreateDialog";
 import { AssetDetailDialog } from "@/app/components/AssetDetailDialog";
 import { ComicBriefDialog } from "@/app/components/ComicBriefDialog";
 import { assetKindLabel, assetKindTag } from "@/app/lib/asset-kind";
 import { navigateWithContentTransition, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
-import { apiDeleteAsset, apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
+import { apiCreateComicAsset, apiDeleteAsset, apiDeleteAssetImage, apiGetAssetDetail, apiGetComic, apiGetComicVisualStyle, apiImportAssetToCanvasList, apiListComicAssets, apiLoadWorkbench, apiRenameAssetImage, apiSetPrimaryAssetImage, apiUpdateAsset, apiUpdateComic, apiUploadAssetImage, apiUploadComicVisualStyleImage, type ComicAssetDetail, type ComicAssetListItem, type ComicListItem, type ComicVisualStyle } from "@/app/lib/api-client";
 
 type AssetFilter = "all" | "character" | "scene" | "prop" | "reference";
 type BriefId = "story" | "world" | "style";
+type AssetCreateKind = "character" | "scene" | "prop" | "reference_image";
 
 const filters: Array<{ id: AssetFilter; label: string; kinds?: ComicAssetListItem["kind"][] }> = [
   { id: "all", label: "全部" },
@@ -50,6 +52,8 @@ export default function ComicAssetsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [adding, setAdding] = useState(false);
+  const [creatingAsset, setCreatingAsset] = useState(false);
+  const [createAssetReturnFocus, setCreateAssetReturnFocus] = useState<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let canceled = false;
@@ -77,14 +81,44 @@ export default function ComicAssetsPage() {
 
   const navigate = (href: string, direction: "forward" | "back" = "forward") => navigateWithContentTransition(direction, () => router.push(href));
   const goBack = () => navigate(returnToWorkbench ? `/comics/${comicId}/chapters/${chapterId}` : `/comics/${comicId}`, "back");
-  const addKind = filter === "all" ? "asset" : filter;
   const addLabel = ({ all: "添加资产", character: "添加角色", scene: "添加场景", prop: "添加道具", reference: "添加图片" } as const)[filter];
-  const openAssetCreate = () => {
-    if (!chapterId) {
-      setNotice("请先进入一话工作区，再创建或上传资产。");
-      return;
-    }
-    navigate(`/comics/${comicId}/chapters/${chapterId}?assetCreate=${encodeURIComponent(addKind)}`);
+  const initialCreateKind: AssetCreateKind = "character";
+  const openAssetCreate = (trigger: HTMLButtonElement) => {
+    setCreateAssetReturnFocus(trigger);
+    setCreatingAsset(true);
+  };
+
+  const closeAssetCreate = () => {
+    setCreatingAsset(false);
+    window.requestAnimationFrame(() => createAssetReturnFocus?.focus());
+  };
+
+  const createAsset = async (input: { kind: AssetCreateKind; name: string; description: string; image?: File }) => {
+    let detail = await apiCreateComicAsset(comicId, input);
+    if (input.image) detail = await apiUploadAssetImage(detail.root.id, input.image);
+    const cover = detail.root.images[0];
+    setAssets((current) => [{
+      id: detail.root.id,
+      kind: detail.kind,
+      name: detail.root.name,
+      description: detail.root.description,
+      versionId: cover?.versionId,
+      contentUrl: cover?.contentUrl,
+      variantCount: detail.variants.length,
+      updatedAt: detail.root.updatedAt,
+    }, ...current]);
+    closeAssetCreate();
+    setNotice(`已创建资产“${detail.root.name}”`);
+  };
+
+  const continueAssetWithAI = async (input: { kind: AssetCreateKind; name: string; description: string }) => {
+    const targetChapterId = chapterId ?? comic?.chapters.at(-1)?.id;
+    if (!targetChapterId) throw new Error("请先新建一话，再交给 AI 创建资产。");
+    const query = new URLSearchParams({
+      assetCreate: input.kind === "reference_image" ? "reference" : input.kind,
+      assetDraft: JSON.stringify(input),
+    });
+    navigate(`/comics/${comicId}/chapters/${targetChapterId}?${query.toString()}`);
   };
 
   const openAssetDetail = (assetId: string, trigger: HTMLButtonElement) => {
@@ -226,10 +260,11 @@ export default function ComicAssetsPage() {
         </nav>
         <div className="comic-asset-content" aria-live="polite">
           {loading ? <div className="comic-asset-loading">正在整理资产…</div> : null}
-          {!loading && !error ? <div className="comic-asset-grid"><button type="button" className="comic-asset-add-card" onClick={openAssetCreate}><span className="comic-asset-add-card-content"><span><Icon name="add" /></span><b>{addLabel}</b><small>{filter === "reference" ? "上传或加入图片" : "在当前工作区与 Agent 创建"}</small></span></button>{visibleAssets.map((asset) => <article className="comic-asset-card" key={asset.id}><button type="button" className="asset-card-open" aria-haspopup="dialog" aria-expanded={selectedId === asset.id} onClick={(event) => openAssetDetail(asset.id, event.currentTarget)}><span className="comic-asset-image">{asset.contentUrl ? <img src={asset.contentUrl} alt={`${asset.name}资产封面`} loading="lazy" decoding="async" /> : <i>{assetKindTag(asset.kind)}</i>}{asset.variantCount ? <em>{asset.variantCount + 1} 形态</em> : null}</span><span className="comic-asset-meta"><b>{asset.name}</b><small><i>{assetKindTag(asset.kind)}</i>{assetKindLabel(asset.kind)}</small></span></button>{returnToWorkbench ? <button type="button" className="asset-card-add" data-tooltip="导入当前画布列表" aria-label={`将${asset.name}导入当前画布列表`} disabled={adding} onClick={() => void importToCanvasList(asset)}><Icon name="add" /></button> : null}</article>)}</div> : null}
+          {!loading && !error ? <div className="comic-asset-grid"><button type="button" className="comic-asset-add-card" onClick={(event) => openAssetCreate(event.currentTarget)}><span className="comic-asset-add-card-content"><span><Icon name="add" /></span><b>{addLabel}</b><small>填写资料并按需上传图片</small></span></button>{visibleAssets.map((asset) => <article className="comic-asset-card" key={asset.id}><button type="button" className="asset-card-open" aria-haspopup="dialog" aria-expanded={selectedId === asset.id} onClick={(event) => openAssetDetail(asset.id, event.currentTarget)}><span className="comic-asset-image">{asset.contentUrl ? <img src={asset.contentUrl} alt={`${asset.name}资产封面`} loading="lazy" decoding="async" /> : <i>{assetKindTag(asset.kind)}</i>}{asset.variantCount ? <em>{asset.variantCount + 1} 形态</em> : null}</span><span className="comic-asset-meta"><b>{asset.name}</b><small><i>{assetKindTag(asset.kind)}</i>{assetKindLabel(asset.kind)}</small></span></button>{returnToWorkbench ? <button type="button" className="asset-card-add" data-tooltip="导入当前画布列表" aria-label={`将${asset.name}导入当前画布列表`} disabled={adding} onClick={() => void importToCanvasList(asset)}><Icon name="add" /></button> : null}</article>)}</div> : null}
         </div>
       </div>
     </section>
+    {creatingAsset ? <AssetCreateDialog initialKind={initialCreateKind} onCreate={createAsset} onContinueWithAI={continueAssetWithAI} onClose={closeAssetCreate} /> : null}
     {selectedId ? <AssetDetailDialog key={selectedId} detail={currentDetailResult?.detail ?? null} loading={detailLoading} error={currentDetailResult?.error ?? ""} onClose={closeAssetDetail} onRetry={() => setDetailRequestKey((key) => key + 1)} onSaveEntry={saveAssetEntry} onUploadImage={uploadAssetImage} onSetPrimaryImage={setPrimaryImage} onRenameImage={renameImage} onDeleteImage={deleteImage} onDeleteAsset={deleteAsset} returnFocus={detailReturnFocus} /> : null}
     {activeBrief ? <ComicBriefDialog title={activeBrief.title} eyebrow={activeBrief.eyebrow} description={activeBrief.description} value={activeBrief.value} placeholder={activeBrief.placeholder} maxLength={activeBrief.maxLength} required={activeBrief.required} referenceImages={activeBrief.id === "style" ? visualStyle.images : undefined} onUploadReference={activeBrief.id === "style" ? uploadVisualStyleReference : undefined} onRenameReference={activeBrief.id === "style" ? renameVisualStyleReference : undefined} onDeleteReference={activeBrief.id === "style" ? deleteVisualStyleReference : undefined} onSave={saveBrief} onClose={closeBrief} /> : null}
     {error || notice ? <div className="asset-studio-toast" role="status">{error || notice}</div> : null}

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@lantern/ui";
-import { navigateWithContentTransition, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
+import { navigateWithContentTransition, useContentRouteEntryTransition, useDelayedLoadingIndicator } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
 import {
   apiGetGlobalSettings,
@@ -44,6 +44,7 @@ export function SettingsClient() {
   const [saving, setSaving] = useState<Set<ModelCapability>>(() => new Set());
   const [notices, setNotices] = useState<Partial<Record<ModelCapability, string>>>({});
   const [loadingError, setLoadingError] = useState("");
+  const showInitialLoading = useDelayedLoadingIndicator(!settings && !loadingError);
 
   useEffect(() => {
     void apiGetGlobalSettings()
@@ -125,7 +126,7 @@ export function SettingsClient() {
   };
 
   return (
-    <main className={`settings-page app-surface route-page-transition ${entryTransition}`}>
+    <main className={`settings-page app-surface route-page-transition route-page-transition-fade ${entryTransition}`}>
       <header className="settings-header">
         <button type="button" className="settings-back app-page-corner-button" aria-label="返回" onClick={() => navigateWithContentTransition("back", () => router.push(returnTo))}><Icon name="collapse" /></button>
       </header>
@@ -137,7 +138,7 @@ export function SettingsClient() {
         </div>
 
         {loadingError ? <section className="settings-error"><strong>无法载入设置</strong><p>{loadingError}</p></section> : null}
-        {!settings && !loadingError ? <div className="settings-loading">正在载入设置…</div> : null}
+        {!settings && !loadingError && showInitialLoading ? <div className="settings-loading">正在载入设置…</div> : null}
 
         {settings ? <>
           <section className="settings-section">

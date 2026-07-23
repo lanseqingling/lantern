@@ -181,6 +181,16 @@ test("registered domain routes preserve validation and response envelopes", asyn
   assert.equal(created.statusCode, 200);
   const comicId = created.json().data.comic.id as string;
 
+  const createdAsset = await app.inject({
+    method: "POST",
+    url: `/v1/comics/${comicId}/assets`,
+    headers: { authorization, "content-type": "application/json" },
+    payload: { kind: "scene", name: "测试街区", description: "通过漫画资产创建接口建立。" },
+  });
+  assert.equal(createdAsset.statusCode, 200);
+  assert.equal(createdAsset.json().data.root.name, "测试街区");
+  assert.equal(createdAsset.json().data.kind, "scene");
+
   const mcpUpdated = await app.inject({
     method: "POST",
     url: "/mcp",

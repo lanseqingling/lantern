@@ -187,7 +187,13 @@
 .composer-frame-reference > img, .composer-frame-reference .frame-reference-placeholder, .composer-image-reference-preview > img { display: grid; place-items: center; width: 30px; height: 28px; overflow: hidden; border-radius: 9px; background: rgba(36,127,130,.12); object-fit: cover; }
 .composer-frame-reference > span:not(.frame-reference-placeholder), .composer-image-reference-preview > span { overflow: hidden; font-size: 9px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
 .composer-frame-reference > svg, .composer-image-reference-remove svg { display: block; justify-self: end; width: 10px; height: 10px; color: currentColor; }
-.composer-box textarea { display: block; width: 100%; min-height: 52px; max-height: 120px; resize: none; border: 0; outline: 0; background: transparent; padding: 4px; color: var(--ink); font-size: 12px; line-height: 1.55; }
+.composer-box textarea { box-sizing: border-box; display: block; width: 100%; min-height: 52px; max-height: 157px; resize: none; overflow-y: hidden; border: 0; outline: 0; background: transparent; padding: 4px; color: var(--ink); font-size: 12px; line-height: 1.55; scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.composer-box textarea::-webkit-scrollbar { width: 5px; }
+.composer-box textarea::-webkit-scrollbar-track { background: transparent; }
+.composer-box textarea::-webkit-scrollbar-thumb { border-radius: 999px; background: transparent; }
+.composer-box textarea:hover { scrollbar-color: rgba(145,153,157,.3) transparent; }
+.composer-box textarea:hover::-webkit-scrollbar-thumb { background: rgba(145,153,157,.3); }
+.composer-box textarea:hover::-webkit-scrollbar-thumb:hover { background: rgba(125,133,138,.44); }
 .composer-box textarea::placeholder { color: #8a969c; }
 .composer-box textarea:disabled { cursor: not-allowed; color: #87949a; }
 .composer-actions button:disabled { cursor: not-allowed; opacity: .4; }
@@ -273,7 +279,7 @@ html[data-lantern-route-transition="landing"] .landing-route-transition { animat
 html[data-lantern-route-transition="workspace"] .workspace-route-transition { animation: workspaceRouteEnter 460ms cubic-bezier(.2,.8,.2,1) both; }
 @keyframes workspaceRouteEnter { from { opacity: 0; transform: translateY(7vh); } to { opacity: 1; transform: translateY(0); } }
 .library-page.is-leaving { opacity: 0; filter: blur(3px); pointer-events: none; transform: translateY(9vh); }
-.route-page-transition { will-change: opacity, transform; }
+.route-page-transition { will-change: opacity; }
 html[data-lantern-content-route-transition="forward"] .route-page-transition { animation: contentRouteExitForward 180ms cubic-bezier(.2,.8,.2,1) both; pointer-events: none; }
 html[data-lantern-content-route-transition="back"] .route-page-transition { animation: contentRouteExitBack 180ms cubic-bezier(.2,.8,.2,1) both; pointer-events: none; }
 .route-page-transition.route-page-enter-forward { animation: contentRouteEnterForward 180ms cubic-bezier(.2,.8,.2,1) both; }
@@ -282,6 +288,11 @@ html[data-lantern-content-route-transition="back"] .route-page-transition { anim
 @keyframes contentRouteExitBack { to { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
 @keyframes contentRouteEnterForward { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
 @keyframes contentRouteEnterBack { from { opacity: 0; transform: translateY(-8px); filter: blur(2px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+.route-page-transition.route-page-transition-fade { will-change: opacity; }
+html[data-lantern-content-route-transition] .route-page-transition.route-page-transition-fade { animation: contentRouteFadeExit 160ms ease both; }
+.route-page-transition.route-page-transition-fade.route-page-enter-forward, .route-page-transition.route-page-transition-fade.route-page-enter-back { animation: contentRouteFadeEnter 160ms ease both; }
+@keyframes contentRouteFadeExit { to { opacity: 0; } }
+@keyframes contentRouteFadeEnter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .route-page-transition, .route-page-transition.route-page-enter-forward, .route-page-transition.route-page-enter-back { animation: none; }
 }

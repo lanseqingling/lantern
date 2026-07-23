@@ -1,4 +1,5 @@
 .runtime-unavailable { display: grid; min-height: 100dvh; place-items: center; padding: 24px; background: #f4f8f7; color: var(--ink); }
+.workbench-loading-blank { min-height: 100dvh; background: #f4f8f7; }
 .runtime-unavailable section { width: min(440px, 100%); padding: 34px; border: 1px solid rgba(36,127,130,.16); border-radius: 24px; background: #fff; box-shadow: var(--shadow); text-align: center; }
 .runtime-unavailable span { color: var(--cyan-deep); font-size: 10px; font-weight: 900; letter-spacing: .16em; }
 .runtime-unavailable h1 { margin: 10px 0 8px; font-size: 24px; }
@@ -228,19 +229,20 @@
 .drawer-main.assets-view, .drawer-main.storyboard-view {
   /* Let both scrolling rails run through the card's bottom padding, like the page list. */
   overflow-x: hidden;
-  overflow-y: scroll;
+  overflow-y: auto;
   margin: 0 -13px -12px 0;
   padding-right: 14px;
   scrollbar-gutter: auto;
 }
+.drawer-main.assets-view:not(.has-scroll-overflow), .drawer-main.storyboard-view:not(.has-scroll-overflow) { overflow-y: hidden; }
 .drawer-main.assets-view .drawer-view, .drawer-main.storyboard-view .drawer-view { padding-bottom: 0; }
 .drawer-main.assets-view, .drawer-main.storyboard-view, .draft-pages { scrollbar-color: transparent transparent; }
 .drawer-main.assets-view::-webkit-scrollbar, .drawer-main.storyboard-view::-webkit-scrollbar, .draft-pages::-webkit-scrollbar { width: 6px; }
 .drawer-main.assets-view::-webkit-scrollbar-track, .drawer-main.storyboard-view::-webkit-scrollbar-track, .draft-pages::-webkit-scrollbar-track { border: 0; background: transparent; }
 .drawer-main.assets-view::-webkit-scrollbar-thumb, .drawer-main.storyboard-view::-webkit-scrollbar-thumb, .draft-pages::-webkit-scrollbar-thumb { border: 0; border-radius: 999px; background: transparent; }
-.drawer-main.assets-view:hover, .drawer-main.storyboard-view:hover, .draft-pages:hover { scrollbar-color: rgba(145,153,157,.3) transparent; }
-.drawer-main.assets-view:hover::-webkit-scrollbar-thumb, .drawer-main.storyboard-view:hover::-webkit-scrollbar-thumb, .draft-pages:hover::-webkit-scrollbar-thumb { background: rgba(145,153,157,.3); }
-.drawer-main.assets-view:hover::-webkit-scrollbar-thumb:hover, .drawer-main.storyboard-view:hover::-webkit-scrollbar-thumb:hover, .draft-pages:hover::-webkit-scrollbar-thumb:hover { background: rgba(125,133,138,.44); }
+.drawer-main.has-scroll-overflow:hover, .draft-pages:hover { scrollbar-color: rgba(145,153,157,.3) transparent; }
+.drawer-main.has-scroll-overflow:hover::-webkit-scrollbar-thumb, .draft-pages:hover::-webkit-scrollbar-thumb { background: rgba(145,153,157,.3); }
+.drawer-main.has-scroll-overflow:hover::-webkit-scrollbar-thumb:hover, .draft-pages:hover::-webkit-scrollbar-thumb:hover { background: rgba(125,133,138,.44); }
 .drawer-view { padding: 1px 1px 18px; }
 .drawer-pages-fixed {
   display: flex;

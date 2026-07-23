@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "@lantern/ui";
 import { AssetImageViewer } from "@/app/components/AssetImageViewer";
 import { DeleteConfirmDialog } from "@/app/components/DeleteConfirmDialog";
@@ -72,6 +73,7 @@ export function AssetDetailDialog({
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(false);
   const [assetDeleting, setAssetDeleting] = useState(false);
   const [imageViewer, setImageViewer] = useState<ImageViewerRequest | null>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
   const entries = useMemo(() => detail ? [detail.root, ...detail.variants] : [], [detail]);
   const activeEntry = entries.find((entry) => entry.id === activeEntryId) ?? entries[0];
@@ -91,6 +93,8 @@ export function AssetDetailDialog({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => setPortalTarget(document.body), []);
 
   useEffect(() => {
     editingRef.current = editing;
@@ -338,7 +342,7 @@ export function AssetDetailDialog({
     }
   };
 
-  return <div className="asset-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  const dialog = <div className="asset-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section ref={dialogRef} className="asset-detail-dialog" role="dialog" aria-modal="true" aria-label={loading ? "正在加载资产详情" : error ? "资产详情加载失败" : activeEntry?.name} onMouseDown={(event) => event.stopPropagation()}>
       <button ref={closeButtonRef} type="button" className="asset-detail-close" aria-label="关闭资产详情" onClick={onClose}><Icon name="x" /></button>
       {loading ? <div className="asset-detail-loading" role="status"><span /><strong>正在打开资产…</strong></div> : null}
@@ -352,11 +356,11 @@ export function AssetDetailDialog({
         </nav> : null}
         <div className="asset-detail-body">
           {editing ? <form id="asset-detail-edit-form" className="asset-detail-copy asset-detail-unified-editor" aria-label="编辑资产文字资料" onSubmit={(event) => { event.preventDefault(); void saveDetails(); }}>
-            <div className="asset-detail-copy-actions asset-detail-edit-actions"><button type="button" disabled={saving} onClick={cancelEditing}>取消</button><button type="submit" className="primary" disabled={saving}><Icon name="save" />{saving ? "保存中…" : "保存资料"}</button></div>
+            <div className="asset-detail-copy-actions asset-detail-edit-actions"><span className="asset-detail-type">{assetKindLabel(detail.kind)}</span><button type="button" disabled={saving} onClick={cancelEditing}>取消</button><button type="submit" className="primary" disabled={saving}><Icon name="save" />{saving ? "保存中…" : "保存资料"}</button></div>
             <label><small>详细描述</small><textarea aria-label="详细描述" value={descriptionDraft} maxLength={4000} onChange={(event) => setDescriptionDraft(event.target.value)} /></label>
             {editError ? <em role="alert">{editError}</em> : null}
           </form> : <section className="asset-detail-copy" aria-label="资产文字资料">
-            <div className="asset-detail-copy-actions"><button type="button" aria-label="编辑资产资料" onClick={startEditing}><Icon name="edit" /></button><button type="button" aria-label="上传资产图片" disabled={imageMutating} onClick={() => uploadInputRef.current?.click()}><Icon name="add" /></button><div className="asset-detail-more" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAssetMenuOpen(false); }}><button type="button" aria-label="更多选项" aria-haspopup="menu" aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((open) => !open)}><Icon name="moreVertical" /></button>{assetMenuOpen ? <div className="asset-detail-more-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAssetMenuOpen(false); setPendingDeleteAsset(true); }}><Icon name="trash" />删除资产</button></div> : null}</div><input ref={uploadInputRef} className="asset-image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} /></div>
+            <div className="asset-detail-copy-actions"><span className="asset-detail-type">{assetKindLabel(detail.kind)}</span><button type="button" aria-label="编辑资产资料" onClick={startEditing}><Icon name="edit" /></button><button type="button" aria-label="上传资产图片" disabled={imageMutating} onClick={() => uploadInputRef.current?.click()}><Icon name="add" /></button><div className="asset-detail-more" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAssetMenuOpen(false); }}><button type="button" aria-label="更多选项" aria-haspopup="menu" aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((open) => !open)}><Icon name="moreVertical" /></button>{assetMenuOpen ? <div className="asset-detail-more-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAssetMenuOpen(false); setPendingDeleteAsset(true); }}><Icon name="trash" />删除资产</button></div> : null}</div><input ref={uploadInputRef} className="asset-image-upload-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} /></div>
             <div className="asset-detail-section"><small>详细描述</small><p>{activeEntry.description || "暂无描述"}</p></div>
             {imageError ? <em className="asset-image-error" role="alert">{imageError}</em> : null}
           </section>}
@@ -376,4 +380,6 @@ export function AssetDetailDialog({
     </section>
     {imageViewer ? <ImageViewer {...imageViewer} onIndexChange={setActiveImageIndex} onClose={() => setImageViewer(null)} /> : null}
   </div>;
+
+  return portalTarget ? createPortal(dialog, portalTarget) : null;
 }

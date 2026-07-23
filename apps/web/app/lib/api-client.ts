@@ -121,6 +121,10 @@ export async function apiListComicAssets(comicId: string) {
   return assets.map((asset) => ({ ...asset, contentUrl: asset.contentUrl ? absoluteAssetUrl(asset.contentUrl) : undefined }));
 }
 
+export async function apiCreateComicAsset(comicId: string, input: { kind: "character" | "scene" | "prop" | "reference_image"; name: string; description: string }) {
+  return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/comics/${encodeURIComponent(comicId)}/assets`, { method: "POST", body: JSON.stringify(input) }));
+}
+
 export async function apiGetAssetDetail(assetId: string) {
   return withAbsoluteAssetDetail(await api<ComicAssetDetail>(`/v1/assets/${encodeURIComponent(assetId)}`));
 }

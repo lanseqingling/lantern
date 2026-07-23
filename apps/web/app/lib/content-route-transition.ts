@@ -1,11 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 export type ContentRouteDirection = "forward" | "back";
 
 const CONTENT_ROUTE_ENTRY_KEY = "lantern-content-route-entry";
 const CONTENT_ROUTE_TRANSITION_MS = 180;
+const ROUTE_LOADING_INDICATOR_DELAY_MS = 450;
 
 function reducedMotion() {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -40,4 +41,19 @@ export function useContentRouteEntryTransition() {
   }, []);
 
   return direction ? `route-page-enter route-page-enter-${direction}` : "";
+}
+
+export function useDelayedLoadingIndicator(loading: boolean) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!loading) {
+      setVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setVisible(true), ROUTE_LOADING_INDICATOR_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
+
+  return visible;
 }

@@ -27,7 +27,7 @@ import type {
   WorkspaceChangeSet,
   WorkspaceOperation,
 } from "@lantern/shared";
-import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, scaleImageCrop, type PageDisplayMode } from "@lantern/shared";
+import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, type PageDisplayMode } from "@lantern/shared";
 import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
 import {
   createBlankWorkbench,
@@ -2556,27 +2556,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
-  const cropImage = (direction: "in" | "out" | "left" | "right" | "up" | "down" | "reset") => {
-    if (!selectedElement || selectedElement.type !== "image" || !selection.pageId) return;
-    const crop = selectedElement.crop ?? { x: 0, y: 0, width: 1, height: 1 };
-    let next = { ...crop };
-    if (direction === "in") next = scaleImageCrop(crop, .86);
-    if (direction === "out") next = scaleImageCrop(crop, 1.16);
-    if (direction === "left") next.x = Math.max(0, crop.x - 0.03);
-    if (direction === "right") next.x = Math.min(1 - next.width, crop.x + 0.03);
-    if (direction === "up") next.y = Math.max(0, crop.y - 0.03);
-    if (direction === "down") next.y = Math.min(1 - next.height, crop.y + 0.03);
-    if (direction === "reset") Object.assign(next, { x: 0, y: 0, width: 1, height: 1 });
-    next.x = Math.min(next.x, 1 - next.width); next.y = Math.min(next.y, 1 - next.height);
-    commitCapability("set_art_crop", {
-      unitId: selection.pageId,
-      frameId: selectedElement.comicFrameId,
-      layerId: selectedElement.layerId,
-      elementId: selectedElement.id,
-      crop: next,
-    }, uiCopy.workbench.operation.adjustImageCrop);
-  };
-
   const beginCrop = () => {
     if (selection.type === "speech_balloon") {
       setInspectorOpen(false);
@@ -2607,13 +2586,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setInspectorOpen(false);
     setObjectInteractionMode("crop");
     setToast(uiCopy.toast.workbench.mode.cornerEditEntered);
-  };
-
-  const resetFrameShape = () => {
-    if (!selection.pageId) return;
-    const { frame } = frameAndImageForSelection(selection);
-    if (!frame || frame.shape.kind === "rect") return;
-    commitCapability("reshape_frame", { unitId: selection.pageId, frameId: frame.id, geometry: frame.geometry, shape: { kind: "rect" } }, uiCopy.workbench.frameEditor.resetRotation);
   };
 
   const endCrop = () => {
@@ -3463,7 +3435,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
   });
   const frameImagePickerSelection = frameImageTarget ? frameAndImageForSelection(frameImageTarget.selection) : undefined;
-  const selectedCropFrame = objectInteractionMode === "crop" ? frameAndImageForSelection(selection).frame : undefined;
   const frameImageChoices = buildFrameImageChoices({
     assets: canvasAssetLibrary,
     canvasImages: canvasReferences,
@@ -4030,7 +4001,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </ObjectToolbar> : null}
         {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{uiCopy.workbench.frameEditor.editTitle(editingStoryboardTarget.label)}</span><button type="button" aria-label={uiCopy.workbench.frameEditor.closeAria} onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="x" /></button></div><section className="frame-editor-section"><strong>{uiCopy.workbench.frameEditor.storyboardTitle}</strong><label>{uiCopy.common.field.title}<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder={uiCopy.workbench.frameEditor.titlePlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>{uiCopy.common.field.description}<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder={uiCopy.workbench.frameEditor.descriptionPlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? uiCopy.common.action.save : uiCopy.workbench.frameEditor.createAndBind}</button></section><section className="frame-editor-section"><strong>{uiCopy.workbench.object.frame}</strong><label>{uiCopy.workbench.frameEditor.borderWidthLabel}<NumberStepper ariaLabel={uiCopy.workbench.frameEditor.borderWidthAria} step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>{uiCopy.workbench.frameEditor.saveBorder}</button></section></aside> : null}
 
-        {inspectorOpen && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selection.type !== "storyboard_beat" ? <aside className="object-inspector" data-testid="object-inspector" onClick={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{selection.label}</span><button type="button" aria-label={uiCopy.workbench.objectEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="panelRightClose" /></button></div>{selectedElement?.type === "image" ? <><p>{uiCopy.workbench.dialog.imageInspectorDescription}</p><div className="crop-controls"><button type="button" onClick={() => cropImage("in")}>{uiCopy.workbench.action.zoomIn}</button><button type="button" onClick={() => cropImage("out")}>{uiCopy.workbench.action.zoomOut}</button><button type="button" onClick={() => cropImage("left")}>{uiCopy.workbench.frameEditor.moveLeft}</button><button type="button" onClick={() => cropImage("up")}>{uiCopy.workbench.frameEditor.moveUp}</button><button type="button" onClick={() => cropImage("down")}>{uiCopy.workbench.frameEditor.moveDown}</button><button type="button" onClick={() => cropImage("right")}>{uiCopy.workbench.frameEditor.moveRight}</button><button type="button" onClick={() => cropImage("reset")}>{uiCopy.workbench.frameEditor.resetCrop}</button></div><button className="text-edit-link" type="button" disabled={!selectedCropFrame || selectedCropFrame.shape.kind === "rect"} onClick={resetFrameShape}>{uiCopy.workbench.frameEditor.resetRotation}</button><button className="text-edit-link" type="button" onClick={() => selectedElement.comicFrameId && setSelection({ type: "comic_frame", id: selectedElement.comicFrameId, pageId: selection.pageId, label: uiCopy.workbench.label.frame(selectedElement.comicFrameId.split("-").pop() ?? "") })}>{uiCopy.workbench.frameEditor.backToFrame}</button><button className="text-edit-link" type="button" onClick={() => selection.pageId && selectedElement.comicFrameId && openStoryboardEditorForFrame(selection.pageId, selectedElement.comicFrameId, selection.label)}>{selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard}</button></> : null}</aside> : null}
       </CanvasStage>
 
       {comicContextMenu && comicContextMenuStyle ? <FloatingMenu className="comic-context-menu reference-context-menu" style={comicContextMenuStyle} aria-label={uiCopy.workbench.objectEditor.manageMenuAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); handleComicContextAction(comicContextMenu.target, comicContextMenu.point); }}>

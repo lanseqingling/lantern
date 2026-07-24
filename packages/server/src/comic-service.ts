@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { ComicFormat, CreationStatus, ReadingDirection, TaskStatus, type Prisma } from "@prisma/client";
-import type { ComicDocument } from "@lantern/shared";
-import type { UploadedImage } from "./asset-service";
+import { validateComicDocument, type ComicDocument } from "@lantern/shared";
+import { createUploadedAsset, type UploadedImage } from "./asset-service";
 import { prisma } from "./db";
 import { AppError } from "./errors";
+import { renderPagePng } from "./export-renderer";
 import { getObject, putImage } from "./object-storage";
+import { setChapterCoverPageImage } from "./workbench-service";
 
 type ComicListCursor = { updatedAt: string; id: string };
 type ComicWithChapters = Prisma.ComicGetPayload<{ include: { chapters: true } }>;
@@ -135,14 +137,25 @@ export async function updateComicChapter(ownerUserId: string, comicId: string, c
 }
 
 export async function getChapterCover(ownerUserId: string, chapterId: string) {
-  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, ownerUserId, archivedAt: null, comic: { archivedAt: null } } });
+  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, ownerUserId, archivedAt: null, comic: { archivedAt: null } }, include: { project: { include: { workingRevisions: { orderBy: { revision: "desc" }, take: 1 } } } } });
+  const working = chapter?.project?.workingRevisions[0];
+  if (working) {
+    const document = validateComicDocument(structuredClone(working.document));
+    const cover = document.units.find((unit) => unit.pageRole === "cover");
+    if (cover) return { bytes: await renderPagePng(document, cover), contentType: "image/png" };
+  }
   if (!chapter?.coverObjectKey || !chapter.coverContentType) throw new AppError("not_found", "章节封面不存在。", 404);
   return { bytes: await getObject(chapter.coverObjectKey), contentType: chapter.coverContentType };
 }
 
 export async function updateChapterCover(ownerUserId: string, comicId: string, chapterId: string, uploaded: UploadedImage) {
-  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, comicId, ownerUserId, archivedAt: null, comic: { archivedAt: null } } });
+  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, comicId, ownerUserId, archivedAt: null, comic: { archivedAt: null } }, include: { project: { select: { id: true } } } });
   if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
+  if (!chapter.project) throw new AppError("not_found", "章节创作空间不存在。", 404);
+  const asset = await createUploadedAsset({ ownerUserId, projectId: chapter.project.id, placeOnCanvas: false, kind: "reference_image", name: "章节封面", description: "章节封面背景图", uploaded });
+  const version = asset.versions[0];
+  if (!version) throw new AppError("validation", "封面图片版本创建失败。", 422);
+  await setChapterCoverPageImage({ ownerUserId, projectId: chapter.project.id, chapterId: chapter.id, assetId: asset.id, assetVersionId: version.id, mediaType: uploaded.contentType, width: uploaded.stored.width, height: uploaded.stored.height });
   const updated = await prisma.chapter.update({ where: { id: chapter.id }, data: { coverObjectKey: uploaded.stored.objectKey, coverContentType: uploaded.contentType, coverWidth: uploaded.stored.width, coverHeight: uploaded.stored.height } });
   return { coverUrl: chapterCoverPath(updated) };
 }

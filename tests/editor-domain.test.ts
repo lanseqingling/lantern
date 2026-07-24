@@ -299,6 +299,7 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
     "remove_frame_image",
     "create_dialogue_balloon",
     "create_page_image",
+    "set_cover_page_image",
     "create_page_dialogue_balloon",
     "create_narration",
     "update_narration",

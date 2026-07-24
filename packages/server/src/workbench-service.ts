@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { MessageKind, type Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { AppError } from "./errors";
@@ -38,6 +39,35 @@ export async function getLatestWorking(projectId: string) {
   const working = await prisma.workingRevision.findFirst({ where: { projectId }, orderBy: { revision: "desc" } });
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
   return working;
+}
+
+export async function setChapterCoverPageImage(args: { ownerUserId: string; projectId: string; chapterId: string; assetId: string; assetVersionId: string; mediaType: string; width?: number; height?: number }) {
+  const current = await getLatestWorking(args.projectId);
+  const fixture = {
+    working: {
+      documentId: current.id,
+      chapterId: args.chapterId,
+      projectId: args.projectId,
+      createdAt: current.createdAt.toISOString(),
+      state: "working" as const,
+      revision: current.revision,
+      document: validateComicDocument(json<unknown>(current.document)),
+    },
+    storyboardBeats: normalizeStoryboardBeats(json<unknown[]>(current.storyboardBeats)),
+  };
+  const plan = planEditorCapability("set_cover_page_image", {
+    assetId: args.assetId,
+    assetVersionId: args.assetVersionId,
+    mediaType: args.mediaType,
+    width: args.width,
+    height: args.height,
+  }, { fixture, createId: (prefix) => `${prefix}:${current.revision + 1}:${randomUUID()}`, actor: "human" });
+  return commitChangeSet({
+    ownerUserId: args.ownerUserId,
+    projectId: args.projectId,
+    expectedRevision: current.revision,
+    changeSet: { id: `set-cover:${randomUUID()}`, projectId: args.projectId, baseRevision: current.revision, source: "manual", commands: plan.commands },
+  });
 }
 
 export async function restoreLatestSnapshot(args: { ownerUserId: string; projectId: string; chapterId: string; expectedRevision: number }) {

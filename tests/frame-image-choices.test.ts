@@ -63,3 +63,14 @@ test("non-frame image pickers keep using only library assets", () => {
 
   assert.deepEqual(choices.map((choice) => choice.label), ["资产图片"]);
 });
+
+test("frame image choices do not repeat an asset already placed on the canvas", () => {
+  const choices = buildFrameImageChoices({
+    assets: [{ id: "shared-asset", kind: "reference_image", name: "同一张图", description: "", versionId: "shared-v1", contentUrl: "/shared.png" }],
+    canvasImages: [{ id: "shared-placement", kind: "reference_image", name: "同一张图", detail: "", imageSrc: "/shared.png", assetId: "shared-asset", assetVersionId: "shared-v1", x: 0, y: 0, zoom: 1, collapsed: false, pinned: false }],
+    resources: [],
+    includeCurrentPageImages: false,
+  });
+
+  assert.deepEqual(choices.map((choice) => choice.id), ["canvas:shared-placement"]);
+});

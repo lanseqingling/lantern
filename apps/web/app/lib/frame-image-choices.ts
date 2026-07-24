@@ -114,5 +114,11 @@ export function buildFrameImageChoices(input: {
     }] : [];
   });
 
-  return [...pageChoices, ...canvasChoices, ...assetChoices];
+  // A canvas placement can point at the same immutable resource version as an
+  // asset-library entry. They are two workbench views of one image, rather
+  // than two choices for placing it on paper, so keep the earlier canvas view.
+  const canvasResourceVersions = new Set(canvasChoices.map((choice) => resourceKey(choice.assetId, choice.assetVersionId)));
+  const uniqueAssetChoices = assetChoices.filter((choice) => !canvasResourceVersions.has(resourceKey(choice.assetId, choice.assetVersionId)));
+
+  return [...pageChoices, ...canvasChoices, ...uniqueAssetChoices];
 }

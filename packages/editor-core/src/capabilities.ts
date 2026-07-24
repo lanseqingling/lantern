@@ -473,9 +473,12 @@ const createPageImageCapability = defineCapability({
     const elementWidth = Math.min(surface.geometry.width * .42, Math.max(120, surface.geometry.width * .3));
     const sourceRatio = input.width && input.height ? input.height / input.width : .75;
     const elementHeight = Math.min(surface.geometry.height * .42, elementWidth * sourceRatio);
+    const coverImage = unit.pageRole === "cover";
     const element: ArtElement = {
       id: context.createId("page-image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId,
-      transform: { x: clamp(input.position.x - elementWidth / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - elementWidth), y: clamp(input.position.y - elementHeight / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - elementHeight), width: elementWidth, height: elementHeight },
+      transform: coverImage
+        ? { x: surface.geometry.x, y: surface.geometry.y, width: surface.geometry.width, height: surface.geometry.height }
+        : { x: clamp(input.position.x - elementWidth / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - elementWidth), y: clamp(input.position.y - elementHeight / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - elementHeight), width: elementWidth, height: elementHeight },
       crop: { x: 0, y: 0, width: 1, height: 1 }, name: "纸面图片",
     };
     const commands: WorkspaceCommand[] = [];
@@ -484,6 +487,46 @@ const createPageImageCapability = defineCapability({
     }
     if (overlay.command) commands.push(overlay.command);
     commands.push({ type: "add_overlay_element", unitId: unit.id, layerId: overlay.layer.id, element });
+    return commands;
+  },
+});
+
+const setCoverPageImageCapability = defineCapability({
+  id: "set_cover_page_image",
+  version: 1,
+  inputSchema: z.strictObject({
+    assetId: z.string().min(1),
+    assetVersionId: z.string().min(1),
+    mediaType: z.string().startsWith("image/"),
+    width: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+  }),
+  scope: "chapter",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "medium",
+  preconditions: ["page_comic", "asset_version_is_fixed"],
+  outputCommandTypes: ["declare_resource", "add_presentation_unit", "add_overlay_layer", "add_overlay_element", "remove_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    if (document.format !== "page") throw new Error("封面页只支持页漫");
+    const commands: WorkspaceCommand[] = [];
+    let cover = document.units.find((unit) => unit.pageRole === "cover");
+    if (!cover) {
+      const reference = document.units.find((unit) => unit.id === document.reading.unitOrder.at(-1));
+      const canvas = reference ? structuredClone(reference.kind === "spread" ? { width: reference.surfaces[0]?.geometry.width ?? 720, height: reference.canvas.height, background: reference.canvas.background } : reference.canvas) : { width: 720, height: 1080, background: { color: "#ffffff" } };
+      const id = context.createId("cover-page");
+      cover = { id, kind: "single_page", pageRole: "cover", canvas, surfaces: [{ id: `${id}-surface`, role: "single", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: 1 }], frames: [], overlayLayers: [], readingSequence: [], layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" } };
+      commands.push({ type: "add_presentation_unit", unit: cover, readingIndex: 0 });
+    }
+    if (!document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
+    const existing = cover.overlayLayers.flatMap((layer) => layer.elements.filter((element): element is ArtElement => element.kind === "image").map((element) => ({ layer, element }))).at(0);
+    if (existing) commands.push({ type: "remove_overlay_element", unitId: cover.id, layerId: existing.layer.id, elementId: existing.element.id });
+    const overlay = overlayLayerFor(context, cover, { type: "unit" }, "page_content", "纸面内容", cover.surfaces[0]?.id);
+    if (overlay.command) commands.push(overlay.command);
+    commands.push({ type: "add_overlay_element", unitId: cover.id, layerId: overlay.layer.id, element: { id: context.createId("cover-image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId, transform: { x: 0, y: 0, width: cover.canvas.width, height: cover.canvas.height }, crop: { x: 0, y: 0, width: 1, height: 1 }, name: "封面主图" } });
     return commands;
   },
 });
@@ -1877,6 +1920,7 @@ const capabilityRegistry = {
   remove_frame_image: removeFrameImageCapability,
   create_dialogue_balloon: createDialogueBalloonCapability,
   create_page_image: createPageImageCapability,
+  set_cover_page_image: setCoverPageImageCapability,
   create_page_dialogue_balloon: createPageDialogueBalloonCapability,
   create_narration: createNarrationCapability,
   update_narration: updateNarrationCapability,

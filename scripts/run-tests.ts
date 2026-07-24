@@ -32,9 +32,11 @@ const env = {
   APP_ENV: "test",
   LANTERN_DATA_DIR: dataDir,
   LANTERN_NO_OPEN: "1",
-  TEXT_MODEL_PROVIDER: "test",
-  IMAGE_MODEL_PROVIDER: "test",
-  VISION_MODEL_PROVIDER: "test",
+  ...(suite === "integration" ? {
+    TEXT_MODEL_PROVIDER: "test",
+    IMAGE_MODEL_PROVIDER: "test",
+    VISION_MODEL_PROVIDER: "test",
+  } : {}),
 };
 
 try {

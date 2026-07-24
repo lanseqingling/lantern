@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { zipSync } from "fflate";
-import { compareVersions, expectedChecksum, safeArchiveEntries } from "@lantern/server/update-service";
+import { compareVersions, expectedChecksum, safeArchiveEntries, versionFromReleaseUrl } from "@lantern/server/update-service";
 
 test("application update versions compare stable semantic versions", () => {
   assert.ok(compareVersions("0.1.4", "0.1.3") > 0);
   assert.equal(compareVersions("v0.1.3", "0.1.3"), 0);
   assert.ok(compareVersions("0.2.0", "0.1.99") > 0);
   assert.ok(compareVersions("1.0.0", "2.0.0") < 0);
+});
+
+test("application update reads the version from GitHub's latest release redirect", () => {
+  assert.equal(versionFromReleaseUrl("https://github.com/lanseqingling/lantern/releases/tag/v0.1.6"), "0.1.6");
+  assert.throws(() => versionFromReleaseUrl("https://example.com/lanseqingling/lantern/releases/tag/v0.1.6"));
 });
 
 test("application update checksum selects the exact release archive", () => {

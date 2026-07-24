@@ -32,13 +32,14 @@ if (command === "stop") {
   await rm(lockFile, { force: true });
 } else if (command === "start") {
   const runtime = JSON.parse(await import("node:fs/promises").then(({ readFile }) => readFile(path.join(dataDir, "config", "runtime.json"), "utf8")));
+  const apiPort = Number(process.env.API_PORT) || runtime.apiPort;
   await mkdir(dataDir, { recursive: true });
   await writeFile(lockFile, JSON.stringify({ pid: process.pid }));
   const server = createServer((request, response) => {
     response.writeHead(request.url === "/health" ? 200 : 404, { "content-type": "application/json" });
     response.end(JSON.stringify({ ok: request.url === "/health" }));
   });
-  server.listen(runtime.apiPort, "127.0.0.1");
+  server.listen(apiPort, "127.0.0.1");
 }
 `;
 
@@ -71,12 +72,13 @@ test("application update worker replaces the install and restarts its health end
       writeFile(path.join(stagedRoot, "scripts", "lantern-bootstrap.mjs"), fixtureBootstrap),
       writeFile(path.join(installRoot, "marker.txt"), "old"),
       writeFile(path.join(stagedRoot, "marker.txt"), "new"),
-      writeFile(path.join(dataDir, "config", "runtime.json"), JSON.stringify({ apiPort: port })),
+      writeFile(path.join(dataDir, "config", "runtime.json"), JSON.stringify({ apiPort: port + 1 })),
       writeFile(path.join(dataDir, "lantern.lock"), JSON.stringify({ pid: process.pid })),
     ]);
 
     const worker = spawn(process.execPath, [workerFile, installRoot, stagedRoot, backupRoot, dataDir, "0.1.4"], {
       cwd: root,
+      env: { ...process.env, API_PORT: String(port) },
       stdio: "inherit",
     });
     const [exitCode] = await once(worker, "exit");

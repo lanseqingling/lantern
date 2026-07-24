@@ -45,6 +45,8 @@ async function waitForStopped() {
 }
 
 async function apiPort() {
+  const configuredPort = Number(process.env.API_PORT);
+  if (configuredPort) return configuredPort;
   const runtimeFile = path.join(dataDir, "config", "runtime.json");
   const runtime = JSON.parse(await readFile(runtimeFile, "utf8"));
   return Number(runtime.apiPort) || 18787;

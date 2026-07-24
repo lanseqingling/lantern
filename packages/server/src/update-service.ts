@@ -9,7 +9,8 @@ import { AppError } from "./errors";
 import { getRuntimePaths } from "./runtime-paths";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const updateEndpoint = "https://api.github.com/repos/lanseqingling/lantern/releases/latest";
+const updateEndpoint = "https://github.com/lanseqingling/lantern/releases/latest";
+const releaseDownloadRoot = "https://github.com/lanseqingling/lantern/releases/download";
 const checkIntervalMs = 30 * 60 * 1000;
 
 export type UpdateStatus = {
@@ -57,6 +58,15 @@ export function compareVersions(left: string, right: string) {
   return leftMajor - rightMajor || leftMinor - rightMinor || leftPatch - rightPatch;
 }
 
+export function versionFromReleaseUrl(value: string) {
+  const url = new URL(value);
+  const match = /^\/lanseqingling\/lantern\/releases\/tag\/v([^/]+)$/.exec(url.pathname);
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || !match?.[1]) {
+    throw new Error("Latest release redirect is invalid");
+  }
+  return decodeURIComponent(match[1]);
+}
+
 async function currentVersion() {
   const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string };
   return packageJson.version;
@@ -68,14 +78,14 @@ async function fetchUpdate(force: boolean): Promise<UpdateStatus> {
   if (!force && status?.checkedAt && Date.now() - Date.parse(status.checkedAt) < checkIntervalMs) return status;
   status = { currentVersion: current, checkedAt: status?.checkedAt, state: "checking", canAutoUpdate: autoUpdate };
   try {
-    const response = await fetch(updateEndpoint, { headers: { Accept: "application/vnd.github+json", "User-Agent": "Lantern" }, signal: AbortSignal.timeout(5000) });
+    const response = await fetch(updateEndpoint, { headers: { "User-Agent": "Lantern" }, redirect: "follow", signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new Error(`Update check failed: ${response.status}`);
-    const release = await response.json() as { tag_name?: string; html_url?: string; assets?: Array<{ name?: string; browser_download_url?: string }> };
-    const latestVersion = release.tag_name?.replace(/^v/, "");
-    if (!latestVersion) throw new Error("Latest release has no version");
-    const archiveUrl = release.assets?.find((asset) => /-source\.zip$/i.test(asset.name ?? ""))?.browser_download_url;
-    const checksumUrl = release.assets?.find((asset) => asset.name === "SHA256SUMS")?.browser_download_url;
-    status = { currentVersion: current, checkedAt: new Date().toISOString(), state: compareVersions(latestVersion, current) > 0 ? "available" : "upToDate", latestVersion, releaseUrl: release.html_url, archiveUrl, checksumUrl, canAutoUpdate: autoUpdate };
+    const latestVersion = versionFromReleaseUrl(response.url);
+    const releaseUrl = response.url;
+    const releaseAssetRoot = `${releaseDownloadRoot}/v${latestVersion}`;
+    const archiveUrl = `${releaseAssetRoot}/lantern-${latestVersion}-source.zip`;
+    const checksumUrl = `${releaseAssetRoot}/SHA256SUMS`;
+    status = { currentVersion: current, checkedAt: new Date().toISOString(), state: compareVersions(latestVersion, current) > 0 ? "available" : "upToDate", latestVersion, releaseUrl, archiveUrl, checksumUrl, canAutoUpdate: autoUpdate };
   } catch {
     status = { currentVersion: current, checkedAt: new Date().toISOString(), state: "unavailable", canAutoUpdate: autoUpdate };
   }

@@ -25,6 +25,7 @@
     "./resource-reference-service": "./src/resource-reference-service.ts",
     "./signed-assets": "./src/signed-assets.ts",
     "./settings-service": "./src/settings-service.ts",
+    "./update-service": "./src/update-service.ts",
     "./workbench-agent-visibility": "./src/workbench-agent-visibility.ts",
     "./workbench-service": "./src/workbench-service.ts"
   },

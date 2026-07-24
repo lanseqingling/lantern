@@ -40,6 +40,18 @@
 .settings-runtime dl > div { display: grid; min-width: 0; min-height: 46px; grid-template-columns: 96px minmax(0,1fr); align-items: center; gap: 18px; border-bottom: 1px solid rgba(23,32,38,.075); padding: 0 2px; }
 .settings-runtime dt { color: var(--muted); font-size: 10px; font-weight: 800; }
 .settings-runtime dd { min-width: 0; margin: 0; overflow: hidden; color: #35464e; font-size: 10px; font-weight: 800; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.settings-update .settings-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.settings-update .settings-section-heading button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--cyan-deep); font-size: 10px; font-weight: 850; cursor: pointer; text-decoration: none; }
+.settings-update .settings-section-heading button:disabled { opacity: .45; cursor: wait; }
+.settings-update .settings-section-heading svg, .settings-update-version svg { width: 14px; height: 14px; }
+.settings-update dl { margin: 0; border-top: 1px solid rgba(23,32,38,.075); }
+.settings-update dl > div { display: grid; min-height: 46px; grid-template-columns: 96px minmax(0,1fr); align-items: center; gap: 18px; border-bottom: 1px solid rgba(23,32,38,.075); padding: 0 2px; }
+.settings-update dt { color: var(--muted); font-size: 10px; font-weight: 800; }
+.settings-update dd { margin: 0; color: #35464e; font-size: 10px; font-weight: 800; text-align: right; }
+.settings-update-version { display: flex; align-items: center; justify-content: flex-end; }
+.settings-update-version.available { color: var(--cyan-deep); }
+.settings-update-version a { display: inline-flex; align-items: center; gap: 7px; border-radius: 8px; color: inherit; padding: 4px 6px; text-decoration: none; }
+.settings-update-version a:hover { background: var(--cyan-soft); }
 .settings-loading, .settings-error { position: relative; z-index: 1; width: min(760px, calc(100% - 44px)); margin: 120px auto; color: var(--muted); text-align: center; }
 .settings-error { border-radius: 18px; background: rgba(255,255,255,.8); padding: 28px; }
 .settings-error p { margin: 8px 0 0; font-size: 11px; }

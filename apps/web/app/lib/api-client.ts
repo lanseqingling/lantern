@@ -310,6 +310,18 @@ export function apiUpdateGlobalSettings(models: Array<{
   return api<GlobalSettings>("/v1/settings", { method: "PATCH", body: JSON.stringify({ models }) });
 }
 
+export type UpdateStatus = {
+  currentVersion: string;
+  checkedAt?: string;
+  state: "idle" | "checking" | "upToDate" | "available" | "unavailable";
+  latestVersion?: string;
+  releaseUrl?: string;
+};
+
+export function apiGetUpdateStatus(refresh = false) {
+  return api<UpdateStatus>(`/v1/update${refresh ? "?refresh=1" : ""}`);
+}
+
 async function readApiResponse<T>(response: Response, fallbackMessage: string) {
   const text = await response.text();
   if (!text) return {} as ApiEnvelope<T> & ApiFailure;

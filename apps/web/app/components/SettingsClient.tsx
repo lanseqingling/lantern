@@ -8,9 +8,11 @@ import { CustomSelect } from "./CustomSelect";
 import { uiCopy } from "@/app/lib/ui-copy";
 import {
   apiGetGlobalSettings,
+  apiGetUpdateStatus,
   apiUpdateGlobalSettings,
   type GlobalSettings,
   type ModelCapability,
+  type UpdateStatus,
 } from "@/app/lib/api-client";
 
 type ModelDraft = GlobalSettings["models"][number] & { apiKey: string };
@@ -45,6 +47,8 @@ export function SettingsClient() {
   const [saving, setSaving] = useState<Set<ModelCapability>>(() => new Set());
   const [notices, setNotices] = useState<Partial<Record<ModelCapability, string>>>({});
   const [loadingError, setLoadingError] = useState("");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const showInitialLoading = useDelayedLoadingIndicator(!settings && !loadingError);
 
   useEffect(() => {
@@ -55,6 +59,14 @@ export function SettingsClient() {
       })
       .catch((error) => setLoadingError(error instanceof Error ? error.message : uiCopy.settings.error.loadFailed));
   }, []);
+
+  const loadUpdateStatus = async (refresh = false) => {
+    setCheckingUpdate(true);
+    try { setUpdateStatus(await apiGetUpdateStatus(refresh)); }
+    finally { setCheckingUpdate(false); }
+  };
+
+  useEffect(() => { void loadUpdateStatus(); }, []);
 
   const updateDraft = (capability: ModelCapability, patch: Partial<ModelDraft>) => {
     setDrafts((current) => current.map((draft) => draft.capability === capability ? { ...draft, ...patch } : draft));
@@ -211,6 +223,10 @@ export function SettingsClient() {
               <div><dt>{uiCopy.settings.runtime.localPorts}</dt><dd>Web {settings.runtime.webPort} · API {settings.runtime.apiPort}</dd></div>
               <div><dt>{uiCopy.settings.runtime.objectStorage}</dt><dd>{settings.runtime.objectStorage}</dd></div>
             </dl>
+          </section>
+          <section className="settings-section settings-update">
+            <div className="settings-section-heading"><h2>{uiCopy.settings.section.updates}</h2><button type="button" aria-label={uiCopy.settings.update.checkAria} disabled={checkingUpdate} onClick={() => void loadUpdateStatus(true)}><Icon name="replace" />{uiCopy.settings.update.check}</button></div>
+            <dl><div><dt>{uiCopy.settings.update.currentLabel}</dt><dd className={`settings-update-version ${updateStatus?.state === "available" ? "available" : ""}`}>{updateStatus?.state === "available" && updateStatus.latestVersion && updateStatus.releaseUrl ? <a href={updateStatus.releaseUrl} target="_blank" rel="noreferrer" aria-label={uiCopy.settings.update.download}>{uiCopy.settings.update.available(updateStatus.currentVersion, updateStatus.latestVersion)}<Icon name="download" /></a> : updateStatus?.state === "available" && updateStatus.latestVersion ? uiCopy.settings.update.available(updateStatus.currentVersion, updateStatus.latestVersion) : updateStatus?.currentVersion ? `v${updateStatus.currentVersion}` : uiCopy.settings.update.checking}</dd></div></dl>
           </section>
         </> : null}
       </section>

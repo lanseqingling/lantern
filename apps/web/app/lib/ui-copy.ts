@@ -1259,6 +1259,15 @@ export const uiCopy = {
     section: {
       modelApi: "模型 API",
       localRuntime: "本地运行",
+      updates: "应用更新",
+    },
+    update: {
+      checking: "正在检查更新…",
+      currentLabel: "当前版本",
+      available: (current: string, latest: string) => `v${current} → v${latest}`,
+      check: "检查更新",
+      download: "下载更新",
+      checkAria: "检查 Lantern 更新",
     },
     runtime: {
       dataDirectory: "数据目录",

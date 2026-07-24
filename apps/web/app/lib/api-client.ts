@@ -316,10 +316,21 @@ export type UpdateStatus = {
   state: "idle" | "checking" | "upToDate" | "available" | "unavailable";
   latestVersion?: string;
   releaseUrl?: string;
+  archiveUrl?: string;
+  checksumUrl?: string;
+  canAutoUpdate: boolean;
 };
 
 export function apiGetUpdateStatus(refresh = false) {
   return api<UpdateStatus>(`/v1/update${refresh ? "?refresh=1" : ""}`);
+}
+
+export function apiInstallUpdate() {
+  return api<{ version: string }>("/v1/update/install", { method: "POST" });
+}
+
+export function apiGetUpdateInstallStatus() {
+  return api<{ state: "idle" | "stopping" | "replacing" | "restarting" | "completed" | "failed"; version?: string }>("/v1/update/install/status");
 }
 
 async function readApiResponse<T>(response: Response, fallbackMessage: string) {

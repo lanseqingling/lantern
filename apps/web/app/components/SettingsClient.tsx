@@ -8,7 +8,9 @@ import { CustomSelect } from "./CustomSelect";
 import { uiCopy } from "@/app/lib/ui-copy";
 import {
   apiGetGlobalSettings,
+  apiGetUpdateInstallStatus,
   apiGetUpdateStatus,
+  apiInstallUpdate,
   apiUpdateGlobalSettings,
   type GlobalSettings,
   type ModelCapability,
@@ -49,6 +51,7 @@ export function SettingsClient() {
   const [loadingError, setLoadingError] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateAction, setUpdateAction] = useState<"idle" | "preparing" | "restarting" | "failed">("idle");
   const showInitialLoading = useDelayedLoadingIndicator(!settings && !loadingError);
 
   useEffect(() => {
@@ -67,6 +70,40 @@ export function SettingsClient() {
   };
 
   useEffect(() => { void loadUpdateStatus(); }, []);
+
+  const waitForRestart = () => {
+    const deadline = Date.now() + 5 * 60 * 1000;
+    const poll = async () => {
+      try {
+        const next = await apiGetUpdateInstallStatus();
+        if (next.state === "completed") {
+          window.location.reload();
+          return;
+        }
+        if (next.state === "failed") {
+          setUpdateAction("failed");
+          return;
+        }
+      } catch {
+        // The API is expected to be temporarily unavailable while restarting.
+      }
+      if (Date.now() < deadline) window.setTimeout(() => void poll(), 1000);
+      else setUpdateAction("failed");
+    };
+    window.setTimeout(() => void poll(), 500);
+  };
+
+  const installUpdate = async () => {
+    if (updateAction === "preparing" || updateAction === "restarting") return;
+    setUpdateAction("preparing");
+    try {
+      await apiInstallUpdate();
+      setUpdateAction("restarting");
+      waitForRestart();
+    } catch {
+      setUpdateAction("failed");
+    }
+  };
 
   const updateDraft = (capability: ModelCapability, patch: Partial<ModelDraft>) => {
     setDrafts((current) => current.map((draft) => draft.capability === capability ? { ...draft, ...patch } : draft));
@@ -226,7 +263,7 @@ export function SettingsClient() {
           </section>
           <section className="settings-section settings-update">
             <div className="settings-section-heading"><h2>{uiCopy.settings.section.updates}</h2><button type="button" aria-label={uiCopy.settings.update.checkAria} disabled={checkingUpdate} onClick={() => void loadUpdateStatus(true)}><Icon name="replace" />{uiCopy.settings.update.check}</button></div>
-            <dl><div><dt>{uiCopy.settings.update.currentLabel}</dt><dd className={`settings-update-version ${updateStatus?.state === "available" ? "available" : ""}`}>{updateStatus?.state === "available" && updateStatus.latestVersion && updateStatus.releaseUrl ? <a href={updateStatus.releaseUrl} target="_blank" rel="noreferrer" aria-label={uiCopy.settings.update.download}>{uiCopy.settings.update.available(updateStatus.currentVersion, updateStatus.latestVersion)}<Icon name="download" /></a> : updateStatus?.state === "available" && updateStatus.latestVersion ? uiCopy.settings.update.available(updateStatus.currentVersion, updateStatus.latestVersion) : updateStatus?.currentVersion ? `v${updateStatus.currentVersion}` : uiCopy.settings.update.checking}</dd></div></dl>
+            <dl><div><dt>{uiCopy.settings.update.currentLabel}</dt><dd className={`settings-update-version ${updateStatus?.state === "available" ? "available" : ""}`}>{updateAction === "preparing" ? uiCopy.settings.update.preparing : updateAction === "restarting" ? uiCopy.settings.update.restarting : updateAction === "failed" ? <button type="button" onClick={() => void installUpdate()}>{uiCopy.settings.update.failed}</button> : updateStatus?.state === "available" && updateStatus.latestVersion && updateStatus.canAutoUpdate && updateStatus.archiveUrl && updateStatus.checksumUrl ? <button type="button" onClick={() => void installUpdate()} aria-label={uiCopy.settings.update.download}>{uiCopy.settings.update.available(updateStatus.currentVersion, updateStatus.latestVersion)}<Icon name="download" /></button> : updateStatus?.state === "available" && updateStatus.latestVersion && updateStatus.releaseUrl ? <a href={updateStatus.releaseUrl} target="_blank" rel="noreferrer" aria-label={uiCopy.settings.update.openRelease}>{uiCopy.settings.update.available(updateStatus.currentVersion, updateStatus.latestVersion)}<Icon name="download" /></a> : updateStatus?.state === "available" && updateStatus.latestVersion ? uiCopy.settings.update.available(updateStatus.currentVersion, updateStatus.latestVersion) : updateStatus?.currentVersion ? `v${updateStatus.currentVersion}` : uiCopy.settings.update.checking}</dd></div></dl>
           </section>
         </> : null}
       </section>

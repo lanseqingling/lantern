@@ -1267,7 +1267,11 @@ export const uiCopy = {
       available: (current: string, latest: string) => `v${current} → v${latest}`,
       check: "检查更新",
       download: "下载更新",
+      openRelease: "打开 Lantern Release",
       checkAria: "检查 Lantern 更新",
+      preparing: "正在下载并准备更新…",
+      restarting: "正在更新并重新启动…",
+      failed: "更新失败，请重试",
     },
     runtime: {
       dataDirectory: "数据目录",

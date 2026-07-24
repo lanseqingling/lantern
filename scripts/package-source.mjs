@@ -60,6 +60,10 @@ for (const relativePath of files) {
     { os: 3, attrs: mode << 16 },
   ];
 }
+archive[`${archiveRoot}/.lantern-release.json`] = [
+  new TextEncoder().encode(`${JSON.stringify({ distribution: "source-release", version: packageJson.version }, null, 2)}\n`),
+  { os: 3, attrs: 0o644 << 16 },
+];
 
 await mkdir(outputDirectory, { recursive: true });
 await writeFile(outputFile, zipSync(archive, { level: 9 }));

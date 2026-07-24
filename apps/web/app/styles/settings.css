@@ -50,8 +50,8 @@
 .settings-update dd { margin: 0; color: #35464e; font-size: 10px; font-weight: 800; text-align: right; }
 .settings-update-version { display: flex; align-items: center; justify-content: flex-end; }
 .settings-update-version.available { color: var(--cyan-deep); }
-.settings-update-version a { display: inline-flex; align-items: center; gap: 7px; border-radius: 8px; color: inherit; padding: 4px 6px; text-decoration: none; }
-.settings-update-version a:hover { background: var(--cyan-soft); }
+.settings-update-version a, .settings-update-version button { display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 8px; background: transparent; color: inherit; padding: 4px 6px; font: inherit; text-decoration: none; cursor: pointer; }
+.settings-update-version a:hover, .settings-update-version button:hover { background: var(--cyan-soft); }
 .settings-loading, .settings-error { position: relative; z-index: 1; width: min(760px, calc(100% - 44px)); margin: 120px auto; color: var(--muted); text-align: center; }
 .settings-error { border-radius: 18px; background: rgba(255,255,255,.8); padding: 28px; }
 .settings-error p { margin: 8px 0 0; font-size: 11px; }

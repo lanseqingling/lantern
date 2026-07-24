@@ -68,6 +68,7 @@ import {
   apiSaveSnapshot,
   apiStreamInteraction,
   apiUpdateCanvasAssetListItem,
+  apiUpdateProjectWorkspaceSettings,
   apiUpdateConversation,
   apiUpdatePlacement,
   apiUploadAgentAttachment,
@@ -426,6 +427,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const stateRef = useRef(state);
   const activeTaskRef = useRef<ActiveTask | null>(activeTask);
   const serverCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const workspaceSettingsCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
   const serverCommitGenerationRef = useRef(0);
   const serverPendingCommitCountRef = useRef(0);
   const initialConversationIdRef = useRef(searchParams.get("conversationId"));
@@ -722,7 +724,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         stateRef.current = nextState;
         setState(nextState);
         setSelection((current) => repairSelectionForState(current, nextState));
-        setPageDisplayMode("single");
+        setPageDisplayMode(nextState.workspaceSettings?.pageDisplayMode ?? "single");
         setRuntimeAdapter("demo");
         setAgentScrollRequest((request) => request + 1);
         setHydrated(true);
@@ -744,7 +746,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         setSelection((current) => repairSelectionForState(current, nextState));
         setRuntimeIds(loaded.ids);
         setWorkbenchMeta({ comicTitle: loaded.comic.title, chapterTitle: loaded.chapter.title });
-        setPageDisplayMode("single");
+        setPageDisplayMode(nextState.workspaceSettings?.pageDisplayMode ?? "single");
         setActiveTask(loaded.activeTask);
         activeTaskRef.current = loaded.activeTask;
         syncConversationUrl(loaded.ids.conversationId);
@@ -1344,7 +1346,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const plan = planCapabilities(requests);
       return commitOperations(plan.commands, label, "manual", undefined, nextPageIndex);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.draft.invalidCapabilityInput);
+      const message = error instanceof Error ? error.message : uiCopy.toast.workbench.draft.invalidCapabilityInput;
+      setToast(message);
       return false;
     }
   };
@@ -3199,6 +3202,17 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
   };
 
+  const moveComicPageToVirtualSlot = (unitId: string, afterUnitId: string) => {
+    const pageIndex = workingPages.findIndex((page) => page.id === unitId);
+    const targetIndex = workingPages.findIndex((page) => page.id === afterUnitId);
+    if (pageIndex < 0 || targetIndex < 0 || pageIndex === targetIndex || pageIndex === targetIndex + 1) return;
+    const direction = pageIndex < targetIndex ? "down" : "up";
+    const steps = pageIndex < targetIndex ? targetIndex - pageIndex : pageIndex - targetIndex - 1;
+    if (commitCapabilities(Array.from({ length: steps }, () => ({ id: "move_presentation_unit" as const, input: { unitId, direction } })), uiCopy.workbench.pageFlow.movePageToVirtualSlot, targetIndex)) {
+      setPageMenuId(null);
+    }
+  };
+
   const addVerticalSegment = (aspectRatio: VerticalSegmentAspectRatio) => {
     setVerticalSegmentMenuPosition(null);
     const pageIndex = state.fixture.working.document.units.length;
@@ -3225,6 +3239,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const activePageMenuIndex = activePageMenu ? currentPages.findIndex((comicPage) => comicPage.id === activePageMenu.id) : -1;
   const activePageMenuUnit = activePageMenu ? state.fixture.working.document.units.find((unit) => unit.id === activePageMenu.id) : undefined;
   const activePageMenuNextUnit = activePageMenuIndex >= 0 ? state.fixture.working.document.units.find((unit) => unit.id === currentPages[activePageMenuIndex + 1]?.id) : undefined;
+  const readerPageDisplayGroups = pageDisplayGroups(state.fixture.working.document, "spread");
   const activePageEditorPage = currentPages.find((comicPage) => comicPage.id === pageEditor?.unitId);
   const activePageEditorUnit = state.fixture.working.document.units.find((unit) => unit.id === pageEditor?.unitId);
   const activePageEditorIndex = activePageEditorPage ? currentPages.findIndex((comicPage) => comicPage.id === activePageEditorPage.id) : -1;
@@ -3352,7 +3367,17 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setCurrentComicPage(nextPageIndex);
   };
   const togglePageDisplayMode = () => {
-    setPageDisplayMode((mode) => mode === "single" ? "spread" : "single");
+    const next = pageDisplayMode === "single" ? "spread" : "single";
+    setPageDisplayMode(next);
+    setState((current) => ({ ...current, workspaceSettings: { ...current.workspaceSettings, pageDisplayMode: next } }));
+    if (runtimeAdapter === "server" && runtimeIds) {
+      workspaceSettingsCommitQueueRef.current = workspaceSettingsCommitQueueRef.current
+        .then(() => apiUpdateProjectWorkspaceSettings(runtimeIds.projectId, { pageDisplayMode: next }))
+        .then(() => undefined)
+        .catch((error) => {
+          setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.draft.invalidCapabilityInput);
+        });
+    }
   };
   const handleCanvasSelection = (next: Selection) => {
     if (multiSelection) return;
@@ -3823,20 +3848,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </div>
         <section className="drawer-pages-fixed" aria-label={isVerticalWorkbench ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page} data-tour-id="comic-pages">
           <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>{isVerticalWorkbench ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page}</strong><small>{physicalPageCount(state.fixture.working.document)} {isVerticalWorkbench ? uiCopy.workbench.label.segmentUnit : uiCopy.workbench.label.pageUnit}</small><button type="button" className="drawer-add-page" aria-label={isVerticalWorkbench ? uiCopy.workbench.pageFlow.addSegment : uiCopy.workbench.pageFlow.addPageAria} aria-expanded={isVerticalWorkbench ? Boolean(verticalSegmentMenuPosition) : undefined} onClick={(event) => isVerticalWorkbench ? openVerticalSegmentMenu(event.currentTarget) : addBlankComicPage()}><Icon name="add" /></button></div>
-          <div className="draft-pages">{currentPages.map((comicPage, index) => {
+          <div className={`draft-pages ${pageDisplayMode === "spread" && !isVerticalWorkbench ? "spread-layout" : ""}`}>{(pageDisplayMode === "spread" && !isVerticalWorkbench ? readerPageDisplayGroups : currentPages.map((comicPage, index) => ({ unitIndices: [index], unitIds: [comicPage.id], trueSpread: false, virtualTrailingPage: undefined }))).map((group) => <div key={group.unitIds.join("-")} className={`page-flow-group ${group.unitIndices.length > 1 || group.virtualTrailingPage ? "paired" : "single"}`}>{group.unitIndices.map((index) => {
+            const comicPage = currentPages[index];
+            if (!comicPage) return null;
             const thumbnail = pageThumbSrc(comicPage);
             const unit = state.fixture.working.document.units.find((item) => item.id === comicPage.id);
             const pageNumber = unit ? presentationUnitNumberLabel(unit, index).replace(/^(Page|滚动段|四格)\s/, "") : String(index + 1).padStart(2, "0");
             const pageName = comicPage.name || (unit ? presentationUnitNumberLabel(unit, index) : defaultComicPageName(comicPage, index));
             const composite = Boolean(unit && unit.surfaces.length > 1);
             return <div key={comicPage.id} className={`draft-page ${index === state.currentPageIndex ? "active" : ""} ${composite ? "composite" : ""} ${unit?.kind === "spread" ? "true-spread" : ""}`}>
-              <button type="button" className="draft-page-main" onClick={() => setCurrentComicPage(index)}>
+              <button type="button" draggable className="draft-page-main" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", comicPage.id); }} onClick={() => setCurrentComicPage(index)}>
                 <span className="draft-page-thumbnail">{thumbnail ? <img src={thumbnail} alt={uiCopy.workbench.pageFlow.pageThumbnailAlt} loading="lazy" decoding="async"/> : <span className="draft-page-empty" aria-label={uiCopy.workbench.pageFlow.blankPageAria}/>}{composite ? <i className="draft-page-seam" /> : null}</span>
                 <span className="draft-page-copy"><b>{pageName}</b><small><em>{pageNumber}</em>{comicPage.kind === "vertical_segment" ? <em className="page-ratio-tag">{composite ? uiCopy.workbench.label.crossSegmentCount(unit?.surfaces.length ?? 0) : verticalSegmentRatioLabel(comicPage.canvas.width, comicPage.canvas.height)}</em> : null}<span>{uiCopy.workbench.label.pageFrameStatus(comicPage.elements.filter((element) => element.type === "comic_frame").length, index === state.currentPageIndex)}</span></small></span>
               </button>
               <button type="button" className="draft-page-more" aria-label={uiCopy.workbench.aria.pageMore(pageName)} aria-expanded={pageMenuId === comicPage.id} onClick={(event) => openPageMenu(event.currentTarget, comicPage.id)}><Icon name="moreVertical" /></button>
             </div>;
-          })}</div>
+          })}{group.virtualTrailingPage ? <div className="draft-page virtual-page-slot" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={(event) => { event.preventDefault(); const unitId = event.dataTransfer.getData("text/plain"); const afterUnitId = group.unitIds.at(-1); if (unitId && afterUnitId) moveComicPageToVirtualSlot(unitId, afterUnitId); }}><span className="draft-page-main" aria-label={uiCopy.workbench.pageFlow.virtualPageAria}><span className="draft-page-thumbnail draft-page-virtual-thumbnail"/></span><button type="button" className="draft-page-more virtual-page-add" aria-label={uiCopy.workbench.pageFlow.createVirtualPageAria} onClick={() => { const unitId = group.unitIds.at(-1); if (unitId) insertBlankComicPage(unitId, "after"); }}><Icon name="add" /></button></div> : null}</div>)}</div>
         </section>
         </div>
       </CreationDrawer>

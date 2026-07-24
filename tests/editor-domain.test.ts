@@ -349,6 +349,19 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
   assert.ok(capabilities.every((capability) => capability.undoPolicy === "atomic"));
 });
 
+test("reader spreads create automatic page-turn boundaries", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-turn-${++sequence}`, actor: "human" as const });
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
+  const [firstUnitId, secondUnitId, thirdUnitId, fourthUnitId] = fixture.working.document.reading.unitOrder;
+  assert.ok(firstUnitId && secondUnitId && thirdUnitId && fourthUnitId);
+  const groups = pageDisplayGroups(fixture.working.document, "spread");
+  assert.deepEqual(groups.map((group) => [group.unitIds, group.virtualTrailingPage]), [[[firstUnitId], undefined], [[secondUnitId, thirdUnitId], undefined], [[fourthUnitId], true]]);
+});
+
 test("paper narration stays frame-free, topmost, editable and independently removable", () => {
   const fixture = createInitialFixture();
   const unit = fixture.working.document.units[0];
@@ -525,15 +538,18 @@ test("page grouping never pairs an ordinary page across a true spread", () => {
   let sequence = 0;
   const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-group-${++sequence}`, actor: "human" as const });
   for (let index = 0; index < 3; index += 1) fixture.working = dryRunEditorCapability("create_page", {}, context()).result.working;
-  const [, secondId, thirdId] = fixture.working.document.reading.unitOrder;
-  fixture.working = dryRunEditorCapability("merge_pages_to_spread", { unitId: secondId, nextUnitId: thirdId }, context()).result.working;
-  const spreadId = fixture.working.document.reading.unitOrder[1];
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  fixture.working = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, context()).result.working;
+  const spreadId = fixture.working.document.reading.unitOrder[0];
   assert.deepEqual(pageDisplayGroups(fixture.working.document, "single"), [
-    { unitIndices: [0], unitIds: [fixture.working.document.reading.unitOrder[0]], trueSpread: false },
-    { unitIndices: [1], unitIds: [spreadId], trueSpread: true },
+    { unitIndices: [0], unitIds: [spreadId], trueSpread: true },
+    { unitIndices: [1], unitIds: [fixture.working.document.reading.unitOrder[1]], trueSpread: false },
     { unitIndices: [2], unitIds: [fixture.working.document.reading.unitOrder[2]], trueSpread: false },
   ]);
-  assert.deepEqual(pageDisplayGroups(fixture.working.document, "spread"), pageDisplayGroups(fixture.working.document, "single"));
+  assert.deepEqual(pageDisplayGroups(fixture.working.document, "spread"), [
+    { unitIndices: [0], unitIds: [spreadId], trueSpread: true },
+    { unitIndices: [1, 2], unitIds: [fixture.working.document.reading.unitOrder[1], fixture.working.document.reading.unitOrder[2]], trueSpread: false },
+  ]);
 });
 
 test("RTL spread merge keeps the first reading unit on the physical right", () => {

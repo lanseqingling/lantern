@@ -207,11 +207,12 @@ model Chapter {
 }
 
 model Project {
-  id          String   @id @default(cuid())
-  ownerUserId String
-  chapterId   String   @unique
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(cuid())
+  ownerUserId       String
+  chapterId         String   @unique
+  workspaceSettings Json     @default("{}")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   owner            User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   chapter          Chapter                    @relation(fields: [chapterId], references: [id], onDelete: Restrict)

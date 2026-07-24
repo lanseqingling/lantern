@@ -325,7 +325,7 @@ async function readApiResponse<T>(response: Response, fallbackMessage: string) {
 
 type WorkbenchResponse = {
   comic: { id: string; title: string; summary: string; defaultReadingDirection: "LTR" | "RTL" };
-  project: { id: string };
+  project: { id: string; workspaceSettings: { pageDisplayMode: "single" | "spread" } };
   conversations: Array<{ id: string; title: string; createdAt: string; updatedAt: string }>;
   chapter: { id: string; number: number; title: string; summary: string };
   working: WorkbenchFixture["working"];
@@ -462,6 +462,7 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
       candidates,
       messages,
       currentPageIndex: 0,
+      workspaceSettings: data.project.workspaceSettings,
       assets: data.assets.map((asset) => ({
         id: asset.id,
         kind: asset.kind,
@@ -497,6 +498,10 @@ export async function apiLoadWorkbench(chapterId: string, conversationId?: strin
 
 export function apiCreateConversation(projectId: string, title?: string) {
   return api<{ id: string; title: string }>(`/v1/projects/${encodeURIComponent(projectId)}/conversations`, { method: "POST", body: JSON.stringify({ title }) });
+}
+
+export function apiUpdateProjectWorkspaceSettings(projectId: string, patch: { pageDisplayMode: "single" | "spread" }) {
+  return api<{ pageDisplayMode: "single" | "spread" }>(`/v1/projects/${encodeURIComponent(projectId)}/workspace-settings`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 export function apiGetContextDebugSnapshot(projectId: string, body: {

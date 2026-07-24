@@ -9,6 +9,7 @@ import {
   getWorkbench,
   restoreLatestChapterSnapshot,
   saveChapterSnapshot,
+  updateProjectWorkspaceSettings,
 } from "@lantern/server/workbench-service";
 import { buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
 import { createProjectConversation, updateConversation } from "@lantern/agent-runtime/conversation-service";
@@ -38,6 +39,8 @@ const contextDebugRequestSchema = z.object({
   pendingAttachments: z.array(z.object({ name: z.string().max(240) })).max(12).optional(),
 });
 
+const workspaceSettingsSchema = z.object({ pageDisplayMode: z.enum(["single", "spread"]).optional() }).refine((value) => value.pageDisplayMode !== undefined);
+
 export function registerWorkbenchRoutes(app: FastifyInstance) {
   app.get<{ Params: { chapterId: string }; Querystring: { conversationId?: string } }>("/v1/workbench/:chapterId", async (request) => {
     const user = await currentUser(request);
@@ -64,6 +67,11 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
       changeSet: body.changeSet,
       candidateId: body.changeSet.sourceCandidateId,
     }));
+  });
+
+  app.patch<{ Params: { projectId: string }; Body: z.infer<typeof workspaceSettingsSchema> }>("/v1/projects/:projectId/workspace-settings", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await updateProjectWorkspaceSettings(user.id, request.params.projectId, workspaceSettingsSchema.parse(request.body ?? {})));
   });
 
   app.post<{ Params: { projectId: string }; Body: z.infer<typeof contextDebugRequestSchema> }>("/v1/projects/:projectId/context-debug", async (request) => {

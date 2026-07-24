@@ -24,6 +24,16 @@ export async function getOwnedProject(ownerUserId: string, projectId: string) {
   return project;
 }
 
+export async function updateProjectWorkspaceSettings(ownerUserId: string, projectId: string, patch: { pageDisplayMode?: "single" | "spread" }) {
+  const project = await getOwnedProject(ownerUserId, projectId);
+  const current = project.workspaceSettings && typeof project.workspaceSettings === "object" && !Array.isArray(project.workspaceSettings)
+    ? json<Record<string, unknown>>(project.workspaceSettings)
+    : {};
+  const workspaceSettings = { ...current, ...patch };
+  await prisma.project.update({ where: { id: project.id }, data: { workspaceSettings } });
+  return { pageDisplayMode: workspaceSettings.pageDisplayMode === "spread" ? "spread" as const : "single" as const };
+}
+
 export async function getLatestWorking(projectId: string) {
   const working = await prisma.workingRevision.findFirst({ where: { projectId }, orderBy: { revision: "desc" } });
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
@@ -244,7 +254,12 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
     user: { ownerUserId },
     comic: project.chapter.comic,
     chapter: project.chapter,
-    project: { id: project.id },
+    project: {
+      id: project.id,
+      workspaceSettings: {
+        pageDisplayMode: json<Record<string, unknown>>(project.workspaceSettings).pageDisplayMode === "spread" ? "spread" : "single",
+      },
+    },
     conversations: project.conversations.map((item) => ({ id: item.id, title: item.title, createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString() })),
     working: {
       documentId: working.id,

@@ -900,6 +900,9 @@ export const uiCopy = {
     pageFlow: {
       addSegment: "新增滚动段",
       addPageAria: "新增一页",
+      virtualPageAria: "在此翻页",
+      createVirtualPageAria: "将虚拟补位变成实际页面",
+      movePageToVirtualSlot: "移动页面到此补位",
       pageThumbnailAlt: "漫画页缩略图",
       blankPageAria: "空白漫画页",
       expandAria: "展开创作流",

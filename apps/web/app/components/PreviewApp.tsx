@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
-import { createBlankWorkbench, loadDemoWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
+import { createBlankWorkbench, loadDemoWorkbench, persistDemoWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@lantern/ui";
-import { apiDownloadChapterArchive, apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, configuredRuntimeAdapter } from "@/app/lib/api-client";
+import { apiDownloadChapterArchive, apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, apiUpdateProjectWorkspaceSettings, configuredRuntimeAdapter } from "@/app/lib/api-client";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 import { prepareContentRouteEntry, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageDisplayMode } from "@lantern/shared";
@@ -20,12 +20,14 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   const [modeSwitching, setModeSwitching] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageDisplayMode, setPageDisplayMode] = useState<PageDisplayMode>("single");
+  const [workspaceProjectId, setWorkspaceProjectId] = useState<string | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState("");
   const [loadError, setLoadError] = useState("");
   const verticalReaderRef = useRef<HTMLElement>(null);
   const verticalScrollFrameRef = useRef<number | null>(null);
+  const workspaceSettingsCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let canceled = false;
@@ -34,7 +36,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         const loaded = loadDemoWorkbench();
         if (canceled) return;
         setState(loaded);
-        setPageDisplayMode("single");
+        setPageDisplayMode(loaded.workspaceSettings?.pageDisplayMode ?? "single");
         setLoaded(true);
         return;
       }
@@ -42,7 +44,8 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         const loaded = await apiLoadWorkbench(chapterId);
         if (canceled) return;
         setState(loaded.state);
-        setPageDisplayMode("single");
+        setPageDisplayMode(loaded.state.workspaceSettings?.pageDisplayMode ?? "single");
+        setWorkspaceProjectId(loaded.ids.projectId);
         setLoaded(true);
       } catch (error) {
         if (!canceled) setLoadError(error instanceof Error ? error.message : uiCopy.workbench.error.apiUnavailable);
@@ -121,8 +124,21 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   };
 
   const switchPageMode = () => {
-    const next = pageDisplayMode === "single" ? "spread" : "single";
+    const next: PageDisplayMode = pageDisplayMode === "single" ? "spread" : "single";
     setPageDisplayMode(next);
+    setState((current) => {
+      const nextState = { ...current, workspaceSettings: { ...current.workspaceSettings, pageDisplayMode: next } };
+      if (configuredRuntimeAdapter() === "demo") persistDemoWorkbench(nextState);
+      return nextState;
+    });
+    if (workspaceProjectId) {
+      workspaceSettingsCommitQueueRef.current = workspaceSettingsCommitQueueRef.current
+        .then(() => apiUpdateProjectWorkspaceSettings(workspaceProjectId, { pageDisplayMode: next }))
+        .then(() => undefined)
+        .catch((error) => {
+          setNotice(error instanceof Error ? error.message : uiCopy.workbench.error.apiUnavailable);
+        });
+    }
   };
   const goPrevious = () => {
     if (atFirstPage) { setNotice(uiCopy.toast.preview.firstChapter); return; }

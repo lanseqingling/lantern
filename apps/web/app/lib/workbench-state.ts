@@ -45,6 +45,7 @@ export type PersistedWorkbench = {
   candidates: Candidate[];
   messages: AgentMessage[];
   currentPageIndex: number;
+  workspaceSettings?: { pageDisplayMode?: "single" | "spread" };
   assets?: AssetSummary[];
   conversations?: Array<{ id: string; title: string; createdAt: string; updatedAt: string }>;
   uiVersion?: number;

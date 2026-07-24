@@ -17,8 +17,8 @@ async function log(message) {
   await appendFile(logFile, `${new Date().toISOString()} ${message}\n`, "utf8");
 }
 
-async function writeStatus(state) {
-  await writeFile(statusFile, `${JSON.stringify({ state, version: updateVersion, updatedAt: new Date().toISOString() })}\n`, "utf8");
+async function writeStatus(state, progress) {
+  await writeFile(statusFile, `${JSON.stringify({ state, version: updateVersion, progress, updatedAt: new Date().toISOString() })}\n`, "utf8");
 }
 
 function runLantern(command) {
@@ -90,22 +90,22 @@ async function restorePreviousInstall(error) {
 
 try {
   await new Promise((resolve) => setTimeout(resolve, 1000));
-  await writeStatus("stopping");
+  await writeStatus("stopping", 92);
   await log(`Stopping Lantern before replacing ${installRoot}`);
   runLantern("stop");
   await waitForStopped();
   await rm(backupRoot, { recursive: true, force: true });
-  await writeStatus("replacing");
+  await writeStatus("replacing", 95);
   await rename(installRoot, backupRoot);
   backupCreated = true;
   await rename(stagedRoot, installRoot);
   await preserveLocalRuntimeFiles();
-  await writeStatus("restarting");
+  await writeStatus("restarting", 98);
   await log("Starting updated Lantern");
   runLantern("start");
   await waitForStarted();
   await log("Lantern update completed");
-  await writeStatus("completed");
+  await writeStatus("completed", 100);
   await rm(backupRoot, { recursive: true, force: true });
   backupCreated = false;
 } catch (error) {

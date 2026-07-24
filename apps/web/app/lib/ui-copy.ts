@@ -1270,7 +1270,13 @@ export const uiCopy = {
       openRelease: "打开 Lantern Release",
       checkAria: "检查 Lantern 更新",
       preparing: "正在下载并准备更新…",
+      downloading: (progress: number) => `正在下载更新… ${progress}%`,
+      verifying: "正在校验更新…",
+      extracting: "正在解压更新…",
+      stopping: "正在停止 Lantern…",
+      replacing: "正在安装更新…",
       restarting: "正在更新并重新启动…",
+      progressAria: "Lantern 更新进度",
       failed: "更新失败，请重试",
     },
     runtime: {

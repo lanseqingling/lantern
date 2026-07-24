@@ -329,8 +329,16 @@ export function apiInstallUpdate() {
   return api<{ version: string }>("/v1/update/install", { method: "POST" });
 }
 
+export type UpdateInstallStatus = {
+  state: "idle" | "downloading" | "verifying" | "extracting" | "stopping" | "replacing" | "restarting" | "completed" | "failed";
+  version?: string;
+  progress?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
+};
+
 export function apiGetUpdateInstallStatus() {
-  return api<{ state: "idle" | "stopping" | "replacing" | "restarting" | "completed" | "failed"; version?: string }>("/v1/update/install/status");
+  return api<UpdateInstallStatus>("/v1/update/install/status");
 }
 
 async function readApiResponse<T>(response: Response, fallbackMessage: string) {

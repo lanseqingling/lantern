@@ -85,7 +85,9 @@ test("application update worker replaces the install and restarts its health end
     const updateLog = await readFile(path.join(dataDir, "logs", "update.log"), "utf8").catch(() => "");
     assert.equal(exitCode, 0, updateLog);
     assert.equal(await readFile(path.join(installRoot, "marker.txt"), "utf8"), "new");
-    assert.equal(JSON.parse(await readFile(path.join(dataDir, "update-status.json"), "utf8")).state, "completed");
+    const updateStatus = JSON.parse(await readFile(path.join(dataDir, "update-status.json"), "utf8"));
+    assert.equal(updateStatus.state, "completed");
+    assert.equal(updateStatus.progress, 100);
     restartedPid = JSON.parse(await readFile(path.join(dataDir, "lantern.lock"), "utf8")).pid;
     assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
   } finally {

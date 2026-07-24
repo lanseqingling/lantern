@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { zipSync } from "fflate";
-import { compareVersions, expectedChecksum, safeArchiveEntries, versionFromReleaseUrl } from "@lantern/server/update-service";
+import { compareVersions, expectedChecksum, getUpdateInstallStatus, safeArchiveEntries, versionFromReleaseUrl } from "@lantern/server/update-service";
 
 test("application update versions compare stable semantic versions", () => {
   assert.ok(compareVersions("0.1.4", "0.1.3") > 0);
@@ -35,4 +38,30 @@ test("application update archives keep every file inside the version root", () =
     "lantern-0.1.4/../outside.txt": new TextEncoder().encode("unsafe"),
   });
   assert.throws(() => safeArchiveEntries(invalid, "0.1.4"), /更新包目录结构无效/);
+});
+
+test("application update progress survives a settings page refresh", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "lantern-update-status-"));
+  const previousDataDir = process.env.LANTERN_DATA_DIR;
+  process.env.LANTERN_DATA_DIR = dataDir;
+  try {
+    await writeFile(path.join(dataDir, "update-status.json"), JSON.stringify({
+      state: "downloading",
+      version: "0.1.8",
+      progress: 37.4,
+      downloadedBytes: 1024,
+      totalBytes: 4096,
+    }));
+    assert.deepEqual(await getUpdateInstallStatus(), {
+      state: "downloading",
+      version: "0.1.8",
+      progress: 37,
+      downloadedBytes: 1024,
+      totalBytes: 4096,
+    });
+  } finally {
+    if (previousDataDir === undefined) delete process.env.LANTERN_DATA_DIR;
+    else process.env.LANTERN_DATA_DIR = previousDataDir;
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });

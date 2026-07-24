@@ -25,8 +25,11 @@ export type UpdateStatus = {
 };
 
 export type UpdateInstallStatus = {
-  state: "idle" | "stopping" | "replacing" | "restarting" | "completed" | "failed";
+  state: "idle" | "downloading" | "verifying" | "extracting" | "stopping" | "replacing" | "restarting" | "completed" | "failed";
   version?: string;
+  progress?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
   updatedAt?: string;
 };
 
@@ -109,13 +112,43 @@ function trustedReleaseUrl(value: string) {
   return url;
 }
 
-async function download(url: URL, maximumBytes: number) {
+async function writeUpdateInstallStatus(value: Omit<UpdateInstallStatus, "updatedAt">) {
+  const statusFile = path.join(getRuntimePaths().dataDir, "update-status.json");
+  await writeFile(statusFile, `${JSON.stringify({ ...value, updatedAt: new Date().toISOString() })}\n`, "utf8");
+}
+
+async function download(url: URL, maximumBytes: number, onProgress?: (downloadedBytes: number, totalBytes?: number) => Promise<void>) {
   const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(5 * 60 * 1000) });
   if (!response.ok) throw new AppError("update_download_failed", "下载更新失败。", 502);
   const declaredSize = Number(response.headers.get("content-length") || 0);
   if (declaredSize > maximumBytes) throw new AppError("update_too_large", "更新文件超过允许大小。", 502);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > maximumBytes) throw new AppError("update_too_large", "更新文件超过允许大小。", 502);
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maximumBytes) throw new AppError("update_too_large", "更新文件超过允许大小。", 502);
+    await onProgress?.(bytes.byteLength, declaredSize || bytes.byteLength);
+    return bytes;
+  }
+  const chunks: Uint8Array[] = [];
+  const reader = response.body.getReader();
+  let downloadedBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    downloadedBytes += value.byteLength;
+    if (downloadedBytes > maximumBytes) {
+      await reader.cancel();
+      throw new AppError("update_too_large", "更新文件超过允许大小。", 502);
+    }
+    chunks.push(value);
+    await onProgress?.(downloadedBytes, declaredSize || undefined);
+  }
+  const bytes = new Uint8Array(downloadedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  await onProgress?.(downloadedBytes, declaredSize || downloadedBytes);
   return bytes;
 }
 
@@ -156,10 +189,18 @@ async function prepareUpdate() {
   }
   const archiveUrl = trustedReleaseUrl(update.archiveUrl);
   const checksumUrl = trustedReleaseUrl(update.checksumUrl);
+  let lastDownloadProgress = -1;
+  await writeUpdateInstallStatus({ state: "downloading", version: update.latestVersion, progress: 0 });
   const [archive, checksums] = await Promise.all([
-    download(archiveUrl, 500 * 1024 * 1024),
+    download(archiveUrl, 500 * 1024 * 1024, async (downloadedBytes, totalBytes) => {
+      const progress = totalBytes ? Math.min(75, Math.floor(downloadedBytes / totalBytes * 75)) : 0;
+      if (progress === lastDownloadProgress) return;
+      lastDownloadProgress = progress;
+      await writeUpdateInstallStatus({ state: "downloading", version: update.latestVersion, progress, downloadedBytes, totalBytes });
+    }),
     download(checksumUrl, 1024 * 1024),
   ]);
+  await writeUpdateInstallStatus({ state: "verifying", version: update.latestVersion, progress: 78 });
   const actual = createHash("sha256").update(archive).digest("hex");
   if (actual !== expectedChecksum(checksums, archiveUrl)) throw new AppError("update_checksum_mismatch", "更新包校验失败。", 502);
 
@@ -169,12 +210,19 @@ async function prepareUpdate() {
   const backupRoot = path.join(parent, `.lantern-previous-${token}`);
   await mkdir(stagedRoot, { recursive: false });
   try {
+    await writeUpdateInstallStatus({ state: "extracting", version: update.latestVersion, progress: 82 });
     const files = safeArchiveEntries(archive, update.latestVersion);
-    for (const file of files) {
+    let lastExtractProgress = 82;
+    for (const [index, file] of files.entries()) {
       const target = path.join(stagedRoot, file.relative);
       if (!target.startsWith(`${stagedRoot}${path.sep}`)) throw new AppError("invalid_update_archive", "更新包路径无效。", 502);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, file.bytes);
+      const progress = Math.floor(82 + (index + 1) / files.length * 8);
+      if (progress !== lastExtractProgress) {
+        lastExtractProgress = progress;
+        await writeUpdateInstallStatus({ state: "extracting", version: update.latestVersion, progress });
+      }
     }
     const stagedPackage = JSON.parse(await readFile(path.join(stagedRoot, "package.json"), "utf8")) as { version?: string };
     const stagedManifest = JSON.parse(await readFile(path.join(stagedRoot, ".lantern-release.json"), "utf8")) as { distribution?: string; version?: string };
@@ -187,8 +235,7 @@ async function prepareUpdate() {
     const workerSource = await readFile(path.join(repositoryRoot, "scripts", "update-worker.mjs"));
     const workerFile = path.join(paths.tempDir, `update-worker-${token}.mjs`);
     await writeFile(workerFile, workerSource, { mode: 0o700 });
-    const installStatusFile = path.join(paths.dataDir, "update-status.json");
-    await writeFile(installStatusFile, `${JSON.stringify({ state: "stopping", version: update.latestVersion, updatedAt: new Date().toISOString() })}\n`, "utf8");
+    await writeUpdateInstallStatus({ state: "stopping", version: update.latestVersion, progress: 92 });
     const child = spawn(process.execPath, [workerFile, repositoryRoot, stagedRoot, backupRoot, paths.dataDir, update.latestVersion], {
       cwd: parent,
       env: process.env,
@@ -201,23 +248,30 @@ async function prepareUpdate() {
     return { version: update.latestVersion };
   } catch (error) {
     await rm(stagedRoot, { recursive: true, force: true });
-    const paths = getRuntimePaths();
-    await writeFile(path.join(paths.dataDir, "update-status.json"), `${JSON.stringify({ state: "failed", version: update.latestVersion, updatedAt: new Date().toISOString() })}\n`, "utf8").catch(() => undefined);
+    await writeUpdateInstallStatus({ state: "failed", version: update.latestVersion }).catch(() => undefined);
     throw error;
   }
 }
 
 export function installAvailableUpdate() {
   if (preparingUpdate) return preparingUpdate;
-  preparingUpdate = prepareUpdate().finally(() => { preparingUpdate = undefined; });
+  preparingUpdate = prepareUpdate()
+    .catch(async (error) => {
+      await writeUpdateInstallStatus({ state: "failed", version: status?.latestVersion }).catch(() => undefined);
+      throw error;
+    })
+    .finally(() => { preparingUpdate = undefined; });
   return preparingUpdate;
 }
 
 export async function getUpdateInstallStatus(): Promise<UpdateInstallStatus> {
   try {
     const value = JSON.parse(await readFile(path.join(getRuntimePaths().dataDir, "update-status.json"), "utf8")) as UpdateInstallStatus;
-    if (!["stopping", "replacing", "restarting", "completed", "failed"].includes(value.state)) return { state: "idle" };
-    return value;
+    if (!["downloading", "verifying", "extracting", "stopping", "replacing", "restarting", "completed", "failed"].includes(value.state)) return { state: "idle" };
+    return {
+      ...value,
+      progress: typeof value.progress === "number" ? Math.max(0, Math.min(100, Math.round(value.progress))) : undefined,
+    };
   } catch {
     return { state: "idle" };
   }

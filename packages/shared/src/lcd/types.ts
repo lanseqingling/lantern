@@ -352,6 +352,7 @@ export type PresentationUnit = {
   id: string;
   name?: string;
   kind: "single_page" | "spread" | "vertical_segment" | "four_panel_unit";
+  pageRole: "story" | "cover" | "interlude";
   canvas: { width: number; height: number; background: { color: string } };
   surfaces: PageSurface[];
   frames: Frame[];
@@ -431,12 +432,35 @@ export function resolveLocalTransform(frame: Geometry, local: LocalTransform): G
 }
 
 /** Projects a normalized source crop into the image box used by every renderer. */
-export function projectImageCrop(crop: NormalizedRect): Rect {
+export function projectImageCrop(crop: NormalizedRect, source?: Pick<ResourceBinding, "width" | "height">, viewport?: Pick<Geometry, "width" | "height">): Rect {
+  if (!source?.width || !source.height || !viewport?.width || !viewport.height) {
+    return {
+      x: -crop.x / crop.width,
+      y: -crop.y / crop.height,
+      width: 1 / crop.width,
+      height: 1 / crop.height,
+    };
+  }
+  const sourceAspect = source.width / source.height;
+  const viewportAspect = viewport.width / viewport.height;
+  const cropAspect = sourceAspect * crop.width / crop.height;
+  if (cropAspect >= viewportAspect) {
+    const visibleWidth = viewportAspect * crop.height / sourceAspect;
+    const sourceX = crop.x + (crop.width - visibleWidth) / 2;
+    return {
+      x: -sourceX * sourceAspect / viewportAspect / crop.height,
+      y: -crop.y / crop.height,
+      width: sourceAspect / viewportAspect / crop.height,
+      height: 1 / crop.height,
+    };
+  }
+  const visibleHeight = sourceAspect * crop.width / viewportAspect;
+  const sourceY = crop.y + (crop.height - visibleHeight) / 2;
   return {
     x: -crop.x / crop.width,
-    y: -crop.y / crop.height,
+    y: -sourceY * viewportAspect / sourceAspect / crop.width,
     width: 1 / crop.width,
-    height: 1 / crop.height,
+    height: viewportAspect / sourceAspect / crop.width,
   };
 }
 
@@ -534,6 +558,7 @@ export type ComicPage = {
   name?: string;
   pageIndex: number;
   kind: "page" | "spread" | "vertical_segment" | "four_panel_unit";
+  pageRole: PresentationUnit["pageRole"];
   canvas: { width: number; height: number; background: { color: string } };
   elements: CanvasElement[];
 };
@@ -610,6 +635,7 @@ export function createComicPageView(document: ComicDocument, unit: PresentationU
     name: unit.name,
     pageIndex: document.reading.unitOrder.indexOf(unit.id),
     kind: unit.kind === "single_page" ? "page" : unit.kind,
+    pageRole: unit.pageRole,
     canvas: unit.canvas,
     elements,
   };

@@ -17,6 +17,7 @@ test("frame image choices put unbound current-page images before library assets"
     id: "spread-1",
     pageIndex: 0,
     kind: "spread",
+    pageRole: "story",
     canvas: { width: 1600, height: 1200, background: { color: "#fff" } },
     elements: [
       image({ id: "cross", assetId: "cross-asset", assetVersionId: "cross-v1", location: { space: "overlay", layerId: "cross-layer", anchor: { type: "unit" }, purpose: "cross_page" } }),
@@ -51,8 +52,9 @@ test("non-frame image pickers keep using only library assets", () => {
     resources: [{ assetId: "paper-asset", assetVersionId: "paper-v1", kind: "image", mediaType: "image/png" }],
     currentPage: {
       id: "page-1",
-      pageIndex: 0,
-      kind: "page",
+    pageIndex: 0,
+    kind: "page",
+    pageRole: "story",
       canvas: { width: 800, height: 1200, background: { color: "#fff" } },
       elements: [image({ id: "paper", assetId: "paper-asset", assetVersionId: "paper-v1", location: { space: "overlay", layerId: "paper-layer", anchor: { type: "unit" }, purpose: "page_content" } })],
     },

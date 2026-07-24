@@ -142,7 +142,7 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
     buildFrame({ number: 4, beatIndex: 2, assetId: "campus-asset-flower-envelope", geometry: { x: 35, y: 840, width: 650, height: 205 }, zIndex: 4 }, dialogues),
   ];
   const page1: PresentationUnit = {
-    id: "campus-page-01", name: "Page 01", kind: "single_page",
+    id: "campus-page-01", name: "Page 01", kind: "single_page", pageRole: "story",
     canvas: { width: 720, height: 1080, background: { color: "#ffffff" } },
     surfaces: [{ id: "campus-page-01-surface", name: "Page 01", role: "single", geometry: { x: 0, y: 0, width: 720, height: 1080 }, pageNumber: 1 }],
     frames: page1Frames, overlayLayers: [], readingSequence: page1Frames.map((frame) => ({ frameId: frame.id })),
@@ -159,7 +159,7 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
   const page2CaptionId = "campus-dialogue-06";
   dialogues.push({ id: page2CaptionId, storyboardBeatId: storyboardBeats[3].id, storyboardBeatVersionId: storyboardBeats[3].versionId, content: "旧看台。\n放学后。" });
   const page2: PresentationUnit = {
-    id: "campus-page-02", name: "Page 02", kind: "single_page",
+    id: "campus-page-02", name: "Page 02", kind: "single_page", pageRole: "story",
     canvas: { width: 720, height: 1080, background: { color: "#ffffff" } },
     surfaces: [{ id: "campus-page-02-surface", name: "Page 02", role: "single", geometry: { x: 0, y: 0, width: 720, height: 1080 }, pageNumber: 2 }],
     frames: page2Frames,
@@ -185,7 +185,7 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
     buildFrame({ number: 11, beatIndex: 7, assetId: "campus-asset-rendezvous-friend", geometry: { x: 1020.241279069768, y: 756.3059593023257, width: 334.7056686046512, height: 233.9658430232558 }, zIndex: 4, crop: { x: 0.2529087469464316, y: 0.1401133238255756, width: 0.6191661602623987, height: 0.6191661602623987 } }, dialogues),
   ];
   const spread: PresentationUnit = {
-    id: "campus-spread-03-04", name: "Page 03–04", kind: "spread",
+    id: "campus-spread-03-04", name: "Page 03–04", kind: "spread", pageRole: "story",
     canvas: { width: 1440, height: 1080, background: { color: "#ffffff" } },
     surfaces: [
       { id: "campus-page-03-surface", name: "Page 03", role: "left", geometry: { x: 0, y: 0, width: 720, height: 1080 }, pageNumber: 3 },

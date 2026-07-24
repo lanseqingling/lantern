@@ -80,7 +80,7 @@ function buildUnit(id: string, index: number, beats: StoryboardBeat[], rects: ty
   const canvas = { width: 720, height: 1080, background: { color: "#ffffff" } };
   return {
     unit: {
-      id, kind, canvas,
+      id, kind, pageRole: "story", canvas,
       surfaces: [{ id: `${id}-surface`, role: kind === "vertical_segment" ? "segment" : "single", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: index + 1 }],
       frames: built.map((entry) => entry.frame), overlayLayers: [],
       readingSequence: built.map((entry) => ({ frameId: entry.frame.id })),
@@ -96,7 +96,7 @@ function buildVerticalUnit(id: string, index: number, beats: StoryboardBeat[], c
   const canvas = { width: 640, height: Math.max(980, 60 + beats.length * 520), background: { color: "#ffffff" } };
   return {
     unit: {
-      id, kind: "vertical_segment", canvas,
+      id, kind: "vertical_segment", pageRole: "story", canvas,
       surfaces: [{ id: `${id}-surface`, role: "segment", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: index + 1 }],
       frames: built.map((entry) => entry.frame), overlayLayers: [], readingSequence: built.map((entry) => ({ frameId: entry.frame.id })),
       layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },

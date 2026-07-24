@@ -16,6 +16,7 @@ export function createCapacityFixture() {
     units: Array.from({ length: 24 }, (_, pageIndex) => ({
       id: `capacity-page-${pageIndex + 1}`,
       kind: "single_page" as const,
+      pageRole: "story" as const,
       canvas: { width: 720, height: 1080, background: { color: "#ffffff" } },
       surfaces: [{ id: `capacity-page-${pageIndex + 1}-surface`, role: "single" as const, geometry: { x: 0, y: 0, width: 720, height: 1080 }, pageNumber: pageIndex + 1 }],
       frames: storyboardBeats.slice(pageIndex * 5, pageIndex * 5 + 5).map((storyboardBeat, frameIndex) => ({

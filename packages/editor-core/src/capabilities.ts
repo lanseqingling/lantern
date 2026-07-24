@@ -207,6 +207,11 @@ function createEmptyFrame(context: EditorCapabilityContext, unit: PresentationUn
   };
 }
 
+function assertPageRoleAllows(unit: PresentationUnit, capability: "frame" | "dialogue") {
+  if (unit.pageRole === "story") return;
+  throw new Error(capability === "frame" ? "封面页和过场页暂不支持新增画格" : "封面页和过场页暂不支持新增对白");
+}
+
 function dialogueReferenceCount(context: EditorCapabilityContext, dialogueId: string) {
   return context.fixture.working.document.units.reduce((count, unit) => count
     + unit.frames.flatMap((frame) => frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[])).filter((element) => element.kind === "balloon" && element.dialogueId === dialogueId).length
@@ -228,6 +233,7 @@ const createFrameCapability = defineCapability({
   execute(input, context) {
     const unit = context.fixture.working.document.units.find((candidate) => candidate.id === input.unitId);
     if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    assertPageRoleAllows(unit, "frame");
     const geometry = availableFrameGeometry(unit, input.position);
     const frame = createEmptyFrame(context, unit, geometry);
     return [{ type: "add_frame", unitId: unit.id, frame, readingIndex: readingIndexForGeometry(context, unit, geometry) }];
@@ -248,6 +254,7 @@ const duplicateFrameCapability = defineCapability({
   undoPolicy: "atomic",
   execute(input, context) {
     const { unit, frame } = findFrame(context, input.unitId, input.frameId);
+    assertPageRoleAllows(unit, "frame");
     const geometry = availableFrameGeometry(unit, { x: frame.geometry.x + frame.geometry.width * 1.5 + 24, y: frame.geometry.y + frame.geometry.height / 2 }, frame.geometry);
     const dialogueCommands: WorkspaceCommand[] = [];
     const layers = frame.layers.map((layer): FrameLayer => ({
@@ -325,7 +332,8 @@ const placeFrameImageCapability = defineCapability({
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { frame } = findFrame(context, input.unitId, input.frameId);
+    const { unit, frame } = findFrame(context, input.unitId, input.frameId);
+    assertPageRoleAllows(unit, "dialogue");
     const existing = frame.layers.flatMap((layer) => layer.kind === "art" ? layer.elements : []).find((element) => element.kind === "image");
     if (existing) throw new Error("当前画格已有主图，请使用更换图片");
     let artLayer = frame.layers.find((layer) => layer.kind === "art");
@@ -495,6 +503,7 @@ const createPageDialogueBalloonCapability = defineCapability({
   execute(input, context) {
     const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
     if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    assertPageRoleAllows(unit, "dialogue");
     const surface = surfaceAt(unit, input.position);
     if (!surface) throw new Error("页面没有可放置对白的纸面");
     const overlay = overlayLayerFor(context, unit, { type: "unit" }, "page_content", "纸面内容", surface.id);
@@ -967,7 +976,7 @@ const setArtCropCapability = defineCapability({
   version: 1,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
-    frameId: z.string().min(1),
+    frameId: z.string().min(1).optional(),
     layerId: z.string().min(1),
     elementId: z.string().min(1),
     crop: normalizedRectSchema,
@@ -981,8 +990,11 @@ const setArtCropCapability = defineCapability({
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { frame } = findFrame(context, input.unitId, input.frameId);
-    const layer = frame.layers.find((item) => item.id === input.layerId);
+    const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    const layer = input.frameId
+      ? findFrame(context, input.unitId, input.frameId).frame.layers.find((item) => item.id === input.layerId)
+      : unit.overlayLayers.find((item) => item.id === input.layerId);
     const element = layer?.elements.find((item) => item.id === input.elementId);
     if (!element || element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
     return [{ type: "set_art_crop", ...input }];
@@ -1357,6 +1369,7 @@ function assertMergeablePair(document: EditorCapabilityContext["fixture"]["worki
   const first = document.units.find((unit) => unit.id === unitId);
   const second = document.units.find((unit) => unit.id === nextUnitId);
   if (!first || !second || first.kind !== kind || second.kind !== kind) throw new Error(kind === "single_page" ? "只能合并两个相邻普通页面" : "只能合并两个相邻滚动段");
+  if (kind === "single_page" && (first.pageRole === "cover" || second.pageRole === "cover" || first.pageRole !== second.pageRole)) throw new Error("只能合并两个相邻且页面角色相同的正文页或过场页");
   if (first.surfaces.length !== 1 || second.surfaces.length !== 1) throw new Error(kind === "single_page" ? "真正双页不能再次参与合并" : "已合并的滚动段不能再次参与合并");
   if (kind === "single_page" && (first.canvas.width !== second.canvas.width || first.canvas.height !== second.canvas.height)) throw new Error("两个页面尺寸不同，无法合并为双页");
   if (kind === "vertical_segment" && first.canvas.width !== second.canvas.width) throw new Error("两个滚动段宽度不同，无法合并");
@@ -1391,6 +1404,7 @@ const mergePagesToSpreadCapability = defineCapability({
     const spread: PresentationUnit = {
       id: context.createId("spread"),
       kind: "spread",
+      pageRole: first.pageRole,
       canvas: { width: first.canvas.width + second.canvas.width, height: first.canvas.height, background: structuredClone(first.canvas.background) },
       surfaces: [firstSurface, secondSurface],
       frames: [...firstContent.frames, ...secondContent.frames],
@@ -1428,6 +1442,7 @@ const mergeVerticalSegmentsCapability = defineCapability({
     const secondContent = compositeSource(second, secondSurface, 0, first.canvas.height);
     const composite: PresentationUnit = {
       id: context.createId("segment-group"), kind: "vertical_segment",
+      pageRole: "story",
       canvas: { width: first.canvas.width, height: first.canvas.height + second.canvas.height, background: structuredClone(first.canvas.background) },
       surfaces: [firstSurface, secondSurface], frames: [...firstContent.frames, ...secondContent.frames], overlayLayers: [...firstContent.overlayLayers, ...secondContent.overlayLayers],
       readingSequence: [...structuredClone(first.readingSequence), ...structuredClone(second.readingSequence)], layoutPolicy: { ...structuredClone(first.layoutPolicy), frameOverlap: first.layoutPolicy.frameOverlap === "allow" || second.layoutPolicy.frameOverlap === "allow" ? "allow" : "forbid" },
@@ -1461,7 +1476,7 @@ function splitCompositeCommands(context: EditorCapabilityContext, unit: Presenta
     });
     const id = context.createId(unit.kind === "spread" ? "page" : "segment");
     return {
-      id, ...(surface.name ? { name: surface.name } : {}), kind: unit.kind === "spread" ? "single_page" : "vertical_segment",
+      id, ...(surface.name ? { name: surface.name } : {}), kind: unit.kind === "spread" ? "single_page" : "vertical_segment", pageRole: unit.pageRole,
       canvas: { width: surface.geometry.width, height: surface.geometry.height, background: structuredClone(unit.canvas.background) },
       surfaces: [{ ...structuredClone(surface), name: undefined, role: unit.kind === "spread" ? "single" : "segment", geometry: { x: 0, y: 0, width: surface.geometry.width, height: surface.geometry.height } }],
       frames, overlayLayers, readingSequence: unit.readingSequence.filter((entry) => frameIds.has(entry.frameId)), layoutPolicy: structuredClone(unit.layoutPolicy),
@@ -1575,7 +1590,8 @@ const createPageCapability = defineCapability({
   inputSchema: z.strictObject({
     relativeToUnitId: z.string().min(1).optional(),
     side: z.enum(["before", "after"]).optional(),
-  }).refine((input) => Boolean(input.relativeToUnitId) === Boolean(input.side), "relativeToUnitId and side must be provided together"),
+    pageRole: z.enum(["story", "cover", "interlude"]).optional(),
+  }).refine((input) => input.pageRole === "cover" || Boolean(input.relativeToUnitId) === Boolean(input.side), "relativeToUnitId and side must be provided together"),
   scope: "chapter",
   humanEntry: "available",
   agentAccess: "disabled",
@@ -1587,9 +1603,12 @@ const createPageCapability = defineCapability({
   execute(input, context) {
     const document = context.fixture.working.document;
     if (document.format === "vertical") throw new Error("create_page is unavailable for vertical comics");
+    const pageRole = input.pageRole ?? "story";
+    if (pageRole !== "story" && document.format !== "page") throw new Error("特殊页只支持页漫");
+    if (pageRole === "cover" && document.units.some((unit) => unit.pageRole === "cover")) throw new Error("本话已有封面页");
     const targetIndex = input.relativeToUnitId ? document.reading.unitOrder.indexOf(input.relativeToUnitId) : -1;
     if (input.relativeToUnitId && targetIndex < 0) throw new Error("找不到插入位置对应的页面");
-    const readingIndex = targetIndex < 0
+    const readingIndex = pageRole === "cover" ? 0 : targetIndex < 0
       ? document.reading.unitOrder.length
       : targetIndex + (input.side === "after" ? 1 : 0);
     const kind: PresentationUnit["kind"] = document.format === "four_panel" ? "four_panel_unit" : "single_page";
@@ -1606,6 +1625,7 @@ const createPageCapability = defineCapability({
     const unit: PresentationUnit = {
       id,
       kind,
+      pageRole,
       canvas,
       surfaces: [{ id: `${id}-surface`, role: "single", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: readingIndex + 1 }],
       frames: [],
@@ -1645,6 +1665,7 @@ const createVerticalSegmentCapability = defineCapability({
     const unit: PresentationUnit = {
       id,
       kind: "vertical_segment",
+      pageRole: "story",
       canvas,
       surfaces: [{ id: `${id}-surface`, role: "segment", geometry: { x: 0, y: 0, width: canvas.width, height: canvas.height }, pageNumber: readingIndex + 1 }],
       frames: [],
@@ -1767,6 +1788,7 @@ const duplicatePresentationUnitCapability = defineCapability({
   execute(input, context) {
     const source = context.fixture.working.document.units.find((unit) => unit.id === input.unitId);
     if (!source) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    if (source.pageRole === "cover") throw new Error("封面页不能复制");
     const readingIndex = context.fixture.working.document.reading.unitOrder.indexOf(source.id);
     if (readingIndex < 0) throw new Error(`PresentationUnit is missing from reading order: ${source.id}`);
     const copied = duplicatePresentationUnit(context, source);
@@ -1795,6 +1817,10 @@ const movePresentationUnitCapability = defineCapability({
     if (index < 0) throw new Error(`missing PresentationUnit: ${input.unitId}`);
     if (input.direction === "up" && index === 0) throw new Error("当前展示单元已经在最前面");
     if (input.direction === "down" && index === context.fixture.working.document.reading.unitOrder.length - 1) throw new Error("当前展示单元已经在最后面");
+    const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
+    if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    if (unit.pageRole === "cover") throw new Error("封面页固定在本话最前");
+    if (input.direction === "up" && index === 1 && context.fixture.working.document.units.find((item) => item.id === context.fixture.working.document.reading.unitOrder[0])?.pageRole === "cover") throw new Error("封面页固定在本话最前");
     return [{ type: "move_presentation_unit", ...input }];
   },
 });

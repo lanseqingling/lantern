@@ -198,6 +198,7 @@ function blankComicDocument(comicId: string, chapterId: string, format: "page" |
     units: [{
       id: `${chapterId}-page-1`,
       kind: format === "vertical" ? "vertical_segment" : format === "four_panel" ? "four_panel_unit" : "single_page",
+      pageRole: "story",
       canvas: { width: format === "vertical" ? 640 : 720, height: format === "vertical" ? 1280 : 1080, background: { color: "#ffffff" } },
       surfaces: [{ id: `${chapterId}-page-1-surface`, role: format === "vertical" ? "segment" : "single", geometry: { x: 0, y: 0, width: format === "vertical" ? 640 : 720, height: format === "vertical" ? 1280 : 1080 }, pageNumber: 1 }],
       frames: [],

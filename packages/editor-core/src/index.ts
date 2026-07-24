@@ -229,8 +229,10 @@ export function applyWorkspaceChangeSet(
       continue;
     }
     if (operation.type === "set_art_crop") {
-      const { layer } = findLayer(operation.unitId, operation.frameId, operation.layerId);
-      const element = layer.elements.find((item) => item.id === operation.elementId);
+      const layer = operation.frameId
+        ? findLayer(operation.unitId, operation.frameId, operation.layerId).layer
+        : findUnit(operation.unitId).overlayLayers.find((item) => item.id === operation.layerId);
+      const element = layer?.elements.find((item) => item.id === operation.elementId);
       if (!element || element.kind !== "image") throw new Error(`missing ArtElement: ${operation.elementId}`);
       element.crop = structuredClone(operation.crop);
       continue;
@@ -368,6 +370,10 @@ export function applyWorkspaceChangeSet(
   document.reading.unitOrder.forEach((unitId) => {
     const unit = document.units.find((item) => item.id === unitId);
     if (!unit) return;
+    if (unit.pageRole === "cover") {
+      unit.surfaces.forEach((surface) => { delete surface.pageNumber; });
+      return;
+    }
     orderedUnitSurfaces(unit, document.reading.direction).forEach((surface) => {
       surface.pageNumber = physicalPageNumber;
       physicalPageNumber += 1;

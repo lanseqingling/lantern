@@ -273,6 +273,7 @@ test("adding a presentation unit appends a valid blank page without changing exi
   const blank: PresentationUnit = {
     id: "page-blank",
     kind: "single_page",
+    pageRole: "story",
     canvas: structuredClone(previous.canvas),
     surfaces: [{ id: "page-blank-surface", role: "single", geometry: { x: 0, y: 0, width: previous.canvas.width, height: previous.canvas.height }, pageNumber: fixture.working.document.units.length + 1 }],
     frames: [], overlayLayers: [], readingSequence: [], layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },
@@ -360,6 +361,34 @@ test("reader spreads create automatic page-turn boundaries", () => {
   assert.ok(firstUnitId && secondUnitId && thirdUnitId && fourthUnitId);
   const groups = pageDisplayGroups(fixture.working.document, "spread");
   assert.deepEqual(groups.map((group) => [group.unitIds, group.virtualTrailingPage]), [[[firstUnitId], undefined], [[secondUnitId, thirdUnitId], undefined], [[fourthUnitId], true]]);
+});
+
+test("cover stays outside reader pairing while interlude participates", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-role-${++sequence}`, actor: "human" as const });
+  const storyId = fixture.working.document.reading.unitOrder[0]!;
+  fixture.working = dryRunEditorCapability("create_page", { pageRole: "cover" }, context()).result.working;
+  const addedStory = dryRunEditorCapability("create_page", { relativeToUnitId: storyId, side: "after" }, context());
+  fixture.working = addedStory.result.working;
+  const addedStoryId = addedStory.result.working.document.reading.unitOrder[2]!;
+  fixture.working = dryRunEditorCapability("create_page", { pageRole: "interlude", relativeToUnitId: addedStoryId, side: "after" }, context()).result.working;
+
+  const groups = pageDisplayGroups(fixture.working.document, "spread");
+  assert.deepEqual(groups.map((group) => group.unitIndices), [[0], [1], [2, 3]]);
+  const cover = fixture.working.document.units.find((unit) => unit.id === groups[0]?.unitIds[0]);
+  assert.equal(cover?.pageRole, "cover");
+  assert.equal(cover?.surfaces[0]?.pageNumber, undefined);
+  assert.equal(fixture.working.document.units.find((unit) => unit.id === storyId)?.surfaces[0]?.pageNumber, 1);
+  const interludeId = fixture.working.document.reading.unitOrder[3]!;
+  assert.throws(() => dryRunEditorCapability("merge_pages_to_spread", { unitId: addedStoryId, nextUnitId: interludeId }, context()), /页面角色相同/);
+  assert.throws(() => dryRunEditorCapability("merge_pages_to_spread", { unitId: groups[0]!.unitIds[0], nextUnitId: storyId }, context()), /页面角色相同/);
+  const secondInterlude = dryRunEditorCapability("create_page", { pageRole: "interlude", relativeToUnitId: interludeId, side: "after" }, context());
+  fixture.working = secondInterlude.result.working;
+  const merged = dryRunEditorCapability("merge_pages_to_spread", { unitId: interludeId, nextUnitId: secondInterlude.result.working.document.reading.unitOrder[4]! }, context());
+  assert.equal(merged.result.working.document.units.find((unit) => unit.kind === "spread")?.pageRole, "interlude");
+  assert.throws(() => dryRunEditorCapability("create_frame", { unitId: interludeId, position: { x: 100, y: 100 } }, context()), /暂不支持新增画格/);
+  assert.throws(() => dryRunEditorCapability("create_page_dialogue_balloon", { unitId: cover!.id, position: { x: 100, y: 100 } }, context()), /暂不支持新增对白/);
 });
 
 test("paper narration stays frame-free, topmost, editable and independently removable", () => {
@@ -718,6 +747,11 @@ test("page objects, breakout and frame overlap preserve explicit ownership and v
   const pageImageResult = dryRunEditorCapability("create_page_image", { unitId: unit.id, position: { x: 420, y: 260 }, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context());
   fixture.working = pageImageResult.result.working;
   const pageContent = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "page_content")!;
+  const pageImage = pageContent.elements.find((element) => element.kind === "image");
+  assert.ok(pageImage?.kind === "image");
+  const croppedPageImage = dryRunEditorCapability("set_art_crop", { unitId: unit.id, layerId: pageContent.id, elementId: pageImage.id, crop: { x: .1, y: .1, width: .8, height: .8 } }, context());
+  const croppedOverlay = croppedPageImage.result.working.document.units[0].overlayLayers.find((layer) => layer.id === pageContent.id)?.elements.find((element) => element.id === pageImage.id);
+  assert.deepEqual(croppedOverlay?.kind === "image" ? croppedOverlay.crop : undefined, { x: .1, y: .1, width: .8, height: .8 });
   const reorderedOverlay = dryRunEditorCapability("reorder_overlay_element", { unitId: unit.id, layerId: pageContent.id, elementId: pageBalloon.id, position: "front" }, context());
   const reorderedUnit = reorderedOverlay.result.working.document.units[0];
   const balloonLayer = reorderedUnit.overlayLayers.find((layer) => layer.elements.some((element) => element.id === pageBalloon.id));

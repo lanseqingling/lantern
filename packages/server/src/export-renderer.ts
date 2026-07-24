@@ -159,14 +159,14 @@ function renderBalloonShell(element: BalloonElement, geometry: Geometry) {
   return `<svg x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 100 100" overflow="visible" preserveAspectRatio="none">${shape}${tailShape}</svg>`;
 }
 
-function renderElement(node: SceneElementNode, assets: Map<string, string>) {
+function renderElement(node: SceneElementNode, assets: Map<string, string>, resources: Map<string, ComicDocument["resources"][number]>) {
   const element = node.element;
   const geometry = node.geometry;
   const clip = node.clipFrame ? ` clip-path="url(#frame-clip-${escapeXml(node.clipFrame.id)})"` : "";
   const transform = transformAttribute(geometry);
   if (element.kind === "image") {
     const data = assets.get(element.assetVersionId); if (!data) return "";
-    const crop = projectImageCrop(element.crop);
+    const crop = projectImageCrop(element.crop, resources.get(element.assetVersionId), geometry);
     const width = geometry.width * crop.width; const height = geometry.height * crop.height;
     const blend = element.blendMode && element.blendMode !== "normal" ? ` style="mix-blend-mode:${element.blendMode}"` : "";
     return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x + crop.x * geometry.width}" y="${geometry.y + crop.y * geometry.height}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${element.opacity ?? 1}"${blend}${clip}${transform}/>`;
@@ -189,6 +189,7 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>) {
 
 export function renderSurfaceSvg(document: ComicDocument, unit: PresentationUnit, surface: PageSurface, assets = new Map<string, string>()) {
   const scene = projectComicRenderScene(document, unit);
+  const resources = new Map(document.resources.map((resource) => [resource.assetVersionId, resource]));
   const defs: string[] = []; const body: Array<{ z: number; svg: string }> = [];
   for (const { frame, fillZIndex, borderZIndex } of scene.frames) {
     const clipId = `frame-clip-${escapeXml(frame.id)}`;
@@ -196,7 +197,7 @@ export function renderSurfaceSvg(document: ComicDocument, unit: PresentationUnit
     body.push({ z: fillZIndex, svg: frameShape(frame, "#fff", "none", 0) });
     body.push({ z: borderZIndex, svg: frameBorderShape(frame) });
   }
-  scene.elements.forEach((node) => body.push({ z: node.zIndex, svg: renderElement(node, assets) }));
+  scene.elements.forEach((node) => body.push({ z: node.zIndex, svg: renderElement(node, assets, resources) }));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${surface.geometry.width}" height="${surface.geometry.height}" viewBox="${surface.geometry.x} ${surface.geometry.y} ${surface.geometry.width} ${surface.geometry.height}"><defs>${defs.join("")}</defs><rect x="${surface.geometry.x}" y="${surface.geometry.y}" width="${surface.geometry.width}" height="${surface.geometry.height}" fill="${escapeXml(unit.canvas.background.color)}"/>${body.sort((a, b) => a.z - b.z).map((entry) => entry.svg).join("")}</svg>`;
 }
 

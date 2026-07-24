@@ -69,7 +69,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("add_frame"), unitId: z.string().min(1), frame: frameSchema, readingIndex: z.number().int().nonnegative().optional() }),
   z.strictObject({ type: z.literal("remove_frame"), unitId: z.string().min(1), frameId: z.string().min(1) }),
   z.strictObject({ type: z.literal("set_frame_overlap_policy"), unitId: z.string().min(1), frameOverlap: z.enum(["forbid", "allow"]) }),
-  z.strictObject({ type: z.literal("set_art_crop"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1), crop: normalizedRectSchema }),
+  z.strictObject({ type: z.literal("set_art_crop"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), crop: normalizedRectSchema }),
   z.strictObject({ type: z.literal("set_element_transform"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), transform: geometrySchema }),
   z.strictObject({ type: z.literal("set_element_appearance"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), appearance: visualAssetReferenceSchema.nullable() }),
   z.strictObject({

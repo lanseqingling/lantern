@@ -206,11 +206,15 @@ function DeviceViewportGlyph({ mode }: { mode: VerticalViewportMode }) {
 }
 
 function defaultComicPageName(page: ComicPage, index: number) {
+  if (page.pageRole === "cover") return uiCopy.workbench.pageFlow.pageRole.cover;
+  if (page.pageRole === "interlude") return uiCopy.workbench.pageFlow.pageRole.interlude;
   const number = String(index + 1).padStart(2, "0");
   return page.kind === "vertical_segment" ? uiCopy.workbench.label.segment(number) : page.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanel(number) : uiCopy.workbench.label.page(number);
 }
 
 function presentationUnitNumberLabel(unit: PresentationUnit, fallbackIndex: number) {
+  if (unit.pageRole === "cover") return uiCopy.workbench.pageFlow.pageRole.cover;
+  if (unit.pageRole === "interlude") return uiCopy.workbench.pageFlow.pageRole.interlude;
   const numbers = unit.surfaces.map((surface) => surface.pageNumber).filter((number): number is number => typeof number === "number").sort((a, b) => a - b);
   const range = numbers.length > 1 ? `${String(numbers[0]).padStart(2, "0")}–${String(numbers.at(-1)).padStart(2, "0")}` : String(numbers[0] ?? fallbackIndex + 1).padStart(2, "0");
   return unit.kind === "vertical_segment" ? uiCopy.workbench.label.segment(range) : unit.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanel(range) : uiCopy.workbench.label.page(range);
@@ -351,6 +355,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [storyboardMenuPosition, setStoryboardMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [pageMenuId, setPageMenuId] = useState<string | null>(null);
   const [pageMenuPosition, setPageMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [pageCreateMenuOpen, setPageCreateMenuOpen] = useState(false);
   const [pageEditor, setPageEditor] = useState<{ unitId: string; mode: PageEditorMode } | null>(null);
   const [pageStructureConfirm, setPageStructureConfirm] = useState<{ unitId: string; action: PageStructureAction } | null>(null);
   const [pageEditDraft, setPageEditDraft] = useState<{ name: string; aspectRatio: VerticalSegmentAspectRatio; aspectRatioChanged: boolean }>({ name: "", aspectRatio: "9:16", aspectRatioChanged: false });
@@ -371,6 +376,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [restoringSnapshot, setRestoringSnapshot] = useState(false);
   const [verticalSegmentMenuPosition, setVerticalSegmentMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [pageDisplayMode, setPageDisplayMode] = useState<PageDisplayMode>("single");
+  const [pageFlowPulse, setPageFlowPulse] = useState(0);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [editingStoryboardBeatId, setEditingStoryboardBeatId] = useState<string | null>(null);
   const [editingStoryboardTarget, setEditingStoryboardTarget] = useState<StoryboardEditorTarget | null>(null);
@@ -428,6 +434,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const activeTaskRef = useRef<ActiveTask | null>(activeTask);
   const serverCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
   const workspaceSettingsCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pageFlowSignatureRef = useRef<string | null>(null);
+  const pageFlowPulseArmedRef = useRef(false);
   const serverCommitGenerationRef = useRef(0);
   const serverPendingCommitCountRef = useRef(0);
   const initialConversationIdRef = useRef(searchParams.get("conversationId"));
@@ -436,7 +444,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { activeTaskRef.current = activeTask; }, [activeTask]);
 
-  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "page" | "session" | "vertical_segment") => {
+  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "page" | "page_create" | "session" | "vertical_segment") => {
     setComicContextMenu(null);
     setFrameImageTarget(null);
     if (keep !== "project") setProjectMenu(false);
@@ -446,6 +454,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     if (keep !== "storyboard") setStoryboardMenuFrameId(null);
     if (keep !== "page") setPageMenuId(null);
+    if (keep !== "page_create") setPageCreateMenuOpen(false);
     if (keep !== "session") setSessionMenuId(null);
     if (keep !== "vertical_segment") setVerticalSegmentMenuPosition(null);
   };
@@ -456,6 +465,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   });
   useOutsidePointerDismiss(Boolean(storyboardMenuFrameId), ".storyboard-frame-row, .storyboard-row-menu-floating", () => setStoryboardMenuFrameId(null));
   useOutsidePointerDismiss(Boolean(pageMenuId), ".draft-page-more, .page-item-menu-floating", () => setPageMenuId(null));
+  useOutsidePointerDismiss(pageCreateMenuOpen, ".drawer-page-create, .page-create-menu", () => setPageCreateMenuOpen(false));
   useOutsidePointerDismiss(Boolean(pageEditor), ".page-edit-card-floating, .delete-confirm-overlay", () => setPageEditor(null));
   useOutsidePointerDismiss(Boolean(frameImageTarget), ".frame-image-picker", () => setFrameImageTarget(null));
 
@@ -811,6 +821,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }, [toast]);
 
   const workingPages = useMemo(() => createComicPageViews(state.fixture.working.document), [state.fixture.working.document]);
+  const readerPageDisplayGroups = useMemo(() => pageDisplayGroups(state.fixture.working.document, "spread"), [state.fixture.working.document]);
+  const pageFlowSignature = useMemo(() => readerPageDisplayGroups.map((group) => `${group.unitIds.join(":")}${group.virtualTrailingPage ? "+" : ""}`).join("|"), [readerPageDisplayGroups]);
+  useEffect(() => {
+    const previous = pageFlowSignatureRef.current;
+    if (previous !== null && previous !== pageFlowSignature) {
+      if (pageDisplayMode === "spread" && pageFlowPulseArmedRef.current) setPageFlowPulse((value) => value + 1);
+      pageFlowPulseArmedRef.current = false;
+    }
+    pageFlowSignatureRef.current = pageFlowSignature;
+  }, [pageDisplayMode, pageFlowSignature]);
   const storyboardFrameRows = useMemo<StoryboardFrameRow[]>(() => {
     const beatById = new Map(state.fixture.storyboardBeats.map((beat) => [beat.id, beat]));
     return workingPages.flatMap((comicPage, pageIndex) => comicPage.elements
@@ -1355,6 +1375,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const commitCapability = (id: EditorCapabilityId, input: unknown, label: string, nextPageIndex?: number) =>
     commitCapabilities([{ id, input }], label, nextPageIndex);
 
+  const commitPageFlowStructureChanges = (requests: EditorCapabilityRequest[], label: string, nextPageIndex?: number) => {
+    pageFlowPulseArmedRef.current = pageDisplayMode === "spread";
+    const committed = commitCapabilities(requests, label, nextPageIndex);
+    if (!committed) pageFlowPulseArmedRef.current = false;
+    return committed;
+  };
+
+  const commitPageFlowStructureChange = (id: EditorCapabilityId, input: unknown, label: string, nextPageIndex?: number) =>
+    commitPageFlowStructureChanges([{ id, input }], label, nextPageIndex);
+
   const elementForSelection = (target: Selection) => target.pageId && target.id
     ? workingPages.find((comicPage) => comicPage.id === target.pageId)?.elements.find((element) => element.id === target.id)
     : undefined;
@@ -1789,20 +1819,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     contextGestureRef.current = isDoubleContext ? null : { key, at: now };
     if (isDoubleContext) {
       const { frame, image } = frameAndImageForSelection(target);
-      const cropImage = image?.location.space === "frame" ? image : undefined;
-      if (frame && target.pageId) {
+      const cropImage = image;
+      if ((frame || cropImage) && target.pageId) {
         closeFloatingMenus();
         setCreationMode(null);
         setCreationPointer(null);
         setInspectorOpen(false);
         if (objectInteractionMode === "crop") {
           setObjectInteractionMode("select");
-          setSelection({ type: "comic_frame", id: frame.id, pageId: target.pageId, label: uiCopy.workbench.label.frame(frame.readingOrder) });
+          setSelection(cropImage
+            ? { type: "image", id: cropImage.id, pageId: target.pageId, label: cropImage.location.space === "frame" ? uiCopy.workbench.defaultLabel.framePrimaryImage : uiCopy.workbench.object.image }
+            : { type: "comic_frame", id: frame!.id, pageId: target.pageId, label: uiCopy.workbench.label.frame(frame!.readingOrder) });
           setToast(uiCopy.toast.workbench.mode.cropExited);
         } else {
           setSelection(cropImage
             ? { type: "image", id: cropImage.id, pageId: target.pageId, label: uiCopy.workbench.defaultLabel.framePrimaryImage }
-            : { type: "comic_frame", id: frame.id, pageId: target.pageId, label: uiCopy.workbench.label.frame(frame.readingOrder) });
+            : { type: "comic_frame", id: frame!.id, pageId: target.pageId, label: uiCopy.workbench.label.frame(frame!.readingOrder) });
           setObjectInteractionMode("crop");
           setToast(cropImage ? uiCopy.toast.workbench.mode.cropEntered : uiCopy.toast.workbench.mode.cornerEditEntered);
         }
@@ -1862,7 +1894,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         : [{ id: "resize_frame", input: { unitId, frameId: element.id, geometry } }];
     }
     if (element.type === "image") {
-      if (patch.crop && element.location.space === "frame") return [{ id: "set_art_crop", input: { unitId, frameId: element.location.frameId, layerId: element.layerId, elementId, crop: patch.crop as NonNullable<ImageElement["crop"]> } }];
+      if (patch.crop) return [{ id: "set_art_crop", input: { unitId, frameId: element.location.space === "frame" ? element.location.frameId : undefined, layerId: element.layerId, elementId, crop: patch.crop as NonNullable<ImageElement["crop"]> } }];
       if (patch.transform) return [{ id: "set_element_transform", input: { unitId, frameId: element.location.space === "frame" ? element.location.frameId : undefined, layerId: element.layerId, elementId, transform: patch.transform } }];
       if (patch.geometry) {
         const anchorFrameId = element.location.space === "frame" ? element.location.frameId : element.location.anchor.type === "frame" ? element.location.anchor.frameId : undefined;
@@ -2559,17 +2591,22 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       return;
     }
     const { frame, image: frameImage } = frameAndImageForSelection(selection);
-    const image = selectedElement?.type === "image" && selectedElement.location.space === "frame" ? selectedElement : frameImage;
+    const image = selectedElement?.type === "image" ? selectedElement : frameImage;
+    if (image && selection.pageId) {
+      setSelection({ type: "image", id: image.id, pageId: selection.pageId, label: image.location.space === "frame" ? uiCopy.workbench.label.frameCrop(selection.label) : selection.label });
+      setInspectorOpen(false);
+      setObjectInteractionMode("crop");
+      setToast(uiCopy.toast.workbench.mode.cropEntered);
+      return;
+    }
     if (!frame || !selection.pageId) {
       setToast(uiCopy.toast.workbench.mode.cropUnsupported);
       return;
     }
-    setSelection(image
-      ? { type: "image", id: image.id, pageId: selection.pageId, label: uiCopy.workbench.label.frameCrop(selection.label) }
-      : { type: "comic_frame", id: frame.id, pageId: selection.pageId, label: selection.label });
+    setSelection({ type: "comic_frame", id: frame.id, pageId: selection.pageId, label: selection.label });
     setInspectorOpen(false);
     setObjectInteractionMode("crop");
-    setToast(image ? uiCopy.toast.workbench.mode.cropEntered : uiCopy.toast.workbench.mode.cornerEditEntered);
+    setToast(uiCopy.toast.workbench.mode.cornerEditEntered);
   };
 
   const resetFrameShape = () => {
@@ -3169,16 +3206,29 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setVerticalSegmentMenuPosition(null);
   };
 
-  const addBlankComicPage = () => {
-    const pageIndex = state.fixture.working.document.units.length;
-    if (commitCapability("create_page", {}, uiCopy.workbench.operation.addBlankPage, pageIndex)) setSelection(noSelection);
+  const createComicPage = (pageRole: PresentationUnit["pageRole"]) => {
+    const cover = state.fixture.working.document.units.find((unit) => unit.pageRole === "cover");
+    if (pageRole === "cover" && cover) {
+      const coverIndex = workingPages.findIndex((page) => page.id === cover.id);
+      if (coverIndex >= 0) setCurrentComicPage(coverIndex);
+      setToast(uiCopy.workbench.pageFlow.coverAlreadyExists);
+      setPageCreateMenuOpen(false);
+      return;
+    }
+    const currentUnitId = workingPages[state.currentPageIndex]?.id;
+    const input = pageRole === "story" || pageRole === "cover"
+      ? { pageRole }
+      : { pageRole, ...(currentUnitId ? { relativeToUnitId: currentUnitId, side: "after" as const } : {}) };
+    const nextPageIndex = pageRole === "cover" ? 0 : pageRole === "story" ? workingPages.length : currentUnitId ? state.currentPageIndex + 1 : workingPages.length;
+    if (commitPageFlowStructureChange("create_page", input, pageRole === "story" ? uiCopy.workbench.action.addStoryPage : pageRole === "cover" ? uiCopy.workbench.action.addCoverPage : uiCopy.workbench.action.addInterludePage, nextPageIndex)) setSelection(noSelection);
+    setPageCreateMenuOpen(false);
   };
 
   const insertBlankComicPage = (unitId: string, side: "before" | "after") => {
     const targetIndex = workingPages.findIndex((page) => page.id === unitId);
     if (targetIndex < 0) return;
     const nextPageIndex = targetIndex + (side === "after" ? 1 : 0);
-    if (commitCapability("create_page", { relativeToUnitId: unitId, side }, side === "before" ? uiCopy.workbench.action.insertPageBefore : uiCopy.workbench.action.insertPageAfter, nextPageIndex)) {
+    if (commitPageFlowStructureChange("create_page", { relativeToUnitId: unitId, side }, side === "before" ? uiCopy.workbench.action.insertPageBefore : uiCopy.workbench.action.insertPageAfter, nextPageIndex)) {
       setSelection(noSelection);
       setPageMenuId(null);
     }
@@ -3197,7 +3247,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const pageIndex = workingPages.findIndex((page) => page.id === unitId);
     const nextPageIndex = pageIndex + (direction === "up" ? -1 : 1);
     if (pageIndex < 0 || nextPageIndex < 0 || nextPageIndex >= workingPages.length) return;
-    if (commitCapability("move_presentation_unit", { unitId, direction }, direction === "up" ? uiCopy.workbench.action.movePageUp : uiCopy.workbench.action.movePageDown, nextPageIndex)) {
+    if (commitPageFlowStructureChange("move_presentation_unit", { unitId, direction }, direction === "up" ? uiCopy.workbench.action.movePageUp : uiCopy.workbench.action.movePageDown, nextPageIndex)) {
       setPageMenuId(null);
     }
   };
@@ -3208,7 +3258,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (pageIndex < 0 || targetIndex < 0 || pageIndex === targetIndex || pageIndex === targetIndex + 1) return;
     const direction = pageIndex < targetIndex ? "down" : "up";
     const steps = pageIndex < targetIndex ? targetIndex - pageIndex : pageIndex - targetIndex - 1;
-    if (commitCapabilities(Array.from({ length: steps }, () => ({ id: "move_presentation_unit" as const, input: { unitId, direction } })), uiCopy.workbench.pageFlow.movePageToVirtualSlot, targetIndex)) {
+    if (commitPageFlowStructureChanges(Array.from({ length: steps }, () => ({ id: "move_presentation_unit" as const, input: { unitId, direction } })), uiCopy.workbench.pageFlow.movePageToVirtualSlot, targetIndex)) {
       setPageMenuId(null);
     }
   };
@@ -3239,7 +3289,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const activePageMenuIndex = activePageMenu ? currentPages.findIndex((comicPage) => comicPage.id === activePageMenu.id) : -1;
   const activePageMenuUnit = activePageMenu ? state.fixture.working.document.units.find((unit) => unit.id === activePageMenu.id) : undefined;
   const activePageMenuNextUnit = activePageMenuIndex >= 0 ? state.fixture.working.document.units.find((unit) => unit.id === currentPages[activePageMenuIndex + 1]?.id) : undefined;
-  const readerPageDisplayGroups = pageDisplayGroups(state.fixture.working.document, "spread");
   const activePageEditorPage = currentPages.find((comicPage) => comicPage.id === pageEditor?.unitId);
   const activePageEditorUnit = state.fixture.working.document.units.find((unit) => unit.id === pageEditor?.unitId);
   const activePageEditorIndex = activePageEditorPage ? currentPages.findIndex((comicPage) => comicPage.id === activePageEditorPage.id) : -1;
@@ -3297,7 +3346,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const deletePage = () => {
     if (!activePageEditorPage || activePageEditorIndex < 0) return;
     const nextPageIndex = Math.min(activePageEditorIndex, currentPages.length - 2);
-    if (commitCapability("delete_presentation_unit", { unitId: activePageEditorPage.id }, uiCopy.workbench.operation.deleteUnit(activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)), nextPageIndex)) {
+    if (commitPageFlowStructureChange("delete_presentation_unit", { unitId: activePageEditorPage.id }, uiCopy.workbench.operation.deleteUnit(activePageEditorPage.name || defaultComicPageName(activePageEditorPage, activePageEditorIndex)), nextPageIndex)) {
       setSelection(noSelection);
       setPageEditor(null);
     }
@@ -3321,9 +3370,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const firstAdded = plan.commands.find((command) => command.type === "add_presentation_unit");
       const label = pageStructureConfirm.action === "merge_pages" ? uiCopy.workbench.operation.mergeSpread : pageStructureConfirm.action === "split_spread" ? uiCopy.workbench.operation.splitSpread : pageStructureConfirm.action === "merge_segments" ? uiCopy.workbench.operation.mergeSegments : uiCopy.workbench.action.splitSegment;
       setPageStructureConfirm(null);
-      commitOperations(plan.commands, label, "manual", undefined, index, () => {
+      const shouldPulsePageFlow = pageStructureConfirm.action === "merge_pages" && pageDisplayMode === "spread";
+      pageFlowPulseArmedRef.current = shouldPulsePageFlow;
+      const committed = commitOperations(plan.commands, label, "manual", undefined, index, () => {
         if (firstAdded?.type === "add_presentation_unit") setSelection({ type: "presentation_unit", id: firstAdded.unit.id, pageId: firstAdded.unit.id, label });
       });
+      if (!committed) pageFlowPulseArmedRef.current = false;
     } catch (error) {
       setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.layout.pageStructureFailed);
       setPageStructureConfirm(null);
@@ -3847,8 +3899,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </div>
         </div>
         <section className="drawer-pages-fixed" aria-label={isVerticalWorkbench ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page} data-tour-id="comic-pages">
-          <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>{isVerticalWorkbench ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page}</strong><small>{physicalPageCount(state.fixture.working.document)} {isVerticalWorkbench ? uiCopy.workbench.label.segmentUnit : uiCopy.workbench.label.pageUnit}</small><button type="button" className="drawer-add-page" aria-label={isVerticalWorkbench ? uiCopy.workbench.pageFlow.addSegment : uiCopy.workbench.pageFlow.addPageAria} aria-expanded={isVerticalWorkbench ? Boolean(verticalSegmentMenuPosition) : undefined} onClick={(event) => isVerticalWorkbench ? openVerticalSegmentMenu(event.currentTarget) : addBlankComicPage()}><Icon name="add" /></button></div>
-          <div className={`draft-pages ${pageDisplayMode === "spread" && !isVerticalWorkbench ? "spread-layout" : ""}`}>{(pageDisplayMode === "spread" && !isVerticalWorkbench ? readerPageDisplayGroups : currentPages.map((comicPage, index) => ({ unitIndices: [index], unitIds: [comicPage.id], trueSpread: false, virtualTrailingPage: undefined }))).map((group) => <div key={group.unitIds.join("-")} className={`page-flow-group ${group.unitIndices.length > 1 || group.virtualTrailingPage ? "paired" : "single"}`}>{group.unitIndices.map((index) => {
+          <div className="drawer-pages-heading"><span><Icon name="pages" /></span><strong>{isVerticalWorkbench ? uiCopy.comic.unit.segment : uiCopy.comic.unit.page}</strong><small>{physicalPageCount(state.fixture.working.document)} {isVerticalWorkbench ? uiCopy.workbench.label.segmentUnit : uiCopy.workbench.label.pageUnit}</small><div className="drawer-page-create"><button type="button" className="drawer-add-page" aria-label={isVerticalWorkbench ? uiCopy.workbench.pageFlow.addSegment : uiCopy.workbench.pageFlow.addPageAria} aria-expanded={isVerticalWorkbench ? Boolean(verticalSegmentMenuPosition) : pageCreateMenuOpen} onClick={(event) => isVerticalWorkbench ? openVerticalSegmentMenu(event.currentTarget) : (closeFloatingMenus("page_create"), setPageCreateMenuOpen((open) => !open))}><Icon name="add" /></button>{!isVerticalWorkbench && pageCreateMenuOpen ? <FloatingMenu className="page-create-menu" aria-label={uiCopy.workbench.pageFlow.addPageMenuAria}><MenuSection className="asset-menu-section"><button type="button" onClick={() => createComicPage("story")}><span><Icon name="pageSingle" />{uiCopy.workbench.action.addStoryPage}</span></button><button type="button" onClick={() => createComicPage("cover")}><span><Icon name="pageSingle" />{uiCopy.workbench.action.addCoverPage}</span></button><button type="button" onClick={() => createComicPage("interlude")}><span><Icon name="pageSingle" />{uiCopy.workbench.action.addInterludePage}</span></button></MenuSection></FloatingMenu> : null}</div></div>
+          <div className={`draft-pages ${pageDisplayMode === "spread" && !isVerticalWorkbench ? "spread-layout" : ""}`}>{(pageDisplayMode === "spread" && !isVerticalWorkbench ? readerPageDisplayGroups : currentPages.map((comicPage, index) => ({ unitIndices: [index], unitIds: [comicPage.id], trueSpread: false, virtualTrailingPage: undefined }))).map((group) => <div key={group.unitIds.join("-")} className={`page-flow-group ${group.unitIndices.length > 1 || group.virtualTrailingPage ? "paired" : "single"} ${pageFlowPulse ? `page-flow-pulse-${pageFlowPulse % 2}` : ""}`}>{group.unitIndices.map((index) => {
             const comicPage = currentPages[index];
             if (!comicPage) return null;
             const thumbnail = pageThumbSrc(comicPage);
@@ -3859,7 +3911,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
             return <div key={comicPage.id} className={`draft-page ${index === state.currentPageIndex ? "active" : ""} ${composite ? "composite" : ""} ${unit?.kind === "spread" ? "true-spread" : ""}`}>
               <button type="button" draggable className="draft-page-main" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", comicPage.id); }} onClick={() => setCurrentComicPage(index)}>
                 <span className="draft-page-thumbnail">{thumbnail ? <img src={thumbnail} alt={uiCopy.workbench.pageFlow.pageThumbnailAlt} loading="lazy" decoding="async"/> : <span className="draft-page-empty" aria-label={uiCopy.workbench.pageFlow.blankPageAria}/>}{composite ? <i className="draft-page-seam" /> : null}</span>
-                <span className="draft-page-copy"><b>{pageName}</b><small><em>{pageNumber}</em>{comicPage.kind === "vertical_segment" ? <em className="page-ratio-tag">{composite ? uiCopy.workbench.label.crossSegmentCount(unit?.surfaces.length ?? 0) : verticalSegmentRatioLabel(comicPage.canvas.width, comicPage.canvas.height)}</em> : null}<span>{uiCopy.workbench.label.pageFrameStatus(comicPage.elements.filter((element) => element.type === "comic_frame").length, index === state.currentPageIndex)}</span></small></span>
+                <span className="draft-page-copy"><b>{pageName}</b><small><em className={comicPage.pageRole === "cover" ? "page-cover-tag" : comicPage.pageRole === "interlude" ? "page-role-tag" : undefined}>{pageNumber}</em>{comicPage.kind === "vertical_segment" ? <em className="page-ratio-tag">{composite ? uiCopy.workbench.label.crossSegmentCount(unit?.surfaces.length ?? 0) : verticalSegmentRatioLabel(comicPage.canvas.width, comicPage.canvas.height)}</em> : null}<span>{uiCopy.workbench.label.pageFrameStatus(comicPage.elements.filter((element) => element.type === "comic_frame").length, index === state.currentPageIndex)}</span></small></span>
               </button>
               <button type="button" className="draft-page-more" aria-label={uiCopy.workbench.aria.pageMore(pageName)} aria-expanded={pageMenuId === comicPage.id} onClick={(event) => openPageMenu(event.currentTarget, comicPage.id)}><Icon name="moreVertical" /></button>
             </div>;
@@ -3893,14 +3945,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </MenuSection>
         <MenuDivider />
         <MenuSection className="asset-menu-section">
-          <button type="button" onClick={() => duplicateComicPage(activePageMenu.id)}><span><Icon name="copy" />{uiCopy.workbench.action.duplicateCurrentPage}</span></button>
-          <button type="button" disabled={activePageMenuIndex <= 0} onClick={() => moveComicPage(activePageMenu.id, "up")}><span><Icon name="moveUp" />{uiCopy.workbench.action.movePageUp}</span></button>
+          <button type="button" disabled={activePageMenuUnit?.pageRole === "cover"} onClick={() => duplicateComicPage(activePageMenu.id)}><span><Icon name="copy" />{uiCopy.workbench.action.duplicateCurrentPage}</span></button>
+          <button type="button" disabled={activePageMenuIndex <= 0 || activePageMenuUnit?.pageRole === "cover" || (activePageMenuIndex === 1 && state.fixture.working.document.units.find((unit) => unit.id === currentPages[0]?.id)?.pageRole === "cover")} onClick={() => moveComicPage(activePageMenu.id, "up")}><span><Icon name="moveUp" />{uiCopy.workbench.action.movePageUp}</span></button>
           <button type="button" disabled={activePageMenuIndex >= workingPages.length - 1} onClick={() => moveComicPage(activePageMenu.id, "down")}><span><Icon name="moveDown" />{uiCopy.workbench.action.movePageDown}</span></button>
         </MenuSection>
         <MenuDivider />
         <MenuSection className="asset-menu-section">
           {!isVerticalWorkbench && activePageMenuUnit ? <><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "before")}><span><Icon name="add" />{uiCopy.workbench.action.insertPageBefore}</span></button><button type="button" onClick={() => insertBlankComicPage(activePageMenuUnit.id, "after")}><span><Icon name="add" />{uiCopy.workbench.action.insertPageAfter}</span></button></> : null}
-          {activePageMenuUnit?.kind === "single_page" && activePageMenuNextUnit?.kind === "single_page" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_pages" }); setPageMenuId(null); }}><span><Icon name="pageSpread" />{uiCopy.workbench.action.mergeNextPage}</span></button> : null}
+          {activePageMenuUnit?.kind === "single_page" && activePageMenuUnit.pageRole !== "cover" && activePageMenuNextUnit?.kind === "single_page" && activePageMenuNextUnit.pageRole === activePageMenuUnit.pageRole ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_pages" }); setPageMenuId(null); }}><span><Icon name="pageSpread" />{uiCopy.workbench.action.mergeNextPage}</span></button> : null}
           {activePageMenuUnit?.kind === "spread" ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "split_spread" }); setPageMenuId(null); }}><span><Icon name="pageSingle" />{uiCopy.workbench.action.splitToSinglePages}</span></button> : null}
           {activePageMenuUnit?.kind === "vertical_segment" && activePageMenuUnit.surfaces.length === 1 && activePageMenuNextUnit?.kind === "vertical_segment" && activePageMenuNextUnit.surfaces.length === 1 ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "merge_segments" }); setPageMenuId(null); }}><span><Icon name="pages" />{uiCopy.workbench.action.mergeNextSegment}</span></button> : null}
           {activePageMenuUnit?.kind === "vertical_segment" && activePageMenuUnit.surfaces.length > 1 ? <button type="button" onClick={() => { setPageStructureConfirm({ unitId: activePageMenuUnit.id, action: "split_segments" }); setPageMenuId(null); }}><span><Icon name="pages" />{uiCopy.workbench.action.splitSegment}</span></button> : null}
@@ -3954,7 +4006,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           {canvasReferences.map((reference) => <ReferenceCard key={reference.id} reference={reference} selected={!multiSelection && selection.id === reference.id} multiSelected={activeMultiCanvasIds.has(reference.id)} multiMode={Boolean(multiSelection)} multiMoving={multiMoving && multiCanvasActive} multiMoveDelta={multiMoveDelta} onSelect={() => { if (multiSelection) return; setSelectedAssetId(reference.assetId ?? reference.localAssetId ?? null); setSelection({ type: "reference_card", id: reference.id, label: reference.name }); setScope(uiCopy.workbench.scope.imageOnly); }} onMove={(x, y) => updateReference(reference.id, { x, y }, uiCopy.workbench.operation.moveCanvasImage(reference.name))} onZoom={(zoom) => updateReference(reference.id, { zoom }, uiCopy.workbench.operation.zoomCanvasImage(reference.name))} onReference={() => addCanvasAssetReference(reference)} onSaveToAssets={(anchor) => openReferenceSaveAssetForm(reference, anchor)} onOpenContextMenu={() => closeFloatingMenus()} assetSaved={reference.libraryStatus === "library" || Boolean(reference.localAssetId && state.assets?.some((asset) => asset.id === reference.localAssetId && asset.libraryStatus === "library"))} onDelete={() => deleteReference(reference.id)} onLayer={(action) => changeReferenceLayer(reference, action)} onCycleImage={() => cycleReferenceImage(reference)} onView={() => { closeFloatingMenus(); setImageViewer({ images: canvasReferences.map((item) => ({ id: item.id, src: item.imageSrc, alt: item.name })), initialIndex: canvasReferences.findIndex((item) => item.id === reference.id), allowNavigation: true }); }} />)}
           <div ref={!isVerticalCanvas ? pageCanvasFitStageRef : undefined} className={`page-canvas-fit-stage ${isVerticalCanvas ? "vertical" : ""}`}>
             <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : showingSpread ? "spread" : ""} ${currentDisplayGroup?.trueSpread ? "true-spread" : ""}`} style={isVerticalCanvas ? verticalStageWrapStyle : pageCanvasStageStyle}>
-              <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : uiCopy.workbench.pageFlow.defaultSegment) : showingSpread ? uiCopy.workbench.label.pageRangeTag(displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")) : page?.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanelTag : uiCopy.workbench.label.pageTag(String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0"))}</span>
+              <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : uiCopy.workbench.pageFlow.defaultSegment) : page?.pageRole === "cover" ? uiCopy.workbench.pageFlow.pageRole.cover : page?.pageRole === "interlude" ? uiCopy.workbench.pageFlow.pageRole.interlude : showingSpread ? uiCopy.workbench.label.pageRangeTag(displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")) : page?.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanelTag : uiCopy.workbench.label.pageTag(String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0"))}</span>
               <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={frameImageCandidatePreview?.target ?? selection} editable={canvasMode === "focus"} interactionMode={frameImageCandidatePreview ? "preview" : objectInteractionMode} creationMode={frameImageCandidatePreview ? undefined : creationMode ?? undefined} multiSelectedIds={frameImageCandidatePreview ? undefined : activeMultiComicIds} multiMoving={!frameImageCandidatePreview && multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={frameImageCandidatePreview ? undefined : handleCanvasSelection} onContextAction={frameImageCandidatePreview ? undefined : handleComicContextAction} onObjectDoubleClick={frameImageCandidatePreview ? undefined : handleComicObjectDoubleClick} onPlaceDialogue={frameImageCandidatePreview ? undefined : createDialogueBalloon} onPlacePageDialogue={frameImageCandidatePreview ? undefined : createPageDialogueBalloon} onPlaceNarration={frameImageCandidatePreview ? undefined : createNarration} onCommitElement={frameImageCandidatePreview ? undefined : (unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={frameImageCandidatePreview ? undefined : commitElementPatches} /></div>)}</div>
               {canvasMode === "free" && !isVerticalCanvas ? <div className="canvas-page-turn-zones" aria-label={uiCopy.workbench.pageFlow.freeModePaginationAria}><button type="button" className="canvas-page-turn-zone previous" aria-label={uiCopy.viewer.action.previousPage} onClick={() => turnCanvasPage(-1)} /><button type="button" className="canvas-page-turn-zone next" aria-label={uiCopy.viewer.action.nextPage} onClick={() => turnCanvasPage(1)} /></div> : null}
             </div>
@@ -3972,7 +4024,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         {canvasMode === "focus" && !frameImageCandidatePreview && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label={uiCopy.workbench.objectEditor.toolbarAria} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
           <button type="button" className="object-ai-reference" aria-label={uiCopy.workbench.objectEditor.referenceAria} onClick={() => { addSelectionReference(); setAgentOpen(true); }}><Icon name="ai" /></button>
           <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.toggleBalloonTransformAria : selection.type === "text" ? uiCopy.workbench.objectEditor.toggleNarrationTransformAria : selection.type === "image" ? uiCopy.workbench.objectEditor.togglePaperImageTransformAria : uiCopy.workbench.objectEditor.toggleFrameMoveAria} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay")) || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
-          <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? uiCopy.workbench.action.rotateNarration : selection.type === "speech_balloon" ? uiCopy.workbench.action.rotateBalloon : uiCopy.workbench.objectEditor.cropFrameImageAria} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && !(selectedElement?.type === "image" && selectedElement.location.space === "frame")} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
+          <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? uiCopy.workbench.action.rotateNarration : selection.type === "speech_balloon" ? uiCopy.workbench.action.rotateBalloon : selectedElement?.type === "image" && selectedElement.location.space === "overlay" ? uiCopy.workbench.objectEditor.cropPaperImageAria : uiCopy.workbench.objectEditor.cropFrameImageAria} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selectedElement?.type !== "image"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
           <button type="button" aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.editBalloonAria : selection.type === "text" ? uiCopy.workbench.objectEditor.editNarrationAria : selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard} onClick={openSelectionEditor}><Icon name="edit" /></button>
           <button type="button" aria-label={uiCopy.workbench.objectEditor.manageAria} aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
         </ObjectToolbar> : null}
@@ -3983,7 +4035,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       {comicContextMenu && comicContextMenuStyle ? <FloatingMenu className="comic-context-menu reference-context-menu" style={comicContextMenuStyle} aria-label={uiCopy.workbench.objectEditor.manageMenuAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); handleComicContextAction(comicContextMenu.target, comicContextMenu.point); }}>
         <header><strong><Icon name={comicContextHeader.icon} />{comicContextHeader.label}</strong>{objectLocationLabel(contextTargetElement) ? <em className="object-location-badge">{objectLocationLabel(contextTargetElement)}</em> : null}</header>
-        {comicContextMenu.target.type === "presentation_unit" ? <ComicMenuGroup label={uiCopy.workbench.menuGroup.add}><button type="button" onClick={() => comicContextMenu.target.pageId && createFrameAt(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="add" />{uiCopy.workbench.action.addFrame}</span></button><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{uiCopy.workbench.imagePicker.placePaper}</span></button>{contextTargetUnit?.kind === "spread" ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_page")}><span><Icon name="pageSpread" />{uiCopy.workbench.imagePicker.placeCrossPage}</span></button> : null}{contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_segment")}><span><Icon name="pages" />{uiCopy.workbench.imagePicker.placeCrossSegment}</span></button> : null}<button type="button" onClick={() => comicContextMenu.target.pageId && createPageDialogueBalloon(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="message" />{uiCopy.workbench.action.addPaperDialogue}</span></button></ComicMenuGroup> : null}
+        {comicContextMenu.target.type === "presentation_unit" ? <ComicMenuGroup label={uiCopy.workbench.menuGroup.add}>{contextTargetUnit?.pageRole === "story" ? <><button type="button" onClick={() => comicContextMenu.target.pageId && createFrameAt(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="add" />{uiCopy.workbench.action.addFrame}</span></button><button type="button" onClick={() => comicContextMenu.target.pageId && createPageDialogueBalloon(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="message" />{uiCopy.workbench.action.addPaperDialogue}</span></button></> : null}<button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{uiCopy.workbench.imagePicker.placePaper}</span></button>{contextTargetUnit?.kind === "spread" ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_page")}><span><Icon name="pageSpread" />{uiCopy.workbench.imagePicker.placeCrossPage}</span></button> : null}{contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_segment")}><span><Icon name="pages" />{uiCopy.workbench.imagePicker.placeCrossSegment}</span></button> : null}</ComicMenuGroup> : null}
         {comicContextMenu.target.type === "comic_frame" ? <>
           <ComicMenuGroup label={uiCopy.asset.label.content}><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{contextTargetFrameData?.image ? uiCopy.workbench.action.replaceFrameImage : uiCopy.workbench.action.placeFrameImage}</span></button><button type="button" onClick={() => createDialogueFromContext(comicContextMenu.target, comicContextMenu.point)}><span><Icon name="message" />{uiCopy.workbench.action.addDialogue}</span></button></ComicMenuGroup>
           <MenuDivider />

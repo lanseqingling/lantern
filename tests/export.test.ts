@@ -33,6 +33,7 @@ function renderFixture(): ComicDocument {
     units: [{
       id: "unit-1",
       kind: "single_page",
+      pageRole: "story",
       canvas: { width: 200, height: 300, background: { color: "#f6f1e8" } },
       surfaces: [{ id: "surface-1", role: "single", geometry: { x: 0, y: 0, width: 200, height: 300 } }],
       frames: [{
@@ -80,6 +81,16 @@ test("shared render scene defines visibility, clipping, geometry and overlay ord
 
 test("image crop uses one projection for workbench and export", () => {
   assert.deepEqual(projectImageCrop({ x: .1, y: .2, width: .5, height: .4 }), { x: -.2, y: -.5, width: 2, height: 2.5 });
+});
+
+test("wide image crop moves horizontally within a page viewport", () => {
+  const source = { width: 2400, height: 1200 };
+  const viewport = { width: 700, height: 1000 };
+  const left = projectImageCrop({ x: 0, y: 0, width: 700 / 2000, height: 1 }, source, viewport);
+  const right = projectImageCrop({ x: 1 - 700 / 2000, y: 0, width: 700 / 2000, height: 1 }, source, viewport);
+  assert.ok(left.width > 1);
+  assert.ok(right.x < left.x);
+  assert.equal(left.height, right.height);
 });
 
 test("crop zoom keeps the pointer anchor and never shrinks the projected image below its frame", () => {

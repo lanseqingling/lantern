@@ -88,6 +88,7 @@ export const surfaceSchema = z.object({
 });
 export const presentationUnitSchema = z.object({
   id: z.string().min(1), name: z.string().min(1).max(80).optional(), kind: z.enum(["single_page", "spread", "vertical_segment", "four_panel_unit"]),
+  pageRole: z.enum(["story", "cover", "interlude"]).default("story"),
   canvas: z.object({ width: z.number().positive(), height: z.number().positive(), background: z.object({ color: z.string() }) }),
   surfaces: z.array(surfaceSchema).min(1), frames: z.array(frameSchema), overlayLayers: z.array(overlayLayerSchema),
   readingSequence: z.array(z.object({ frameId: z.string().min(1), textOrder: z.array(z.string().min(1)).optional() })),
@@ -122,6 +123,9 @@ export function validateComicDocument(input: unknown): ComicDocument {
   if (new Set(document.reading.unitOrder).size !== unitIds.length || document.reading.unitOrder.some((id) => !unitIds.includes(id)) || unitIds.some((id) => !document.reading.unitOrder.includes(id))) {
     throw new Error("reading.unitOrder must contain every presentation unit exactly once");
   }
+  const covers = document.units.filter((unit) => unit.pageRole === "cover");
+  if (covers.length > 1) throw new Error("chapter may contain at most one cover page");
+  if (covers[0] && document.reading.unitOrder[0] !== covers[0].id) throw new Error("cover page must be the first presentation unit");
   const claimId = (id: string) => { if (globalIds.has(id)) throw new Error(`duplicate LCD object id: ${id}`); globalIds.add(id); };
   const assertAppearanceResource = (element: { id: string; appearance?: { assetId: string; assetVersionId: string } }) => {
     if (!element.appearance) return;
@@ -133,6 +137,7 @@ export function validateComicDocument(input: unknown): ComicDocument {
   document.dialogues.forEach((dialogue) => claimId(`dialogue:${dialogue.id}`));
   for (const unit of document.units) {
     claimId(unit.id);
+    if (unit.pageRole === "cover" && unit.kind !== "single_page") throw new Error(`${unit.id} cover page must be a single page`);
     unit.surfaces.forEach((surface) => {
       claimId(surface.id);
       if (!insideCanvas(surface.geometry, unit.canvas)) throw new Error(`${surface.id} must stay inside unit canvas`);

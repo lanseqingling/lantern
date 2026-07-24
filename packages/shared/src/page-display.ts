@@ -10,7 +10,10 @@ export function orderedUnitSurfaces(unit: PresentationUnit, direction: ReadingDi
 }
 
 export function physicalPageCount(document: ComicDocument) {
-  return document.reading.unitOrder.reduce((count, unitId) => count + (document.units.find((unit) => unit.id === unitId)?.surfaces.length ?? 0), 0);
+  return document.reading.unitOrder.reduce((count, unitId) => {
+    const unit = document.units.find((item) => item.id === unitId);
+    return count + (unit?.pageRole === "cover" ? 0 : unit?.surfaces.length ?? 0);
+  }, 0);
 }
 
 export function pageDisplayGroups(document: ComicDocument, mode: PageDisplayMode): PageDisplayGroup[] {
@@ -23,6 +26,11 @@ export function pageDisplayGroups(document: ComicDocument, mode: PageDisplayMode
   let openingSingles = 1;
   for (let index = 0; index < orderedUnits.length;) {
     const unit = orderedUnits[index];
+    if (unit.pageRole === "cover") {
+      groups.push({ unitIndices: [index], unitIds: [unit.id], trueSpread: false });
+      index += 1;
+      continue;
+    }
     if (unit.kind === "spread") {
       groups.push({ unitIndices: [index], unitIds: [unit.id], trueSpread: true });
       openingSingles = 0;
@@ -30,12 +38,12 @@ export function pageDisplayGroups(document: ComicDocument, mode: PageDisplayMode
       continue;
     }
     const next = orderedUnits[index + 1];
-    if (mode === "spread" && openingSingles === 0 && unit.kind === "single_page" && next?.kind === "single_page") {
+    if (mode === "spread" && openingSingles === 0 && unit.kind === "single_page" && next?.kind === "single_page" && next.pageRole !== "cover") {
       groups.push({ unitIndices: [index, index + 1], unitIds: [unit.id, next.id], trueSpread: false });
       index += 2;
       continue;
     }
-    const virtualTrailingPage = mode === "spread" && openingSingles === 0 && unit.kind === "single_page" && next?.kind !== "single_page";
+    const virtualTrailingPage = mode === "spread" && openingSingles === 0 && unit.kind === "single_page" && (next?.kind !== "single_page" || next.pageRole === "cover");
     groups.push({ unitIndices: [index], unitIds: [unit.id], trueSpread: false, ...(virtualTrailingPage ? { virtualTrailingPage: true } : {}) });
     openingSingles = Math.max(0, openingSingles - 1);
     index += 1;

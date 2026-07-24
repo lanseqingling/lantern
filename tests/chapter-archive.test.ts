@@ -22,6 +22,7 @@ const document: ComicDocument = {
   units: [{
     id: "unit-1",
     kind: "single_page",
+    pageRole: "story",
     canvas: { width: 720, height: 1080, background: { color: "#ffffff" } },
     surfaces: [{ id: "surface-1", role: "single", geometry: { x: 0, y: 0, width: 720, height: 1080 }, pageNumber: 1 }],
     frames: [{

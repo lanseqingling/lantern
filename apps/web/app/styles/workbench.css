@@ -177,11 +177,7 @@
 .context-debug-nav small { overflow: hidden; color: currentColor; font-size: 9px; line-height: 1.35; opacity: .72; text-overflow: ellipsis; white-space: nowrap; }
 .context-debug-content { min-width: 0; min-height: 0; overflow: hidden; }
 .context-debug-code-shell { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; background: #112126; }
-.context-debug-content pre, .context-debug-content textarea { box-sizing: border-box; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; resize: none; overflow: auto; border: 0; outline: none; background: transparent; color: #d8eeea; padding: 56px 20px 18px; font: 11px/1.68 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; white-space: pre-wrap; scrollbar-width: thin; scrollbar-color: rgba(127,190,188,.55) transparent; }
-.context-debug-content pre::-webkit-scrollbar, .context-debug-content textarea::-webkit-scrollbar { width: 7px; height: 7px; }
-.context-debug-content pre::-webkit-scrollbar-track, .context-debug-content textarea::-webkit-scrollbar-track { background: transparent; }
-.context-debug-content pre::-webkit-scrollbar-thumb, .context-debug-content textarea::-webkit-scrollbar-thumb { border: 2px solid #112126; border-radius: 999px; background: rgba(127,190,188,.55); }
-.context-debug-content pre::-webkit-scrollbar-thumb:hover, .context-debug-content textarea::-webkit-scrollbar-thumb:hover { background: rgba(181,229,226,.74); }
+.context-debug-content pre, .context-debug-content textarea { box-sizing: border-box; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; resize: none; overflow: auto; border: 0; outline: none; background: transparent; color: #d8eeea; padding: 56px 20px 18px; font: 11px/1.68 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; white-space: pre-wrap; }
 .context-debug-content textarea:focus { box-shadow: inset 0 0 0 2px rgba(100,200,200,.5); }
 .context-debug-code-actions { position: absolute; z-index: 2; top: 12px; right: 12px; display: flex; gap: 5px; }
 .context-debug-code-actions button { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid rgba(216,238,234,.16); border-radius: 9px; background: rgba(20,42,47,.86); color: #b8ded9; cursor: pointer; }
@@ -224,7 +220,7 @@
 .drawer-stack { display: grid; flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
 .drawer-top-card, .drawer-pages-fixed { border: 1px solid rgba(255,255,255,.86); border-radius: 25px; background: radial-gradient(circle at 14% 4%, rgba(100,200,200,.11), transparent 34%), rgba(255,255,255,.62); box-shadow: 0 22px 60px rgba(23,32,38,.09); backdrop-filter: blur(22px); }
 .drawer-top-card { position: relative; z-index: 2; display: flex; min-height: 0; flex-direction: column; padding: 12px; }
-.drawer-main { min-height: 0; overflow: auto; padding: 1px 1px 8px; scrollbar-width: thin; }
+.drawer-main { min-height: 0; overflow: auto; padding: 1px 1px 8px; }
 .drawer-top-card .drawer-main { flex: 1; }
 .drawer-main.assets-view, .drawer-main.storyboard-view {
   /* Let both scrolling rails run through the card's bottom padding, like the page list. */
@@ -236,13 +232,6 @@
 }
 .drawer-main.assets-view:not(.has-scroll-overflow), .drawer-main.storyboard-view:not(.has-scroll-overflow) { overflow-y: hidden; }
 .drawer-main.assets-view .drawer-view, .drawer-main.storyboard-view .drawer-view { padding-bottom: 0; }
-.drawer-main.assets-view, .drawer-main.storyboard-view, .draft-pages { scrollbar-color: transparent transparent; }
-.drawer-main.assets-view::-webkit-scrollbar, .drawer-main.storyboard-view::-webkit-scrollbar, .draft-pages::-webkit-scrollbar { width: 6px; }
-.drawer-main.assets-view::-webkit-scrollbar-track, .drawer-main.storyboard-view::-webkit-scrollbar-track, .draft-pages::-webkit-scrollbar-track { border: 0; background: transparent; }
-.drawer-main.assets-view::-webkit-scrollbar-thumb, .drawer-main.storyboard-view::-webkit-scrollbar-thumb, .draft-pages::-webkit-scrollbar-thumb { border: 0; border-radius: 999px; background: transparent; }
-.drawer-main.has-scroll-overflow:hover, .draft-pages:hover { scrollbar-color: rgba(145,153,157,.3) transparent; }
-.drawer-main.has-scroll-overflow:hover::-webkit-scrollbar-thumb, .draft-pages:hover::-webkit-scrollbar-thumb { background: rgba(145,153,157,.3); }
-.drawer-main.has-scroll-overflow:hover::-webkit-scrollbar-thumb:hover, .draft-pages:hover::-webkit-scrollbar-thumb:hover { background: rgba(125,133,138,.44); }
 .drawer-view { padding: 1px 1px 18px; }
 .drawer-pages-fixed {
   display: flex;
@@ -319,7 +308,6 @@
      remains in the outer rail instead of stealing the row's right margin. */
   padding: 6px 21px 12px 4px;
   scrollbar-gutter: auto;
-  scrollbar-width: thin;
 }
 .page-flow-group { margin-bottom: 0; }
 .draft-pages.spread-layout .page-flow-group { display: grid; width: calc(100% + 8px); gap: 0; margin-bottom: 7px; padding: 4px; border: 1px solid rgba(100,200,200,.34); border-radius: 17px; background: rgba(255,255,255,.58); }

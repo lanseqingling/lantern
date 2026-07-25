@@ -11,7 +11,7 @@ const demoImageFiles = [
   "classroom-after-bell-v2.png",
   "letter-from-black-bag-closeup-v10.png",
   "breakout-rendezvous-v2.png",
-  "spread-rendezvous-girls-v3.png",
+  "spread-rendezvous-girls-v6.png",
 ] as const;
 
 const demoLayoutContext = {

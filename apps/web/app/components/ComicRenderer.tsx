@@ -189,7 +189,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     ? images.find((node) => node.element.id === selection.id && node.source === "frame")?.frame?.id
     : interactionMode === "crop" && selection?.type === "comic_frame" ? selection.id : undefined;
   const texts = scene.elements.filter((node): node is TextSceneNode => node.element.kind === "text");
-  const narrations = texts.filter((node) => node.source === "overlay" && node.overlayPurpose === "narration");
+  const narrations = texts.filter((node) => node.source === "overlay" && node.overlayPurpose === "narration" && node.element.role === "narration");
   const balloons = scene.elements.filter((node): node is BalloonSceneNode => node.element.kind === "balloon");
   const effects = scene.elements.filter((node): node is EffectSceneNode => node.element.kind === "effect");
   const overlayImages = images.filter((node) => node.source === "overlay");
@@ -611,7 +611,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     }) : null}
     {texts.map((node) => {
       const text = node.element;
-      const editableNarration = node.source === "overlay" && node.overlayPurpose === "narration";
+      const editableNarration = node.source === "overlay" && node.overlayPurpose === "narration" && text.role === "narration";
       const selected = editableNarration && selection?.type === "text" && selection.id === text.id;
       const textSelection: Selection = { type: "text", id: text.id, pageId: unit.id, label: narrationOrderLabel(node) };
       const appearanceSrc = text.appearance ? resolvedResources?.[text.appearance.assetVersionId]?.url : undefined;

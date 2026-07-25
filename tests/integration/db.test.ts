@@ -18,7 +18,7 @@ import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
 import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "@lantern/server/asset-library-service";
 import { duplicateComic } from "@lantern/server/comic-service";
 import { putImage } from "@lantern/server/object-storage";
-import { commitChangeSet, revertCandidateApplication } from "@lantern/server/workbench-service";
+import { commitChangeSet, getWorkbench, revertCandidateApplication } from "@lantern/server/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
 import { getExternalAgentContext, inspectExternalAgentComposition, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
 import { getConfig } from "@lantern/server/config";
@@ -697,11 +697,64 @@ test("initial data contains only the built-in example comic", async () => {
     const comics = await prisma.comic.findMany({
       where: { isExample: true },
       orderBy: { id: "asc" },
-      select: { id: true, title: true, isExample: true },
+      select: { id: true, title: true, summary: true, isExample: true },
     });
     assert.deepEqual(comics, [
-      { id: "comic-campus-letter", title: "风停之前", isExample: true },
+      {
+        id: "comic-campus-letter",
+        title: "风停之前",
+        summary: "夏末，夏葵在书包里发现一封没有署名的信。她认出熟悉的五瓣花印，循着信中的约定赶到即将封闭的旧看台。看见林澄的瞬间，她终于喊出对方的名字，随后画面留白——",
+        isExample: true,
+      },
     ]);
+    const [canvasAssets, messages, page3CandidateCount, project] = await Promise.all([
+      prisma.canvasAssetListItem.findMany({
+        where: { projectId: "project-campus-letter-01", hiddenAt: null },
+        orderBy: { sortIndex: "asc" },
+        select: { assetId: true },
+      }),
+      prisma.message.findMany({
+        where: { conversationId: "conversation-campus-letter-main" },
+        orderBy: { createdAt: "asc" },
+        select: { role: true, kind: true, content: true },
+      }),
+      prisma.candidate.count({ where: { id: "candidate-campus-page3-rhythm" } }),
+      prisma.project.findUniqueOrThrow({ where: { id: "project-campus-letter-01" }, select: { workspaceSettings: true } }),
+    ]);
+    assert.deepEqual(canvasAssets.map((item) => item.assetId), [
+      "campus-asset-xiakui",
+      "campus-asset-lincheng",
+      "campus-asset-cover",
+      "campus-asset-title-art",
+      "campus-asset-classroom-lesson",
+      "campus-asset-breakout-panel",
+    ]);
+    assert.deepEqual(messages.map((message) => [message.role, message.kind]), [
+      ["USER", "PLAIN"],
+      ["AGENT", "PLAIN"],
+      ["USER", "PLAIN"],
+      ["AGENT", "PLAIN"],
+    ]);
+    assert.match(messages[0].content, /后脚的透视有点大/);
+    assert.match(messages[0].content, /最开始原图/);
+    assert.match(messages[1].content, /自然的屈膝跑姿/);
+    assert.match(messages[2].content, /上一次提交/);
+    assert.match(messages[2].content, /背景楼梯/);
+    assert.match(messages[2].content, /中心再放大/);
+    assert.match(messages[2].content, /往左移动/);
+    assert.match(messages[2].content, /尾巴再向右上收短/);
+    assert.match(messages[3].content, /肩背侧向/);
+    assert.match(messages[3].content, /水泥看台阶梯/);
+    assert.match(messages[3].content, /进一步收紧裁切/);
+    assert.match(messages[3].content, /向左移动/);
+    assert.match(messages[3].content, /尾巴向右上收短/);
+    assert.equal(page3CandidateCount, 0);
+    assert.deepEqual(project.workspaceSettings, { pageDisplayMode: "spread" });
+    const workbench = await getWorkbench("user-local-creator", "chapter-campus-letter-01");
+    assert.deepEqual(workbench.project.workspaceSettings, { pageDisplayMode: "spread" });
+    assert.deepEqual(workbench.assets.map((asset) => asset.id), canvasAssets.map((item) => item.assetId));
+    assert.ok(workbench.messages.every((message) => message.kind === "plain"));
+    assert.ok(workbench.candidates.every((candidate) => candidate.id !== "candidate-campus-page3-rhythm"));
   } finally {
     await prisma.$disconnect();
   }

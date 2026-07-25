@@ -244,7 +244,7 @@
 .landing-start { position: relative; z-index: 3; display: inline-flex; align-items: center; margin-top: 35px; border: 1px solid rgba(255,255,255,.7); border-radius: 999px; background: var(--cyan); padding: 17px 27px; box-shadow: 0 13px 30px rgba(36,127,130,.24), 0 0 0 6px rgba(100,200,200,.13); color: #fff; font-size: 16px; font-weight: 850; cursor: pointer; transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease; }
 .landing-start:hover { background: #2e9294; box-shadow: 0 17px 36px rgba(36,127,130,.28), 0 0 0 7px rgba(100,200,200,.14); transform: translateY(-2px); }
 .landing-start:focus-visible { outline: 3px solid rgba(242,184,75,.7); outline-offset: 4px; }
-.landing-scroll-cue { position: absolute; z-index: 3; left: 50%; bottom: 26px; display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; color: #5d7478; padding: 8px 12px; font-size: 11px; font-weight: 800; letter-spacing: .03em; transform: translateX(-50%); cursor: pointer; transition: color 180ms ease, opacity 220ms ease, transform 300ms cubic-bezier(.2,.8,.2,1); }
+.landing-scroll-cue { position: absolute; z-index: 3; left: 50%; bottom: 14px; display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--cyan-deep); padding: 8px 12px; font-size: 11px; font-weight: 800; letter-spacing: .03em; transform: translateX(-50%); cursor: pointer; transition: color 180ms ease, opacity 220ms ease, transform 300ms cubic-bezier(.2,.8,.2,1); }
 .landing-scroll-cue:hover { color: var(--cyan-deep); }
 .landing-scroll-cue svg { width: 16px; height: 16px; animation: landingScrollCue 1.6s ease-in-out infinite; }
 .landing-scroll-cue:focus-visible { outline: 3px solid rgba(100,200,200,.42); outline-offset: 3px; }
@@ -375,9 +375,9 @@ html[data-lantern-content-route-transition] .route-page-transition.route-page-tr
 .chapter-hero { display: grid; grid-template-columns: 1fr 320px; gap: 48px; align-items: center; max-width: 980px; margin: calc(9vh + 42px) auto 0; }
 .chapter-hero h1 { margin: 12px 0; font-size: clamp(50px, 7vw, 82px); letter-spacing: -.05em; }
 .chapter-hero p { max-width: 520px; color: var(--muted); line-height: 1.7; }
-.chapter-cover-action { position: relative; width: 100%; height: 360px; overflow: visible; border: 0; background: transparent; padding: 0; cursor: pointer; transform: rotate(2deg); }
+.chapter-cover-action { position: relative; width: 100%; height: 400px; overflow: visible; border: 0; background: transparent; padding: 0; cursor: pointer; transform: rotate(2deg); }
 .chapter-cover-action > img { width: 100%; height: 100%; border: 10px solid #fff; border-radius: 26px; object-fit: cover; object-position: center 55%; box-shadow: var(--shadow); }
-.chapter-cover-placeholder { height: 360px; padding: 30px; border: 10px solid #fff; border-radius: 26px; box-shadow: var(--shadow); text-align: center; transform: rotate(2deg); }
+.chapter-cover-placeholder { height: 400px; padding: 30px; border: 10px solid #fff; border-radius: 26px; box-shadow: var(--shadow); text-align: center; transform: rotate(2deg); }
 .chapter-cover-action .chapter-cover-placeholder { transform: none; }
 .chapter-cover-placeholder b { font-size: 58px; letter-spacing: -.1em; }
 .chapter-cover-placeholder span { max-width: 190px; color: var(--cyan-deep); font-size: 10px; font-weight: 900; line-height: 1.6; }

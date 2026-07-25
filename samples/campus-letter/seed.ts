@@ -330,7 +330,7 @@ export async function seedCampusLetter() {
     id: ids.comic,
     ownerUserId: owner.id,
     title: "风停之前",
-    summary: "夏末，夏葵在书包里发现一封没有署名的信。她认出熟悉的五瓣花印，循着信中的约定赶到即将封闭的旧看台。看见林澄的瞬间，她终于喊出对方的名字，随后画面留白——",
+    summary: "夏末，夏葵在书包里发现一封没有署名的信。她认出熟悉的五瓣花印，循着信中的约定赶到即将封闭的旧看台——",
     worldSummary: "故事发生在当代临海城市的一所普通高中，时间为夏末新学期。校园常年有风，旧操场看台因为年久失修即将封闭改造；这里是夏葵与林澄第一次真正交谈的地方。五瓣花印是林澄写便签时一直使用的小标记，也是夏葵辨认来信人的依据，不具有超自然能力。创作内部事实是林澄因家庭搬迁即将转学，但读者可见正文在第一话结尾只到夏葵隔着跑道喊出林澄的名字，转学事实仍不揭示。",
     format: ComicFormat.PAGE,
     defaultReadingDirection: ReadingDirection.LTR,

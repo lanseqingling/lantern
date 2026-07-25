@@ -22,7 +22,7 @@ import { readUploadedImage, uploadedImage } from "../upload";
 
 const comicCreateSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(2000),
+  summary: z.string().trim().max(2000).default(""),
   worldSummary: z.string().trim().max(4000).optional(),
   styleSummary: z.string().trim().max(4000).optional(),
   format: z.enum(["page", "vertical", "four_panel"]).default("page"),
@@ -37,7 +37,7 @@ const comicUpdateSchema = z.object({
   defaultReadingDirection: z.enum(["ltr", "rtl"]).optional(),
   status: creationStatusSchema.optional(),
 }).refine((value) => value.title !== undefined || value.summary !== undefined || value.worldSummary !== undefined || value.styleSummary !== undefined || value.defaultReadingDirection !== undefined || value.status !== undefined);
-const chapterCreateSchema = z.object({ title: z.string().trim().min(1).max(120), summary: z.string().trim().min(1).max(2000) });
+const chapterCreateSchema = z.object({ title: z.string().trim().min(1).max(120), summary: z.string().trim().max(2000).default("") });
 const chapterUpdateSchema = z.object({ title: z.string().trim().min(1).max(120).optional(), summary: z.string().trim().min(1).max(2000).optional(), status: creationStatusSchema.optional() })
   .refine((value) => value.title !== undefined || value.summary !== undefined || value.status !== undefined);
 const comicAssetCreateSchema = z.object({

@@ -322,7 +322,7 @@ async function executeExternalResourceCapability(
 
   if (capability.id === "chapter.create") {
     const comic = await resolveResourceReference(ownerUserId, argument(parsed, "comic"), "comic");
-    const created = await createComicChapter(ownerUserId, comic.id, { title: argument(parsed, "title"), summary: argument(parsed, "summary") });
+    const created = await createComicChapter(ownerUserId, comic.id, { title: argument(parsed, "title"), summary: parsed.summary as string });
     return externalResourceResult(capability, {
       resource: resourceReference("chapter", created.chapterId),
       projectId: created.projectId,

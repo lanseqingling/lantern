@@ -21,7 +21,7 @@ const idempotencyKeySchema = z.string().trim().min(8).max(128).regex(/^[A-Za-z0-
 
 const comicCreateSchema = z.strictObject({
   title: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(2000),
+  summary: z.string().trim().max(2000).default(""),
   worldSummary: z.string().trim().max(4000).optional(),
   styleSummary: z.string().trim().max(4000).optional(),
   format: z.enum(["page", "vertical", "four_panel"]).default("page"),
@@ -44,7 +44,7 @@ const comicUpdateSchema = z.strictObject({
 const chapterCreateSchema = z.strictObject({
   comic: externalResourceReferenceSchema,
   title: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(2000),
+  summary: z.string().trim().max(2000).default(""),
   idempotencyKey: idempotencyKeySchema,
 });
 

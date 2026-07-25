@@ -102,7 +102,7 @@ test("storyboard entry editing and frame-image generation are distinct capabilit
 test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
   const first = semanticCapabilityCatalogManifest();
   const second = semanticCapabilityCatalogManifest();
-  assert.equal(first.revision, 6);
+  assert.equal(first.revision, 7);
   assert.equal(first.hash, second.hash);
   assert.match(first.hash, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => JSON.stringify(first));

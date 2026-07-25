@@ -703,7 +703,7 @@ test("initial data contains only the built-in example comic", async () => {
       {
         id: "comic-campus-letter",
         title: "风停之前",
-        summary: "夏末，夏葵在书包里发现一封没有署名的信。她认出熟悉的五瓣花印，循着信中的约定赶到即将封闭的旧看台。看见林澄的瞬间，她终于喊出对方的名字，随后画面留白——",
+        summary: "夏末，夏葵在书包里发现一封没有署名的信。她认出熟悉的五瓣花印，循着信中的约定赶到即将封闭的旧看台——",
         isExample: true,
       },
     ]);

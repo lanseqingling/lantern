@@ -49,7 +49,7 @@ export function LibraryClient() {
   };
 
   const createComic = async () => {
-    if (!draft.title.trim() || !draft.summary.trim() || submitting) return;
+    if (!draft.title.trim() || submitting) return;
     setSubmitting(true);
     setError("");
     try {
@@ -82,7 +82,7 @@ export function LibraryClient() {
       <label>{uiCopy.comic.field.description}<textarea value={draft.summary} placeholder={uiCopy.library.form.descriptionPlaceholder} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} /></label>
       <label>{uiCopy.library.form.structureLabel}<CustomSelect ariaLabel={uiCopy.library.form.structureLabel} className="creation-select compact" value={draft.format === "four_panel" ? "page" : draft.format} options={formatOptions} onChange={(value) => setDraft((current) => ({ ...current, format: value as typeof current.format }))} /></label>
       {error ? <p className="creation-error">{error}</p> : null}
-      <footer><button type="button" onClick={() => setCreating(false)}>{uiCopy.common.action.cancel}</button><button type="button" className="primary" disabled={!draft.title.trim() || !draft.summary.trim() || submitting} onClick={() => void createComic()}>{submitting ? uiCopy.common.progress.creating : uiCopy.library.action.createComic}</button></footer>
+      <footer><button type="button" onClick={() => setCreating(false)}>{uiCopy.common.action.cancel}</button><button type="button" className="primary" disabled={!draft.title.trim() || submitting} onClick={() => void createComic()}>{submitting ? uiCopy.common.progress.creating : uiCopy.library.action.createComic}</button></footer>
     </section></div> : null}
   </>;
 }

@@ -97,9 +97,9 @@ export async function getComicChapter(ownerUserId: string, chapterId: string) {
   };
 }
 
-export async function createComic(ownerUserId: string, input: { title: string; summary: string; worldSummary?: string; styleSummary?: string; format: "page" | "vertical" | "four_panel"; defaultReadingDirection?: "ltr" | "rtl" }) {
+export async function createComic(ownerUserId: string, input: { title: string; summary?: string; worldSummary?: string; styleSummary?: string; format: "page" | "vertical" | "four_panel"; defaultReadingDirection?: "ltr" | "rtl" }) {
   const format = ({ page: ComicFormat.PAGE, vertical: ComicFormat.VERTICAL, four_panel: ComicFormat.FOUR_PANEL } as const)[input.format];
-  const comic = await prisma.comic.create({ data: { ownerUserId, title: input.title, summary: input.summary, worldSummary: input.worldSummary ?? "", styleSummary: input.styleSummary ?? "", format, defaultReadingDirection: input.defaultReadingDirection === "rtl" ? ReadingDirection.RTL : ReadingDirection.LTR } });
+  const comic = await prisma.comic.create({ data: { ownerUserId, title: input.title, summary: input.summary ?? "", worldSummary: input.worldSummary ?? "", styleSummary: input.styleSummary ?? "", format, defaultReadingDirection: input.defaultReadingDirection === "rtl" ? ReadingDirection.RTL : ReadingDirection.LTR } });
   return { comic: { id: comic.id, title: comic.title } };
 }
 
@@ -123,11 +123,11 @@ export async function updateComicCover(ownerUserId: string, comicId: string, upl
   return { coverUrl: comicCoverPath(updated) };
 }
 
-export async function createComicChapter(ownerUserId: string, comicId: string, input: { title: string; summary: string }) {
+export async function createComicChapter(ownerUserId: string, comicId: string, input: { title: string; summary?: string }) {
   const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
   if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
   const last = await prisma.chapter.findFirst({ where: { comicId: comic.id }, orderBy: { number: "desc" } });
-  return createChapterWorkspace(ownerUserId, comic, (last?.number ?? 0) + 1, input.title, input.summary);
+  return createChapterWorkspace(ownerUserId, comic, (last?.number ?? 0) + 1, input.title, input.summary ?? "");
 }
 
 export async function updateComicChapter(ownerUserId: string, comicId: string, chapterId: string, input: { title?: string; summary?: string; status?: "in_progress" | "completed" }) {

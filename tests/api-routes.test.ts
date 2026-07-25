@@ -5,7 +5,6 @@ import { createApiApp } from "../apps/api/src/app";
 import { getConfig } from "@lantern/server/config";
 import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
 import { createComicLibraryAsset } from "@lantern/server/asset-library-service";
-import { createComicChapter } from "@lantern/server/comic-service";
 import { prepareExternalAssetUpload } from "@lantern/server/external-upload-service";
 import {
   LOCAL_USER_DISPLAY_NAME,
@@ -176,7 +175,7 @@ test("registered domain routes preserve validation and response envelopes", asyn
     method: "POST",
     url: "/v1/comics",
     headers: { authorization, "content-type": "application/json" },
-    payload: { title: "服务边界测试", summary: "验证 API 只负责传输映射。", format: "page", defaultReadingDirection: "ltr" },
+    payload: { title: "服务边界测试", format: "page", defaultReadingDirection: "ltr" },
   });
   assert.equal(created.statusCode, 200);
   const comicId = created.json().data.comic.id as string;
@@ -216,6 +215,7 @@ test("registered domain routes preserve validation and response envelopes", asyn
   });
   assert.equal(fetched.statusCode, 200);
   assert.equal(fetched.json().data.title, "服务边界测试");
+  assert.equal(fetched.json().data.summary, "");
   assert.equal(fetched.json().data.worldSummary, "资源引用测试世界观");
   assert.equal(fetched.json().data.status, "in_progress");
 
@@ -229,7 +229,14 @@ test("registered domain routes preserve validation and response envelopes", asyn
   assert.equal(updated.json().data.title, "服务边界测试·已更新");
   assert.equal(updated.json().data.status, "COMPLETED");
 
-  const chapter = await createComicChapter(LOCAL_USER_ID, comicId, { title: "上传测试一话", summary: "验证外置 Agent 图片上传边界。" });
+  const chapterCreated = await app.inject({
+    method: "POST",
+    url: `/v1/comics/${comicId}/chapters`,
+    headers: { authorization, "content-type": "application/json" },
+    payload: { title: "上传测试一话" },
+  });
+  assert.equal(chapterCreated.statusCode, 200);
+  const chapter = chapterCreated.json().data as { chapterId: string };
   const completedChapter = await app.inject({
     method: "PATCH",
     url: `/v1/comics/${comicId}/chapters/${chapter.chapterId}`,

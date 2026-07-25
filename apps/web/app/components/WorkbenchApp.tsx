@@ -26,6 +26,7 @@ import type {
   TextCanvasElement,
   WorkspaceChangeSet,
   WorkspaceOperation,
+  Geometry,
 } from "@lantern/shared";
 import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, type PageDisplayMode } from "@lantern/shared";
 import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
@@ -104,7 +105,7 @@ type FrameImageCandidatePreview = {
   previousInspectorOpen: boolean;
 };
 type CanvasCreationMode = "dialogue" | "narration" | null;
-type ComicContextMenuState = { target: Selection; point: ComicContextPoint; bleedMenu?: { left: number; top: number }; imageMoreMenu?: { left: number; top: number } };
+type ComicContextMenuState = { target: Selection; point: ComicContextPoint; bleedMenu?: { left: number; top: number }; backgroundMenu?: { left: number; top: number }; imageMoreMenu?: { left: number; top: number } };
 type ComicDeleteTarget = { kind: "frame" | "image" | "dialogue" | "narration"; selection: Selection };
 type FrameImageTarget = { selection: Selection; left: number; top: number; position?: { x: number; y: number }; placement?: "cross_page" | "cross_segment" };
 type CanvasAssetSaveKind = "character" | "scene" | "prop" | "reference_image";
@@ -369,7 +370,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [future, setFuture] = useState<HistoryEntry[]>([]);
   const [leftOpen, setLeftOpen] = useState(true);
-  const [agentOpen, setAgentOpen] = useState(true);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [projectMenu, setProjectMenu] = useState(false);
   const [importingArchive, setImportingArchive] = useState(false);
   const [archiveImportFile, setArchiveImportFile] = useState<File | null>(null);
@@ -987,7 +988,14 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     return firstImage ? assetSrcByKey.get(`${firstImage.assetId}:${firstImage.assetVersionId}`) : undefined;
   };
 
-  const toolbarTarget = frameImageCandidatePreview?.target ?? selection;
+  const selectedFrameImage = selectedElement?.type === "image" && selectedElement.location.space === "frame"
+    ? selectedElement
+    : undefined;
+  // Frame images use the frame's toolbar geometry and transform controls. Their
+  // own selection is retained so crop mode can still address the image itself.
+  const toolbarTarget = frameImageCandidatePreview?.target ?? (selectedFrameImage?.comicFrameId && selection.pageId
+    ? { type: "comic_frame" as const, id: selectedFrameImage.comicFrameId, pageId: selection.pageId, label: selection.label }
+    : selection);
 
   useLayoutEffect(() => {
     const isCanvasSelection = toolbarTarget.type !== "none" && toolbarTarget.type !== "presentation_unit" && toolbarTarget.type !== "reference_card";
@@ -1722,6 +1730,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const openFrameBleedMenu = (button: HTMLButtonElement) => {
     setComicContextMenu((current) => current ? { ...current, bleedMenu: contextSubmenuPosition(button, 160, 134) } : current);
+  };
+
+  const openPageBackgroundMenu = (button: HTMLButtonElement) => {
+    setComicContextMenu((current) => current ? { ...current, backgroundMenu: contextSubmenuPosition(button, 150, 82) } : current);
+  };
+
+  const setPageBackground = (target: Selection, color: "#ffffff" | "#000000") => {
+    if (!target.pageId) return;
+    const label = color === "#ffffff" ? uiCopy.workbench.action.white : uiCopy.workbench.action.black;
+    if (commitCapability("set_presentation_unit_background", { unitId: target.pageId, color }, uiCopy.workbench.operation.setPageBackground(label))) setComicContextMenu(null);
   };
 
   const openImageMoreMenu = (button: HTMLButtonElement) => {
@@ -3169,7 +3187,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
   const handleWorkbenchPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
     const target = event.target instanceof Element ? event.target : null;
-    if (comicContextMenu && !target?.closest(".comic-context-menu, .comic-frame-bleed-menu, .comic-image-more-menu, .object-toolbar")) {
+    if (comicContextMenu && !target?.closest(".comic-context-menu, .comic-frame-bleed-menu, .comic-page-background-menu, .comic-image-more-menu, .object-toolbar")) {
       setComicContextMenu(null);
       setSelection(noSelection);
     }
@@ -3365,6 +3383,29 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const unit = canvasUnits[index];
     return aspect + (unit && unit.canvas.height > 0 ? unit.canvas.width / unit.canvas.height : 0);
   }, 0);
+  const crossPageSnapFrames = (pageIndex: number): Array<{ id: string; geometry: Geometry }> => {
+    if (displayedPageIndices.length !== 2) return [];
+    const currentUnit = canvasUnits[pageIndex];
+    const currentPosition = displayedPageIndices.indexOf(pageIndex);
+    if (!currentUnit || currentPosition < 0) return [];
+    return displayedPageIndices.flatMap((otherPageIndex, otherPosition) => {
+      if (otherPageIndex === pageIndex) return [];
+      const otherUnit = canvasUnits[otherPageIndex];
+      if (!otherUnit) return [];
+      const scale = currentUnit.canvas.width / otherUnit.canvas.width;
+      const horizontalOffset = otherPosition < currentPosition ? -currentUnit.canvas.width : currentUnit.canvas.width;
+      return otherUnit.frames.map((frame) => ({
+        id: `${otherUnit.id}:${frame.id}`,
+        geometry: {
+          ...frame.geometry,
+          x: horizontalOffset + frame.geometry.x * scale,
+          y: frame.geometry.y * scale,
+          width: frame.geometry.width * scale,
+          height: frame.geometry.height * scale,
+        },
+      }));
+    });
+  };
   const displayedPhysicalNumbers = displayedPageIndices.flatMap((index) => {
     const unit = canvasUnits[index];
     return unit ? orderedUnitSurfaces(unit, canvasDocument.reading.direction).map((surface) => surface.pageNumber).filter((number): number is number => typeof number === "number") : [];
@@ -3978,7 +4019,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <div ref={!isVerticalCanvas ? pageCanvasFitStageRef : undefined} className={`page-canvas-fit-stage ${isVerticalCanvas ? "vertical" : ""}`}>
             <div className={`comic-stage-wrap ${isVerticalCanvas ? "vertical" : showingSpread ? "spread" : ""} ${currentDisplayGroup?.trueSpread ? "true-spread" : ""}`} style={isVerticalCanvas ? verticalStageWrapStyle : pageCanvasStageStyle}>
               <span className="page-tag">{isVerticalCanvas ? (canvasUnits[state.currentPageIndex] ? presentationUnitNumberLabel(canvasUnits[state.currentPageIndex], state.currentPageIndex).toUpperCase() : uiCopy.workbench.pageFlow.defaultSegment) : page?.pageRole === "cover" ? uiCopy.workbench.pageFlow.pageRole.cover : page?.pageRole === "interlude" ? uiCopy.workbench.pageFlow.pageRole.interlude : showingSpread ? uiCopy.workbench.label.pageRangeTag(displayedPhysicalNumbers.map((number) => String(number).padStart(2, "0")).join("–")) : page?.kind === "four_panel_unit" ? uiCopy.workbench.label.fourPanelTag : uiCopy.workbench.label.pageTag(String(displayedPhysicalNumbers[0] ?? state.currentPageIndex + 1).padStart(2, "0"))}</span>
-              <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={frameImageCandidatePreview?.target ?? selection} editable={canvasMode === "focus"} interactionMode={frameImageCandidatePreview ? "preview" : objectInteractionMode} creationMode={frameImageCandidatePreview ? undefined : creationMode ?? undefined} multiSelectedIds={frameImageCandidatePreview ? undefined : activeMultiComicIds} multiMoving={!frameImageCandidatePreview && multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} onSelect={frameImageCandidatePreview ? undefined : handleCanvasSelection} onContextAction={frameImageCandidatePreview ? undefined : handleComicContextAction} onObjectDoubleClick={frameImageCandidatePreview ? undefined : handleComicObjectDoubleClick} onPlaceDialogue={frameImageCandidatePreview ? undefined : createDialogueBalloon} onPlacePageDialogue={frameImageCandidatePreview ? undefined : createPageDialogueBalloon} onPlaceNarration={frameImageCandidatePreview ? undefined : createNarration} onCommitElement={frameImageCandidatePreview ? undefined : (unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={frameImageCandidatePreview ? undefined : commitElementPatches} /></div>)}</div>
+              <div ref={isVerticalCanvas ? verticalStripRef : undefined} className={`comic-page-spread ${isVerticalCanvas ? "vertical-strip-pages" : displayedPageIndices.length === 1 ? "one" : ""}`} style={verticalStripStyle} onScroll={isVerticalCanvas ? handleVerticalStripScroll : undefined}>{displayedPageIndices.map((pageIndex) => <div className={`spread-page ${isVerticalCanvas && pageIndex === state.currentPageIndex ? "active" : ""}`} data-page-index={isVerticalCanvas ? pageIndex : undefined} key={canvasUnits[pageIndex]?.id ?? pageIndex}><ComicRenderer document={canvasDocument} resolvedResources={canvasResolvedResources} pageIndex={pageIndex} selection={frameImageCandidatePreview?.target ?? selection} editable={canvasMode === "focus"} interactionMode={frameImageCandidatePreview ? "preview" : objectInteractionMode} creationMode={frameImageCandidatePreview ? undefined : creationMode ?? undefined} multiSelectedIds={frameImageCandidatePreview ? undefined : activeMultiComicIds} multiMoving={!frameImageCandidatePreview && multiMoving && multiComicActive} multiMoveDelta={multiMoveDelta} crossPageSnapFrames={crossPageSnapFrames(pageIndex)} onSelect={frameImageCandidatePreview ? undefined : handleCanvasSelection} onContextAction={frameImageCandidatePreview ? undefined : handleComicContextAction} onObjectDoubleClick={frameImageCandidatePreview ? undefined : handleComicObjectDoubleClick} onPlaceDialogue={frameImageCandidatePreview ? undefined : createDialogueBalloon} onPlacePageDialogue={frameImageCandidatePreview ? undefined : createPageDialogueBalloon} onPlaceNarration={frameImageCandidatePreview ? undefined : createNarration} onCommitElement={frameImageCandidatePreview ? undefined : (unitId, elementId, patch, label) => commitCapabilities(capabilitiesForElementPatch(unitId, elementId, patch), label)} onCommitElements={frameImageCandidatePreview ? undefined : commitElementPatches} /></div>)}</div>
               {canvasMode === "free" && !isVerticalCanvas ? <div className="canvas-page-turn-zones" aria-label={uiCopy.workbench.pageFlow.freeModePaginationAria}><button type="button" className="canvas-page-turn-zone previous" aria-label={uiCopy.viewer.action.previousPage} onClick={() => turnCanvasPage(-1)} /><button type="button" className="canvas-page-turn-zone next" aria-label={uiCopy.viewer.action.nextPage} onClick={() => turnCanvasPage(1)} /></div> : null}
             </div>
           </div>
@@ -3994,7 +4035,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </ObjectToolbar> : null}
         {canvasMode === "focus" && !frameImageCandidatePreview && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label={uiCopy.workbench.objectEditor.toolbarAria} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
           <button type="button" className="object-ai-reference" aria-label={uiCopy.workbench.objectEditor.referenceAria} onClick={() => { addSelectionReference(); setAgentOpen(true); }}><Icon name="ai" /></button>
-          <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.toggleBalloonTransformAria : selection.type === "text" ? uiCopy.workbench.objectEditor.toggleNarrationTransformAria : selection.type === "image" ? uiCopy.workbench.objectEditor.togglePaperImageTransformAria : uiCopy.workbench.objectEditor.toggleFrameMoveAria} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && !(selectedElement?.type === "image" && selectedElement.location.space === "overlay")) || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
+          <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.toggleBalloonTransformAria : selection.type === "text" ? uiCopy.workbench.objectEditor.toggleNarrationTransformAria : selectedFrameImage ? uiCopy.workbench.objectEditor.toggleFrameMoveAria : selection.type === "image" ? uiCopy.workbench.objectEditor.togglePaperImageTransformAria : uiCopy.workbench.objectEditor.toggleFrameMoveAria} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && selectedElement?.type !== "image") || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
           <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? uiCopy.workbench.action.rotateNarration : selection.type === "speech_balloon" ? uiCopy.workbench.action.rotateBalloon : selectedElement?.type === "image" && selectedElement.location.space === "overlay" ? uiCopy.workbench.objectEditor.cropPaperImageAria : uiCopy.workbench.objectEditor.cropFrameImageAria} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selectedElement?.type !== "image"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
           <button type="button" aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.editBalloonAria : selection.type === "text" ? uiCopy.workbench.objectEditor.editNarrationAria : selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard} onClick={openSelectionEditor}><Icon name="edit" /></button>
           <button type="button" aria-label={uiCopy.workbench.objectEditor.manageAria} aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
@@ -4005,6 +4046,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       {comicContextMenu && comicContextMenuStyle ? <FloatingMenu className="comic-context-menu reference-context-menu" style={comicContextMenuStyle} aria-label={uiCopy.workbench.objectEditor.manageMenuAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); handleComicContextAction(comicContextMenu.target, comicContextMenu.point); }}>
         <header><strong><Icon name={comicContextHeader.icon} />{comicContextHeader.label}</strong>{objectLocationLabel(contextTargetElement) ? <em className="object-location-badge">{objectLocationLabel(contextTargetElement)}</em> : null}</header>
+        {comicContextMenu.target.type === "presentation_unit" ? <ComicMenuGroup label={uiCopy.workbench.action.backgroundColor}><button type="button" aria-haspopup="menu" aria-expanded={Boolean(comicContextMenu.backgroundMenu)} onClick={(event) => openPageBackgroundMenu(event.currentTarget)}><span><Icon name="pageSingle" />{uiCopy.workbench.action.backgroundColor}<span className="reference-menu-chevron"><Icon name="expand" /></span></span></button></ComicMenuGroup> : null}
         {comicContextMenu.target.type === "presentation_unit" ? <ComicMenuGroup label={uiCopy.workbench.menuGroup.add}>{contextTargetUnit?.pageRole === "story" ? <><button type="button" onClick={() => comicContextMenu.target.pageId && createFrameAt(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="add" />{uiCopy.workbench.action.addFrame}</span></button><button type="button" onClick={() => comicContextMenu.target.pageId && createPageDialogueBalloon(comicContextMenu.target.pageId, { x: comicContextMenu.point.canvasX, y: comicContextMenu.point.canvasY })}><span><Icon name="message" />{uiCopy.workbench.action.addPaperDialogue}</span></button></> : null}<button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{uiCopy.workbench.imagePicker.placePaper}</span></button>{contextTargetUnit?.kind === "spread" ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_page")}><span><Icon name="pageSpread" />{uiCopy.workbench.imagePicker.placeCrossPage}</span></button> : null}{contextTargetUnit?.kind === "vertical_segment" && contextTargetUnit.surfaces.length > 1 ? <button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target, undefined, "cross_segment")}><span><Icon name="pages" />{uiCopy.workbench.imagePicker.placeCrossSegment}</span></button> : null}</ComicMenuGroup> : null}
         {comicContextMenu.target.type === "comic_frame" ? <>
           <ComicMenuGroup label={uiCopy.asset.label.content}><button type="button" onClick={() => openFrameImagePicker(comicContextMenu.target)}><span><Icon name="asset" />{contextTargetFrameData?.image ? uiCopy.workbench.action.replaceFrameImage : uiCopy.workbench.action.placeFrameImage}</span></button><button type="button" onClick={() => createDialogueFromContext(comicContextMenu.target, comicContextMenu.point)}><span><Icon name="message" />{uiCopy.workbench.action.addDialogue}</span></button></ComicMenuGroup>
@@ -4040,6 +4082,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </> : null}
       </FloatingMenu> : null}
       {comicContextMenu?.bleedMenu && contextTargetFrameData?.frame ? <FloatingMenu className="reference-context-menu comic-frame-bleed-menu" style={comicContextMenu.bleedMenu} aria-label={uiCopy.workbench.objectEditor.selectBleedEdgeAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection>{(["top", "right", "bottom", "left"] as const).map((edge) => <button type="button" key={edge} aria-pressed={Boolean(contextTargetFrameData.frame?.bleedEdges?.[edge])} onClick={() => toggleFrameBleedEdge(comicContextMenu.target, edge)}><span><Icon name="expand" />{uiCopy.workbench.bleed.action(contextTargetFrameData.frame?.bleedEdges?.[edge] ? "cancel" : "extend", { top: uiCopy.workbench.direction.top, right: uiCopy.workbench.direction.right, bottom: uiCopy.workbench.direction.bottom, left: uiCopy.workbench.direction.left }[edge])}</span></button>)}</MenuSection></FloatingMenu> : null}
+      {comicContextMenu?.backgroundMenu && contextTargetUnit ? <FloatingMenu className="reference-context-menu comic-page-background-menu" style={comicContextMenu.backgroundMenu} aria-label={uiCopy.workbench.action.backgroundColor} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection>{(["#ffffff", "#000000"] as const).map((color) => { const label = color === "#ffffff" ? uiCopy.workbench.action.white : uiCopy.workbench.action.black; return <button type="button" key={color} aria-pressed={contextTargetUnit.canvas.background.color === color} onClick={() => setPageBackground(comicContextMenu.target, color)}><span><i className={`page-background-swatch ${color === "#000000" ? "black" : "white"}`} />{label}</span></button>; })}</MenuSection></FloatingMenu> : null}
       {comicContextMenu?.imageMoreMenu && contextTargetElement?.type === "image" ? <FloatingMenu className="reference-context-menu comic-image-more-menu" style={comicContextMenu.imageMoreMenu} aria-label={uiCopy.workbench.imagePicker.moreAria} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><MenuSection><button type="button" onClick={() => openCanvasImageViewer(comicContextMenu.target)}><span><Icon name="referenceImage" />{uiCopy.common.action.viewImage}</span></button><button type="button" disabled={Boolean(downloadingCanvasImageId)} onClick={() => void downloadCanvasImage(comicContextMenu.target)}><span><Icon name="download" />{downloadingCanvasImageId === contextTargetElement.id ? uiCopy.common.progress.downloading : uiCopy.common.action.download}</span></button><button type="button" disabled={contextImageAlreadyInAssetList || Boolean(addingCanvasImageAssetId)} onClick={() => void addCanvasImageToAssetList(comicContextMenu.target)}><span><Icon name="add" />{contextImageAlreadyInAssetList ? uiCopy.asset.status.addedToList : addingCanvasImageAssetId === contextTargetElement.assetId ? uiCopy.workbench.action.addInProgress : uiCopy.asset.action.addToList}</span></button></MenuSection></FloatingMenu> : null}
 
       {frameImageTarget && frameImagePickerStyle ? <FloatingMenu role="dialog" className="frame-image-picker" style={frameImagePickerStyle} aria-label={uiCopy.workbench.imagePicker.selectAria} onPointerDown={(event) => event.stopPropagation()}>
@@ -4061,7 +4104,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       <div className="canvas-global-actions" aria-label={uiCopy.common.navigation.globalEntry}><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label={uiCopy.workbench.chat.panelAria}>
         <div className="agent-head">
-          <div className="agent-head-actions"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label={uiCopy.workbench.chat.sessionsAria} aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><button type="button" aria-label={uiCopy.workbench.chat.collapseAria} onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
+          <div className="agent-head-actions"><span className="agent-session-entry"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label={uiCopy.workbench.chat.sessionsAria} aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><small>{uiCopy.workbench.chat.internalAgentHint}</small></span><button type="button" aria-label={uiCopy.workbench.chat.collapseAria} onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
         </div>
         {sessionDrawerOpen ? <SessionDrawer aria-label={uiCopy.workbench.chat.currentSessionsAria}><header><div><small>{uiCopy.workbench.chat.currentCanvasLabel}</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label={uiCopy.workbench.chat.newSessionAria} onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder={uiCopy.workbench.chat.sessionNamePlaceholder} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.createSessionAria}><Icon name="add" /></button><button type="button" aria-label={uiCopy.workbench.chat.cancelNewSessionAria} onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="x" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.saveSessionNameAria}><Icon name="save" /></button><button type="button" aria-label={uiCopy.workbench.creationSpace.cancelRenameAria} onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="x" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={uiCopy.workbench.aria.manageConversation(conversation.title)} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />{uiCopy.workbench.chat.rename}</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="trash" />{uiCopy.common.action.delete}</button></div> : null}</SessionDrawer> : null}
         <div ref={agentMessagesRef} className="agent-messages" data-testid="agent-messages">

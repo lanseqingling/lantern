@@ -245,7 +245,10 @@ export function SettingsClient() {
 
         {settings ? <>
           <section className="settings-section">
-            <div className="settings-section-heading"><h2>{uiCopy.settings.section.modelApi}</h2></div>
+            <div className="settings-section-heading settings-model-api-heading">
+              <h2>{uiCopy.settings.section.modelApi}</h2>
+              <a href={uiCopy.settings.section.externalAgentGuideUrl} target="_blank" rel="noreferrer">{uiCopy.workbench.chat.internalAgentHint}</a>
+            </div>
             <div className="settings-model-list">
               {drafts.map((draft) => {
                 const isExpanded = expanded.has(draft.capability);

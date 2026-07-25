@@ -12,6 +12,15 @@ export type EdgeExtensionGuide = {
   position: number;
 };
 
+export type EqualGapGuide = {
+  kind: "equal_gap";
+  axis: "x" | "y";
+  reference: { start: number; end: number; position: number };
+  active: { start: number; end: number; position: number };
+};
+
+export type MoveSnapGuide = EdgeExtensionGuide | EqualGapGuide;
+
 export type ParallelCornerGuide = {
   kind: "parallel_corner";
   frameId: string;
@@ -64,25 +73,74 @@ export function snapGeometryToFrameEdgeExtensions(
   geometry: Geometry,
   targets: ReadonlyArray<Pick<SnapFrame, "geometry">>,
   threshold: { x: number; y: number },
-): { geometry: Geometry; guides: EdgeExtensionGuide[] } {
-  const xCandidates = targets.flatMap((target) => [
-    { delta: target.geometry.x - geometry.x, position: target.geometry.x },
-    { delta: target.geometry.x + target.geometry.width - geometry.x - geometry.width, position: target.geometry.x + target.geometry.width },
-  ]).filter((candidate) => Math.abs(candidate.delta) <= threshold.x).sort((left, right) => Math.abs(left.delta) - Math.abs(right.delta));
-  const yCandidates = targets.flatMap((target) => [
-    { delta: target.geometry.y - geometry.y, position: target.geometry.y },
-    { delta: target.geometry.y + target.geometry.height - geometry.y - geometry.height, position: target.geometry.y + target.geometry.height },
-  ]).filter((candidate) => Math.abs(candidate.delta) <= threshold.y).sort((left, right) => Math.abs(left.delta) - Math.abs(right.delta));
-  const xSnap = xCandidates[0];
-  const ySnap = yCandidates[0];
+  movementAxis?: "x" | "y",
+): { geometry: Geometry; guides: MoveSnapGuide[] } {
+  const xCandidates: MoveSnapCandidate[] = targets.flatMap((target) => [
+    { axis: "x" as const, delta: target.geometry.x - geometry.x, guide: { kind: "edge_extension" as const, axis: "x" as const, position: target.geometry.x } },
+    { axis: "x" as const, delta: target.geometry.x + target.geometry.width - geometry.x - geometry.width, guide: { kind: "edge_extension" as const, axis: "x" as const, position: target.geometry.x + target.geometry.width } },
+  ]).filter((candidate) => Math.abs(candidate.delta) <= threshold.x);
+  const yCandidates: MoveSnapCandidate[] = targets.flatMap((target) => [
+    { axis: "y" as const, delta: target.geometry.y - geometry.y, guide: { kind: "edge_extension" as const, axis: "y" as const, position: target.geometry.y } },
+    { axis: "y" as const, delta: target.geometry.y + target.geometry.height - geometry.y - geometry.height, guide: { kind: "edge_extension" as const, axis: "y" as const, position: target.geometry.y + target.geometry.height } },
+  ]).filter((candidate) => Math.abs(candidate.delta) <= threshold.y);
+  const gapCandidates = movementAxis === "x"
+    ? horizontalEqualGapCandidates(geometry, targets, threshold.x)
+    : movementAxis === "y"
+      ? verticalEqualGapCandidates(geometry, targets, threshold.y)
+      : [];
+  const xSnap = [...xCandidates, ...gapCandidates.filter((candidate) => candidate.axis === "x")].sort((left, right) => Math.abs(left.delta) - Math.abs(right.delta))[0];
+  const ySnap = [...yCandidates, ...gapCandidates.filter((candidate) => candidate.axis === "y")].sort((top, bottom) => Math.abs(top.delta) - Math.abs(bottom.delta))[0];
   return {
     geometry: { ...geometry, x: geometry.x + (xSnap?.delta ?? 0), y: geometry.y + (ySnap?.delta ?? 0) },
     guides: [
-      ...(xSnap ? [{ kind: "edge_extension" as const, axis: "x" as const, position: xSnap.position }] : []),
-      ...(ySnap ? [{ kind: "edge_extension" as const, axis: "y" as const, position: ySnap.position }] : []),
+      ...(xSnap ? [xSnap.guide] : []),
+      ...(ySnap ? [ySnap.guide] : []),
     ],
   };
 }
+
+type MoveSnapCandidate = { axis: "x" | "y"; delta: number; guide: MoveSnapGuide };
+const overlaps = (firstStart: number, firstEnd: number, secondStart: number, secondEnd: number) => Math.min(firstEnd, secondEnd) - Math.max(firstStart, secondStart) > .5;
+
+const verticalEqualGapCandidates = (geometry: Geometry, targets: ReadonlyArray<Pick<SnapFrame, "geometry">>, threshold: number): MoveSnapCandidate[] => {
+  const candidates: MoveSnapCandidate[] = [];
+  for (const upper of targets) for (const lower of targets) {
+    if (upper === lower || upper.geometry.y + upper.geometry.height > lower.geometry.y || !overlaps(upper.geometry.x, upper.geometry.x + upper.geometry.width, lower.geometry.x, lower.geometry.x + lower.geometry.width)) continue;
+    const gap = lower.geometry.y - (upper.geometry.y + upper.geometry.height);
+    for (const anchor of targets) {
+      if (!overlaps(anchor.geometry.x, anchor.geometry.x + anchor.geometry.width, geometry.x, geometry.x + geometry.width)) continue;
+      const placeBelow = anchor.geometry.y + anchor.geometry.height + gap;
+      const placeAbove = anchor.geometry.y - geometry.height - gap;
+      const position = Math.max(upper.geometry.x + upper.geometry.width, lower.geometry.x + lower.geometry.width, anchor.geometry.x + anchor.geometry.width, geometry.x + geometry.width) + 10;
+      for (const [nextY, activeStart, activeEnd] of [[placeBelow, anchor.geometry.y + anchor.geometry.height, placeBelow], [placeAbove, placeAbove + geometry.height, anchor.geometry.y]] as const) {
+        const delta = nextY - geometry.y;
+        if (Math.abs(delta) > threshold) continue;
+        candidates.push({ axis: "y", delta, guide: { kind: "equal_gap", axis: "y", reference: { start: upper.geometry.y + upper.geometry.height, end: lower.geometry.y, position }, active: { start: activeStart, end: activeEnd, position } } });
+      }
+    }
+  }
+  return candidates;
+};
+
+const horizontalEqualGapCandidates = (geometry: Geometry, targets: ReadonlyArray<Pick<SnapFrame, "geometry">>, threshold: number): MoveSnapCandidate[] => {
+  const candidates: MoveSnapCandidate[] = [];
+  for (const left of targets) for (const right of targets) {
+    if (left === right || left.geometry.x + left.geometry.width > right.geometry.x || !overlaps(left.geometry.y, left.geometry.y + left.geometry.height, right.geometry.y, right.geometry.y + right.geometry.height)) continue;
+    const gap = right.geometry.x - (left.geometry.x + left.geometry.width);
+    for (const anchor of targets) {
+      if (!overlaps(anchor.geometry.y, anchor.geometry.y + anchor.geometry.height, geometry.y, geometry.y + geometry.height)) continue;
+      const placeRight = anchor.geometry.x + anchor.geometry.width + gap;
+      const placeLeft = anchor.geometry.x - geometry.width - gap;
+      const position = Math.max(left.geometry.y + left.geometry.height, right.geometry.y + right.geometry.height, anchor.geometry.y + anchor.geometry.height, geometry.y + geometry.height) + 10;
+      for (const [nextX, activeStart, activeEnd] of [[placeRight, anchor.geometry.x + anchor.geometry.width, placeRight], [placeLeft, placeLeft + geometry.width, anchor.geometry.x]] as const) {
+        const delta = nextX - geometry.x;
+        if (Math.abs(delta) > threshold) continue;
+        candidates.push({ axis: "x", delta, guide: { kind: "equal_gap", axis: "x", reference: { start: left.geometry.x + left.geometry.width, end: right.geometry.x, position }, active: { start: activeStart, end: activeEnd, position } } });
+      }
+    }
+  }
+  return candidates;
+};
 
 /** Snaps the right and bottom edges of a bottom-right resize gesture. */
 export function snapGeometrySizeToFrameEdgeExtensions(

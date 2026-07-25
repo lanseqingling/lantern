@@ -161,6 +161,39 @@ test("moving objects snap only to close like-for-like frame edge extensions", ()
   assert.deepEqual(crossEdgeOnly.guides, []);
 });
 
+test("moving objects preserve matching frame gaps only along the active axis", () => {
+  const frames = [
+    { geometry: { x: 20, y: 20, width: 100, height: 60 } },
+    { geometry: { x: 20, y: 100, width: 100, height: 60 } },
+  ];
+  const snapped = snapGeometryToFrameEdgeExtensions(
+    { x: 20, y: 177, width: 100, height: 60 },
+    frames,
+    { x: 5, y: 5 },
+    "y",
+  );
+  assert.equal(snapped.geometry.y, 180);
+  const gapGuide = snapped.guides.find((guide) => guide.kind === "equal_gap");
+  assert.deepEqual(gapGuide, {
+    kind: "equal_gap",
+    axis: "y",
+    reference: { start: 80, end: 100, position: 130 },
+    active: { start: 160, end: 180, position: 130 },
+  });
+
+  const horizontalOnly = snapGeometryToFrameEdgeExtensions(
+    { x: 177, y: 20, width: 60, height: 100 },
+    [
+      { geometry: { x: 20, y: 20, width: 60, height: 100 } },
+      { geometry: { x: 100, y: 20, width: 60, height: 100 } },
+    ],
+    { x: 5, y: 5 },
+    "x",
+  );
+  assert.equal(horizontalOnly.geometry.x, 180);
+  assert.equal(horizontalOnly.guides.some((guide) => guide.kind === "equal_gap" && guide.axis === "x"), true);
+});
+
 test("resizing objects snaps their right and bottom edges to matching frame extensions", () => {
   const target = { geometry: { x: 10, y: 20, width: 80, height: 90 } };
   const snapped = snapGeometrySizeToFrameEdgeExtensions(
@@ -227,6 +260,23 @@ test("reshape frame capability applies geometry and four-corner shape atomically
   assert.deepEqual(next?.shape, shape);
   const pageFrame = createComicPageView(result.result.working.document, result.result.working.document.units[0]).elements.find((element) => element.id === frame.id);
   assert.deepEqual(pageFrame?.type === "comic_frame" ? pageFrame.shape : undefined, shape);
+});
+
+test("presentation unit background is limited to the supported paper colors", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const result = dryRunEditorCapability("set_presentation_unit_background", { unitId: unit.id, color: "#000000" }, {
+    fixture,
+    createId: (prefix) => `${prefix}-background`,
+    actor: "human",
+  });
+  assert.deepEqual(result.commands, [{ type: "set_presentation_unit_background", unitId: unit.id, color: "#000000" }]);
+  assert.equal(result.result.working.document.units[0].canvas.background.color, "#000000");
+  assert.throws(() => dryRunEditorCapability("set_presentation_unit_background", { unitId: unit.id, color: "#2f3540" }, {
+    fixture,
+    createId: (prefix) => `${prefix}-background`,
+    actor: "human",
+  }));
 });
 
 test("frame border width accepts half-step values independently from its storyboard binding", () => {
@@ -339,6 +389,7 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
     "create_page",
     "create_vertical_segment",
     "update_presentation_unit",
+    "set_presentation_unit_background",
     "duplicate_presentation_unit",
     "move_presentation_unit",
     "delete_presentation_unit",

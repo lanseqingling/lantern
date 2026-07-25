@@ -10,6 +10,7 @@
 .snap-guide-layer { position: absolute; z-index: 2147483647; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 3px rgba(100,200,200,.86)); }
 .snap-guide-layer line { fill: none; stroke: var(--cyan); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .snap-guide-layer .edge-extension { stroke-linecap: square; }
+.snap-guide-layer .distance-guide line { stroke: var(--cyan); stroke-width: 1.5; stroke-linecap: square; }
 .snap-guide-layer .parallel-reference-edge { stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 7 5; }
 .snap-guide-layer .parallel-active-edge { stroke-width: 3.5; stroke-linecap: round; }
 .lcd-image, .lcd-frame, .lcd-frame-fill, .lcd-text, .lcd-balloon, .lcd-effect { position: absolute; box-sizing: border-box; }
@@ -69,6 +70,12 @@
 .comic-page.interaction-move .selection-label, .comic-page.interaction-crop .selection-label, .comic-page.interaction-preview .selection-label { border-color: rgba(225,174,75,.46); color: #8b641c; box-shadow: 0 8px 20px rgba(183,125,27,.1); }
 .comic-page.interaction-preview .lcd-frame.selected { pointer-events: auto; background: rgba(225,174,75,.025); }
 .resize-handle { position: absolute; z-index: 30; right: -7px; bottom: -7px; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 5px; background: var(--cyan); box-shadow: 0 3px 10px rgba(36,127,130,.28); pointer-events: auto; cursor: nwse-resize; }
+.corner-resize-controls { position: absolute; z-index: 30; inset: 0; pointer-events: none; }
+.corner-resize-handle { position: absolute; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 5px; background: var(--cyan); box-shadow: 0 3px 10px rgba(36,127,130,.28); pointer-events: auto; touch-action: none; translate: -50% -50%; }
+.corner-resize-handle.corner-top-left { left: 0; top: 0; cursor: nwse-resize; }
+.corner-resize-handle.corner-top-right { left: 100%; top: 0; cursor: nesw-resize; }
+.corner-resize-handle.corner-bottom-right { left: 100%; top: 100%; cursor: nwse-resize; }
+.corner-resize-handle.corner-bottom-left { left: 0; top: 100%; cursor: nesw-resize; }
 .frame-corner-controls { position: absolute; z-index: 45; inset: 0; overflow: visible; pointer-events: none; }
 .frame-corner-handle { position: absolute; width: 15px; height: 15px; border: 2px solid #fff; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 2px rgba(36,127,130,.24), 0 4px 12px rgba(36,127,130,.34); translate: -50% -50%; pointer-events: auto; cursor: move; touch-action: none; transition: scale 120ms ease, box-shadow 120ms ease; }
 .frame-corner-handle:hover, .frame-corner-handle:focus-visible { box-shadow: 0 0 0 3px rgba(100,200,200,.28), 0 5px 14px rgba(36,127,130,.42); outline: 2px solid rgba(255,255,255,.94); outline-offset: 1px; scale: 1.12; }

@@ -129,6 +129,11 @@ export function applyWorkspaceChangeSet(
       else unit.name = operation.name;
       continue;
     }
+    if (operation.type === "set_presentation_unit_background") {
+      const unit = findUnit(operation.unitId);
+      unit.canvas.background.color = operation.color;
+      continue;
+    }
     if (operation.type === "resize_vertical_segment") {
       const unit = findUnit(operation.unitId);
       if (unit.kind !== "vertical_segment") throw new Error("resize_vertical_segment requires a vertical segment");

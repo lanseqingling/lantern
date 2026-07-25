@@ -5,11 +5,12 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@lantern/shared";
 import { balloonCutCornerPoints, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@lantern/shared";
 import type { Selection } from "@/app/lib/workbench-state";
-import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
+import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type MoveSnapGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 import { uiCopy } from "@/app/lib/ui-copy";
 
 type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
+type ResizeCorner = "top_left" | "top_right" | "bottom_right" | "bottom_left";
 export type ComicContextPoint = { clientX: number; clientY: number; canvasX: number; canvasY: number };
 type DragState = {
   mode: "frame_move" | "frame_resize" | "frame_corner" | "image_crop" | "image_move" | "image_resize" | "balloon_move" | "balloon_resize" | "balloon_rotate" | "balloon_tail" | "text_move" | "text_resize" | "text_rotate";
@@ -23,6 +24,7 @@ type DragState = {
   startSceneGeometry?: Geometry;
   startShape?: FrameShape;
   frameBounds?: Geometry;
+  resizeCorner?: ResizeCorner;
   cornerIndex?: FrameCornerIndex;
   axis?: FrameCornerAxis;
   startTransform?: LocalTransform;
@@ -32,7 +34,7 @@ type DragState = {
   moved?: boolean;
 };
 type CropWheelState = { elementId: string; crop: ArtElement["crop"]; timer: number };
-type SnapGuideState = { edgeGuides: EdgeExtensionGuide[] } | { parallelGuide: ParallelCornerGuide } | null;
+type SnapGuideState = { edgeGuides: MoveSnapGuide[] } | { parallelGuide: ParallelCornerGuide } | null;
 
 type ComicRendererProps = {
   document: ComicDocument;
@@ -45,6 +47,7 @@ type ComicRendererProps = {
   multiSelectedIds?: ReadonlySet<string>;
   multiMoving?: boolean;
   multiMoveDelta?: { x: number; y: number };
+  crossPageSnapFrames?: Array<Pick<Frame, "id" | "geometry">>;
   onSelect?: (selection: Selection) => void;
   onContextAction?: (selection: Selection, point: ComicContextPoint) => void;
   onObjectDoubleClick?: (selection: Selection) => void;
@@ -154,7 +157,7 @@ function FrameShapeVisual({ frame, fill, stroke }: { frame: Frame; fill: string;
   </svg>;
 }
 
-export function ComicRenderer({ document, resolvedResources, pageIndex, selection, editable = false, interactionMode = "select", creationMode, multiSelectedIds, multiMoving = false, multiMoveDelta, onSelect, onContextAction, onObjectDoubleClick, onPlaceDialogue, onPlacePageDialogue, onPlaceNarration, onCommitElement, onCommitElements, onPageClick, className }: ComicRendererProps) {
+export function ComicRenderer({ document, resolvedResources, pageIndex, selection, editable = false, interactionMode = "select", creationMode, multiSelectedIds, multiMoving = false, multiMoveDelta, crossPageSnapFrames = [], onSelect, onContextAction, onObjectDoubleClick, onPlaceDialogue, onPlacePageDialogue, onPlaceNarration, onCommitElement, onCommitElements, onPageClick, className }: ComicRendererProps) {
   const requestedUnitId = document.reading.unitOrder[pageIndex];
   const unit = document.units.find((item) => item.id === requestedUnitId) ?? document.units[0];
   const paperRef = useRef<HTMLDivElement>(null);
@@ -185,6 +188,14 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const framesById = new Map(frames.map((frame) => [frame.id, frame]));
   const readingOrder = new Map(unit.readingSequence.map((entry, index) => [entry.frameId, index + 1]));
   const images = scene.elements.filter((node): node is ImageSceneNode => node.element.kind === "image");
+  // A frame image is edited as an image while cropping, but otherwise belongs to
+  // its frame. Keep the frame affordances visible when that image is selected.
+  const selectedFrameId = selection?.type === "comic_frame"
+    ? selection.id
+    : selection?.type === "image"
+      ? images.find((node) => node.source === "frame" && node.element.id === selection.id)?.frame?.id
+      : undefined;
+  const frameIsSelected = (frameId: string) => selectedFrameId === frameId;
   const cropFrameId = interactionMode === "crop" && selection?.type === "image"
     ? images.find((node) => node.element.id === selection.id && node.source === "frame")?.frame?.id
     : interactionMode === "crop" && selection?.type === "comic_frame" ? selection.id : undefined;
@@ -278,6 +289,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     const bounds = surface?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
     return containsGeometry(bounds, geometry) && (unit.layoutPolicy.frameOverlap === "allow" || !unit.frames.some((frame) => frame.id !== frameId && rectsOverlap(geometry, frame.geometry)));
   };
+  const movingSnapFrames = (frameId?: string) => [...unit.frames.filter((frame) => frame.id !== frameId), ...crossPageSnapFrames];
   const nudgeFrameCorner = (event: ReactKeyboardEvent<HTMLButtonElement>, frame: Frame, cornerIndex: FrameCornerIndex) => {
     const direction = ({ ArrowLeft: ["x", -1], ArrowRight: ["x", 1], ArrowUp: ["y", -1], ArrowDown: ["y", 1] } as const)[event.key as "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"];
     if (!direction || !onCommitElements) return;
@@ -365,8 +377,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const actualDy = (rawTransform.y - drag.startTransform.y) * (drag.frameId ? anchor.height : 1);
       const snapped = snapGeometryToFrameEdgeExtensions(
         { ...drag.startSceneGeometry, x: drag.startSceneGeometry.x + actualDx, y: drag.startSceneGeometry.y + actualDy },
-        unit.frames.filter((frame) => frame.id !== drag.frameId),
+        movingSnapFrames(drag.frameId),
         moveSnapThreshold,
+        Math.abs(dx) >= Math.abs(dy) ? "x" : "y",
       );
       const snappedDx = snapped.geometry.x - drag.startSceneGeometry.x;
       const snappedDy = snapped.geometry.y - drag.startSceneGeometry.y;
@@ -403,24 +416,45 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const coordinateWidth = drag.frameId ? 1 : anchor.width;
       const coordinateHeight = drag.frameId ? 1 : anchor.height;
       const coordinateBounds = drag.coordinateBounds ?? { minX: 0, minY: 0, maxX: coordinateWidth, maxY: coordinateHeight };
+      const scaleX = drag.frameId ? anchor.width : 1;
+      const scaleY = drag.frameId ? anchor.height : 1;
+      const offsetX = dx / scaleX;
+      const offsetY = dy / scaleY;
+      const corner = drag.resizeCorner ?? "bottom_right";
+      const right = drag.startTransform.x + drag.startTransform.width;
+      const bottom = drag.startTransform.y + drag.startTransform.height;
+      const x = corner === "top_left" || corner === "bottom_left"
+        ? clamp(drag.startTransform.x + offsetX, coordinateBounds.minX, right - minWidth)
+        : drag.startTransform.x;
+      const y = corner === "top_left" || corner === "top_right"
+        ? clamp(drag.startTransform.y + offsetY, coordinateBounds.minY, bottom - minHeight)
+        : drag.startTransform.y;
       const rawTransform = {
         ...drag.startTransform,
-        width: clamp(drag.startTransform.width + (drag.frameId ? dx / anchor.width : dx), minWidth, coordinateBounds.maxX - drag.startTransform.x),
-        height: clamp(drag.startTransform.height + (drag.frameId ? dy / anchor.height : dy), minHeight, coordinateBounds.maxY - drag.startTransform.y),
+        x,
+        y,
+        width: corner === "top_left" || corner === "bottom_left" ? right - x : clamp(drag.startTransform.width + offsetX, minWidth, coordinateBounds.maxX - drag.startTransform.x),
+        height: corner === "top_left" || corner === "top_right" ? bottom - y : clamp(drag.startTransform.height + offsetY, minHeight, coordinateBounds.maxY - drag.startTransform.y),
       };
       const rawGeometry = {
         ...drag.startSceneGeometry,
+        x: drag.startSceneGeometry.x + (rawTransform.x - drag.startTransform.x) * scaleX,
+        y: drag.startSceneGeometry.y + (rawTransform.y - drag.startTransform.y) * scaleY,
         width: rawTransform.width * (drag.frameId ? anchor.width : 1),
         height: rawTransform.height * (drag.frameId ? anchor.height : 1),
       };
-      const snapped = snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold);
+      const snapped = corner === "bottom_right"
+        ? snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold)
+        : { geometry: rawGeometry, guides: [] };
       const transform = {
         ...rawTransform,
-        width: clamp(snapped.geometry.width / (drag.frameId ? anchor.width : 1), minWidth, coordinateBounds.maxX - drag.startTransform.x),
-        height: clamp(snapped.geometry.height / (drag.frameId ? anchor.height : 1), minHeight, coordinateBounds.maxY - drag.startTransform.y),
+        x: clamp(drag.startTransform.x + (snapped.geometry.x - drag.startSceneGeometry.x) / scaleX, coordinateBounds.minX, coordinateBounds.maxX - minWidth),
+        y: clamp(drag.startTransform.y + (snapped.geometry.y - drag.startSceneGeometry.y) / scaleY, coordinateBounds.minY, coordinateBounds.maxY - minHeight),
+        width: clamp(snapped.geometry.width / scaleX, minWidth, coordinateBounds.maxX - rawTransform.x),
+        height: clamp(snapped.geometry.height / scaleY, minHeight, coordinateBounds.maxY - rawTransform.y),
       };
-      const actualRight = drag.startSceneGeometry.x + transform.width * (drag.frameId ? anchor.width : 1);
-      const actualBottom = drag.startSceneGeometry.y + transform.height * (drag.frameId ? anchor.height : 1);
+      const actualRight = drag.startSceneGeometry.x + (transform.x - drag.startTransform.x + transform.width) * scaleX;
+      const actualBottom = drag.startSceneGeometry.y + (transform.y - drag.startTransform.y + transform.height) * scaleY;
       const guides = snapped.guides.filter((guide) => Math.abs((guide.axis === "x" ? actualRight : actualBottom) - guide.position) < 1e-6);
       if (guides.length) setSnapGuides({ edgeGuides: guides });
       patch = { transform };
@@ -457,7 +491,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     } else if (drag.mode === "frame_move" && drag.startGeometry && drag.frameId) {
       const start = drag.startGeometry;
       const rawGeometry = { ...start, x: clamp(start.x + dx, 0, unit.canvas.width - start.width), y: clamp(start.y + dy, 0, unit.canvas.height - start.height) };
-      const snapped = snapGeometryToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold);
+      const snapped = snapGeometryToFrameEdgeExtensions(rawGeometry, movingSnapFrames(drag.frameId), moveSnapThreshold, Math.abs(dx) >= Math.abs(dy) ? "x" : "y");
       const snappedAllowed = frameGeometryAllowed(drag.frameId, snapped.geometry);
       const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
       if (!frameGeometryAllowed(drag.frameId, geometry)) return;
@@ -465,8 +499,26 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       patch = { geometry };
     } else if (drag.mode === "frame_resize" && drag.startGeometry && drag.frameId) {
       const start = drag.startGeometry;
-      const rawGeometry = { ...start, width: clamp(start.width + dx, minimumFrameWidth, unit.canvas.width - start.x), height: clamp(start.height + dy, minimumFrameHeight, unit.canvas.height - start.y) };
-      const snapped = snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold);
+      const bounds = drag.frameBounds ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+      const right = start.x + start.width;
+      const bottom = start.y + start.height;
+      const corner = drag.resizeCorner ?? "bottom_right";
+      const x = corner === "top_left" || corner === "bottom_left"
+        ? clamp(start.x + dx, bounds.x, right - minimumFrameWidth)
+        : start.x;
+      const y = corner === "top_left" || corner === "top_right"
+        ? clamp(start.y + dy, bounds.y, bottom - minimumFrameHeight)
+        : start.y;
+      const width = corner === "top_left" || corner === "bottom_left"
+        ? right - x
+        : clamp(start.width + dx, minimumFrameWidth, bounds.x + bounds.width - start.x);
+      const height = corner === "top_left" || corner === "top_right"
+        ? bottom - y
+        : clamp(start.height + dy, minimumFrameHeight, bounds.y + bounds.height - start.y);
+      const rawGeometry = { ...start, x, y, width, height };
+      const snapped = corner === "bottom_right"
+        ? snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold)
+        : { geometry: rawGeometry, guides: [] };
       const snappedAllowed = snapped.geometry.width >= minimumFrameWidth && snapped.geometry.height >= minimumFrameHeight && frameGeometryAllowed(drag.frameId, snapped.geometry);
       const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
       if (!frameGeometryAllowed(drag.frameId, geometry)) return;
@@ -506,9 +558,12 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     onContextMenu={(event) => { const point = eventPoint(event); if (!point) return; const frame = frameAtPoint(point); contextFor(event, frame ? { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) } : { type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); }}>
     <div className="paper-grain" aria-hidden="true" />
     {snapGuides ? <svg className="snap-guide-layer" viewBox={`0 0 ${unit.canvas.width} ${unit.canvas.height}`} preserveAspectRatio="none" aria-hidden="true">
-      {"edgeGuides" in snapGuides ? snapGuides.edgeGuides.map((guide) => guide.axis === "x"
+      {"edgeGuides" in snapGuides ? snapGuides.edgeGuides.filter((guide): guide is EdgeExtensionGuide => guide.kind === "edge_extension").map((guide) => guide.axis === "x"
         ? <line className="edge-extension" key={`x-${guide.position}`} x1={guide.position} x2={guide.position} y1={0} y2={unit.canvas.height} />
-        : <line className="edge-extension" key={`y-${guide.position}`} x1={0} x2={unit.canvas.width} y1={guide.position} y2={guide.position} />) : null}
+        : <line className="edge-extension" key={`y-${guide.position}`} x1={-unit.canvas.width} x2={unit.canvas.width * 2} y1={guide.position} y2={guide.position} />) : null}
+      {"edgeGuides" in snapGuides ? snapGuides.edgeGuides.filter((guide) => guide.kind === "equal_gap").map((guide) => guide.axis === "x"
+        ? <g className="distance-guide" key={`gap-x-${guide.reference.start}-${guide.active.start}`}><line x1={guide.reference.start} x2={guide.reference.end} y1={guide.reference.position} y2={guide.reference.position} /><line x1={guide.reference.start} x2={guide.reference.start} y1={guide.reference.position - 7} y2={guide.reference.position + 7} /><line x1={guide.reference.end} x2={guide.reference.end} y1={guide.reference.position - 7} y2={guide.reference.position + 7} /><line x1={guide.active.start} x2={guide.active.end} y1={guide.active.position} y2={guide.active.position} /><line x1={guide.active.start} x2={guide.active.start} y1={guide.active.position - 7} y2={guide.active.position + 7} /><line x1={guide.active.end} x2={guide.active.end} y1={guide.active.position - 7} y2={guide.active.position + 7} /></g>
+        : <g className="distance-guide" key={`gap-y-${guide.reference.start}-${guide.active.start}`}><line x1={guide.reference.position} x2={guide.reference.position} y1={guide.reference.start} y2={guide.reference.end} /><line x1={guide.reference.position - 7} x2={guide.reference.position + 7} y1={guide.reference.start} y2={guide.reference.start} /><line x1={guide.reference.position - 7} x2={guide.reference.position + 7} y1={guide.reference.end} y2={guide.reference.end} /><line x1={guide.active.position} x2={guide.active.position} y1={guide.active.start} y2={guide.active.end} /><line x1={guide.active.position - 7} x2={guide.active.position + 7} y1={guide.active.start} y2={guide.active.start} /><line x1={guide.active.position - 7} x2={guide.active.position + 7} y1={guide.active.end} y2={guide.active.end} /></g>) : null}
       {"parallelGuide" in snapGuides ? <>
         <line className="parallel-reference-edge" x1={snapGuides.parallelGuide.referenceEdge.start.x} y1={snapGuides.parallelGuide.referenceEdge.start.y} x2={snapGuides.parallelGuide.referenceEdge.end.x} y2={snapGuides.parallelGuide.referenceEdge.end.y} />
         <line className="parallel-active-edge" x1={snapGuides.parallelGuide.activeEdge.start.x} y1={snapGuides.parallelGuide.activeEdge.start.y} x2={snapGuides.parallelGuide.activeEdge.end.x} y2={snapGuides.parallelGuide.activeEdge.end.y} />
@@ -531,6 +586,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const image = node.element;
       const frame = node.frame;
       const selected = selection?.type === "image" && selection.id === image.id;
+      const showImageSelection = selected && (node.source === "overlay" || interactionMode === "crop");
       const src = resolvedResources?.[image.assetVersionId]?.url;
       const source = document.resources.find((resource) => resource.assetVersionId === image.assetVersionId);
       const label = node.source === "overlay"
@@ -541,7 +597,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const imageSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
       const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
       const coordinateBounds = nodeCoordinateBounds(node, frame);
-      return <div className={`lcd-image ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(image.id) ? "multi-selected" : ""}`} data-element-id={image.id} data-page-id={unit.id} key={image.id}
+      return <div className={`lcd-image ${node.source === "overlay" ? "scene-overlay" : ""} ${showImageSelection ? "selected" : ""} ${multiSelectedIds?.has(image.id) ? "multi-selected" : ""}`} data-element-id={image.id} data-page-id={unit.id} key={image.id}
         style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: image.opacity, mixBlendMode: image.blendMode }}
         onWheel={(event) => { if (selected && interactionMode === "crop") zoomCropWithWheel(event, image, frame?.geometry ?? node.geometry); }}
         onClick={(event) => {
@@ -580,11 +636,11 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         <div className="lcd-image-crop">
           {src ? <img src={src} alt={uiCopy.renderer.frameImageAlt} draggable={false} style={cropStyle(image, source, node.geometry)} /> : <div className="missing-frame-image" aria-label={uiCopy.renderer.waitingFrameImageAria}><span>{uiCopy.renderer.waitingFrameImageAria}</span></div>}
         </div>
-        {selected && editable ? <><div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div>{node.source === "overlay" && interactionMode === "move" ? <button type="button" aria-label={uiCopy.renderer.resizePaperImage} className="resize-handle overlay-image-resize" onPointerDown={(event) => startDrag(event, { mode: "image_resize", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, imageSelection)}/> : null}</> : null}
+        {showImageSelection && editable ? <><div className="selection-corners image-corners" aria-hidden="true"><span className="selection-label">{label}</span></div>{node.source === "overlay" && interactionMode === "move" ? <div className="corner-resize-controls overlay-image-resize">{(["top_left", "top_right", "bottom_right", "bottom_left"] as const).map((corner) => <button type="button" key={corner} aria-label={uiCopy.renderer.resizePaperImage} className={`corner-resize-handle corner-${corner.replace("_", "-")}`} onPointerDown={(event) => startDrag(event, { mode: "image_resize", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, resizeCorner: corner, startTransform: image.transform, startSceneGeometry: node.geometry }, imageSelection)}/>)}</div> : null}</> : null}
       </div>;
     })}
     {scene.frames.map(({ frame, borderZIndex }) => {
-      const selected = selection?.type === "comic_frame" && selection.id === frame.id;
+      const selected = frameIsSelected(frame.id);
       const cropEditing = cropFrameId === frame.id;
       const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
       return <div className={`lcd-frame ${selected ? "selected" : ""} ${cropEditing ? "crop-editing" : ""} ${multiSelectedIds?.has(frame.id) ? "multi-selected" : ""}`} data-element-id={frame.id} data-page-id={unit.id} key={frame.id}
@@ -598,7 +654,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       </div>;
     })}
     {editable ? scene.frames.map(({ frame }) => {
-      const selected = selection?.type === "comic_frame" && selection.id === frame.id;
+      const selected = frameIsSelected(frame.id);
       const cropEditing = cropFrameId === frame.id;
       if (!selected && !cropEditing) return null;
       const cornerPoints = cropEditing ? frameQuadrilateralPoints(frame.shape) : undefined;
@@ -606,7 +662,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const retainedSelection = selection?.type === "image" && cropEditing ? selection : frameSelection;
       return <div className="frame-interaction-layer" key={`controls-${frame.id}`} style={geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height)}>
         {cropEditing && cornerPoints ? <div className="frame-corner-controls" aria-label={uiCopy.renderer.rotateFrame}>{cornerPoints.map((point, index) => <button type="button" key={index} className={`frame-corner-handle corner-${index}`} style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }} aria-label={uiCopy.renderer.adjustCornerAria([uiCopy.renderer.cornerAria.topLeft, uiCopy.renderer.cornerAria.topRight, uiCopy.renderer.cornerAria.bottomRight, uiCopy.renderer.cornerAria.bottomLeft][index])} onKeyDown={(event) => nudgeFrameCorner(event, frame, index as FrameCornerIndex)} onPointerDown={(event) => startDrag(event, { mode: "frame_corner", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry, startShape: frame.shape, frameBounds: editableBoundsForFrame(frame), cornerIndex: index as FrameCornerIndex }, retainedSelection)} />)}</div> : null}
-        {selected && interactionMode === "move" ? <button type="button" aria-label={uiCopy.renderer.resizeFrame} className="resize-handle" onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection)}/> : null}
+        {selected && interactionMode === "move" ? <div className="corner-resize-controls">{(["top_left", "top_right", "bottom_right", "bottom_left"] as const).map((corner) => <button type="button" key={corner} aria-label={uiCopy.renderer.resizeFrame} className={`corner-resize-handle corner-${corner.replace("_", "-")}`} onPointerDown={(event) => startDrag(event, { mode: "frame_resize", elementId: frame.id, frameId: frame.id, frameBounds: editableBoundsForFrame(frame), resizeCorner: corner, startGeometry: frame.geometry }, frameSelection)}/>)}</div> : null}
       </div>;
     }) : null}
     {texts.map((node) => {
@@ -676,20 +732,19 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         return <span className="balloon-order-anchor" key={`${balloon.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`balloon:${balloon.id}`) ?? 0}px 0` }}><button type="button" className={`balloon-order ${crossPage ? "cross-page" : ""} ${selection?.type === "speech_balloon" && selection.id === balloon.id ? "selected" : ""}`} aria-label={uiCopy.renderer.selectObjectAria(label)} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, nextSelection); }}>{crossPage ? label : String(order).padStart(2, "0")}</button></span>;
       })}
       {overlayImages.map((node) => {
+        if (interactionMode === "move") return null;
         const image = node.element;
-        const frame = node.frame;
         const label = overlayImageLabel(node);
-        const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
-        const coordinateBounds = nodeCoordinateBounds(node, frame);
         const nextSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
-        return <span className="image-order-anchor" key={`${image.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`image:${image.id}`) ?? 0}px 0` }}><button type="button" className={`image-object-order ${selection?.type === "image" && selection.id === image.id ? "selected" : ""}`} aria-label={uiCopy.renderer.selectObjectAria(label)} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, nextSelection); }}>{label}</button></span>;
+        return <span className="image-order-anchor" key={`${image.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`image:${image.id}`) ?? 0}px 0` }}><button type="button" className={`image-object-order ${selection?.type === "image" && selection.id === image.id ? "selected" : ""}`} aria-label={uiCopy.renderer.selectObjectAria(label)} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); }}>{label}</button></span>;
       })}
       {scene.frames.map(({ frame }, index) => {
+        if (interactionMode === "move") return null;
         const order = readingOrder.get(frame.id) ?? index + 1;
         const crossPage = unit.kind === "spread" && frame.surfaceScope === "unit";
         const cornerEditing = cropFrameId === frame.id;
         const nextSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
-        return <button type="button" className={`reading-order frame-order-button ${cornerEditing ? "corner-editing" : ""} ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - ${cornerEditing ? 34 : 12}px)` }} aria-label={uiCopy.renderer.selectFrameAria(frameLabel(frame))} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); if (interactionMode === "move") startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, nextSelection); }}>{crossPage ? frameLabel(frame) : order}</button>;
+        return <button type="button" className={`reading-order frame-order-button ${cornerEditing ? "corner-editing" : ""} ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - ${cornerEditing ? 34 : 12}px)` }} aria-label={uiCopy.renderer.selectFrameAria(frameLabel(frame))} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); }}>{crossPage ? frameLabel(frame) : order}</button>;
       })}
     </div> : null}
     <span className="page-watermark">{unit.kind === "vertical_segment" ? uiCopy.renderer.watermark.scroll(pageIndex + 1) : unit.kind === "four_panel_unit" ? uiCopy.renderer.watermark.fourPanel : uiCopy.renderer.watermark.page(pageIndex + 1)}</span>

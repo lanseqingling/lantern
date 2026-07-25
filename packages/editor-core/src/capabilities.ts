@@ -1752,6 +1752,24 @@ const updatePresentationUnitCapability = defineCapability({
   },
 });
 
+const setPresentationUnitBackgroundCapability = defineCapability({
+  id: "set_presentation_unit_background",
+  version: 1,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), color: z.enum(["#ffffff", "#000000"]) }),
+  scope: "unit",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  risk: "low",
+  preconditions: ["presentation_unit_exists"],
+  outputCommandTypes: ["set_presentation_unit_background"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    if (!context.fixture.working.document.units.some((unit) => unit.id === input.unitId)) throw new Error(`missing PresentationUnit: ${input.unitId}`);
+    return [{ type: "set_presentation_unit_background", unitId: input.unitId, color: input.color }];
+  },
+});
+
 function duplicatePresentationUnit(context: EditorCapabilityContext, source: PresentationUnit) {
   const document = context.fixture.working.document;
   const unitId = context.createId(source.kind === "vertical_segment" ? "segment" : source.kind === "spread" ? "spread" : "page");
@@ -1960,6 +1978,7 @@ const capabilityRegistry = {
   create_page: createPageCapability,
   create_vertical_segment: createVerticalSegmentCapability,
   update_presentation_unit: updatePresentationUnitCapability,
+  set_presentation_unit_background: setPresentationUnitBackgroundCapability,
   duplicate_presentation_unit: duplicatePresentationUnitCapability,
   move_presentation_unit: movePresentationUnitCapability,
   delete_presentation_unit: deletePresentationUnitCapability,

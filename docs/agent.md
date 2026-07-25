@@ -2,7 +2,7 @@
 
 Lantern Agent 是漫画工作台中的创作协作者。它理解当前创作现场，选择必要上下文，回答问题或调用受控创作能力，并把结果以可检查、可拒绝、可恢复的方式交还给用户。它不替用户拥有作品，也不以自动完成整话为目标。
 
-本文是 Agent 整体架构、能力边界、上下文、任务、候选和扩展方向的事实源。UI、内置 Agent 与 MCP 的当前能力拆分和接入差异见[漫画能力矩阵](./capabilities.md)，作品结构与写入不变量见 [LCD](./lcd.md)，对话、任务卡、候选预览等界面呈现见[编辑器体验](./editor.md)，MCP、Skill 和外置 Agent 的接入契约见[外置 Agent 接入](./external-agent.md)；可执行 schema、Capability 与持久化字段仍以代码为准。
+本文是 Agent 整体架构、能力边界、上下文、任务、候选、MCP、Skill 和扩展方向的事实源。UI、内置 Agent 与 MCP 的当前能力拆分和接入差异见[漫画能力矩阵](./capabilities.md)，作品结构与写入不变量见 [LCD](./lcd.md)，对话、任务卡、候选预览等界面呈现见[编辑器体验](./editor.md)；可执行 schema、Capability 与持久化字段仍以代码为准。
 
 ## 1. Agent 能力总览
 
@@ -15,7 +15,7 @@ Lantern Agent 是漫画工作台中的创作协作者。它理解当前创作现
 | 3 | Capability Registry 与执行守卫 | 已落地 | 统一声明工具输入、目标、范围、风险、结果与 Agent 权限 | Agent 不直接写 LCD、Prisma 或底层命令 |
 | 4 | Task、Candidate 与恢复 | 已落地 | 异步任务、重试、取消、checkpoint、Candidate、revision 冲突和刷新恢复共用一套生命周期 | 任何生成结果都不能静默覆盖工作稿 |
 | 5 | 当前创作闭环 | 已落地 | 普通问答与图片理解；单格分镜条目；单格图片生成或替换；角色或场景资产图 | 问答保持只读；写入任务每次只处理一个明确目标并产生单个 Candidate |
-| 6 | 外置 Agent、MCP 与 Skill | 已落地 | 外置 Agent 已可发现受控上下文、绑定 revision 的 LCD 结构与最终合成画面，以及作品、章节、结构化资产和固定图片版本管理能力，并继续复用同一套领域服务、ChangeSet、Task 和 Candidate | 接入方式不改变权限、目标范围、确认和写入边界，也不强制所有编辑进入 Workflow；同步写入要求幂等键并记录审计 |
+| 6 | 外置 Agent、MCP 与 Skill | 进行中 | 接入、能力发现、受控上下文、作品与资产管理已经落地；继续按领域把工作台的稳定创作能力投影到 MCP，并同步补齐 Skill | 当前尚未开放 LCD 编辑、完整 Candidate/Task 生命周期和生成能力；接入方式不改变权限、目标范围、确认和写入边界 |
 | 7 | 评测与可观测性 | 优先 | 建立目标识别、上下文命中、越界、无效追问、结构化输出、任务成功率和 Candidate 采用率评测 | 记录决策与证据，不记录思维链或不必要的私有内容 |
 | 8 | 动态上下文管理 | 优先 | Capability 声明上下文需求，按任务动态检索、裁剪、排序并解释取舍 | 显式引用和用户本轮要求优先，检索不能扩大写入范围 |
 | 9 | 记忆 | 优先 | 分离会话摘要、项目连续性事实、用户偏好和任务临时状态，并提供更新、失效与溯源规则 | 记忆不是作品事实，不能覆盖显式输入或固定版本 |
@@ -140,11 +140,114 @@ Workflow Run 是 Task 之上的持久编排层：它组合工具和 Task，维�
 
 多模式只解决持续交互规则确实不同的场景。模式可以固定焦点、保护范围、上下文策略和呈现方式，但不能改变 Capability 权限、数据事实源或 Candidate 边界。一次普通对话能够表达的差异不新增模式。
 
-## 7. Agent 接入与运行规范
+## 7. 外置 Agent、MCP 与 Skill
 
-Lantern 的 Agent 协作能力不绑定单一界面或单一模型。MCP 向外置 Agent 投影已开放的语义 Capability，Skill 补充稳定的产品概念和协作方法；两者都不拥有独立权限或作品状态。外置 Agent 复用 Lantern 的领域服务、Editor Capability、Context、ChangeSet 和 revision 边界，并在能力需要时复用 Task 与 Candidate，不建立独立写入链路。接入协议、协作知识、外部结果登记、能力版本和同步发布的完整规则见[外置 Agent 接入](./external-agent.md)。
+### 7.1 定位与对齐范围
 
-内置与外置 Agent 都要记录 actor、客户端、工具版本、决策、scope、context snapshot、工具调用、校验和最终 revision；任何接入方式都不能暴露数据库、对象存储凭证、任意 LCD 写入或原始底层命令。
+外置 Agent 是 Lantern 的正式创作入口之一。MCP 向它投影已开放的语义 Capability，应用级 Skill 补充稳定的漫画领域知识和协作方法；两者都不拥有独立权限、领域逻辑或作品状态。外置 Agent 复用 Lantern 的领域服务、Editor Capability、Context、ChangeSet、WorkingRevision、Task 和 Candidate，不建立外置专属写入链路。
+
+当前交付重点是外置 Agent。后续新增或扩展的能力默认只评估并登记外置访问级别，保持内置 Agent 的 Planner、Prompt、上下文策略、可见工具和现有创作闭环不变；只有修复共享事实源或安全守卫时才调整共同基础，且不能因此自动向内置 Agent 开放新能力。
+
+最终对齐工作台 UI 与 MCP + Skill，指持久领域能力对齐，而不是界面控件对齐：
+
+- 工作台已经提供、领域语义稳定且适合外置调用的作品管理与创作动作，都应复用同一领域服务或 Editor Capability，并具有对应的 MCP 能力和 Skill 知识。
+- 画布平移、缩放、选择、悬停反馈、工具条、抽屉、虚拟补位页和 Candidate 比较界面属于 UI 交互，不为 MCP 复刻；外置 Agent 使用 Resource Reference、受控 handle、Observation 和结构化结果完成等价目标。
+- Undo、Redo 和本地历史游标仍由工作台控制。MCP 直接编辑必须形成一次可撤销的原子 ChangeSet，但外置 Agent 不远程操纵用户的历史游标。
+- 尚未成为正式工作台能力的生成、解析、模板或高级精修，不为追求列数相同而先在 MCP 建立第二套实现。
+- 每个工作台能力最终都必须在[漫画能力矩阵](./capabilities.md)中表现为 MCP 已接入、部分接入，或附有明确的不接入理由；不能以笼统的“外置 Agent 已支持编辑”代替逐项核对。
+
+领域切片只有同时完成 Capability、MCP 投影、Skill reference、守卫和代表性一致性验收，才算对外开放。Workflow、长任务和多 Agent 只能组合已经开放的原子能力，不能成为基本编辑能力的前置条件。
+
+### 7.2 接入架构
+
+```text
+兼容的本地外置 Agent
+  ├─ Lantern Skill：领域对象、作用范围和协作知识
+  └─ Lantern MCP Server：能力发现、输入输出和调用
+         ↓
+External Agent Service：身份、所有权、幂等、审计与错误映射
+         ↓
+Semantic Capability Registry：schema、目标、上下文、风险、权限与 effect
+         ↓
+  ┌────────────────┬──────────────────┬───────────────────┐
+  │ 查询与管理服务 │ Editor Capability │ Generation Runtime │
+  │ Comic / Asset  │ LCD / ChangeSet   │ Task / Candidate   │
+  └────────────────┴──────────────────┴───────────────────┘
+         ↓
+领域资源 / WorkingRevision / Candidate / Task
+```
+
+MCP 是语义 Capability 的传输投影。MCP handler 只解析协议、建立调用上下文、调用服务并投影结果；不能读取 Prisma、分配领域 ID、拼装 `WorkspaceCommand`、提交任意 ChangeSet 或直接写 LCD。产品内调用直接使用同一语义服务，不绕行 MCP。
+
+作品与资源管理能力通过对应领域服务完成所有权校验、事务和稳定 ID 分配。页面、画格、格内图片、裁切、对白、气泡、旁白、图层和阅读结构等编辑能力通过 Editor Capability 规划强类型命令，并以原子 ChangeSet 产生新的 WorkingRevision。Chapter 创建时形成对应 Project；Project 是一话的工作空间，不作为脱离 Chapter 的独立内容对象创建。
+
+### 7.3 Capability、结果与确认
+
+每项语义 Capability 至少声明稳定 ID 与版本、用途和禁止范围、输入输出 schema、目标类型与数量、作用范围、上下文和版本要求、同步或异步执行方式、结果 effect、风险、确认、撤销、幂等、冲突语义，以及内置和外置 Agent 各自的访问级别。Manifest 是能力目录、MCP tool、服务端执行守卫和已启用 Planner catalog 的共同来源。
+
+| Effect | 适用动作 | 写入规则 |
+|---|---|---|
+| `observe` | 列表、详情、有限上下文、图片或画面理解 | 不修改任何作品事实 |
+| `resource_mutation` | 创建或更新漫画、章节、设定和资产资料 | 调用领域服务；破坏性动作需要明确确认 |
+| `direct_change` | 移动画格、调整裁切、修改气泡等确定性原子编辑 | 以 expected revision 提交可撤销 ChangeSet |
+| `candidate` | 生成、结构、多对象和其他高风险结果 | 应用前不修改工作稿 |
+
+`execution` 只表示是否需要持久异步运行，`effect` 表示真实作品影响。同步资源管理和原子编辑不得创建虚假 Task；只有异步、可取消、可重试或需要持久恢复的操作创建 Task。Task 完成不能自动应用 Candidate；显式应用仍要校验 owner、目标、状态和 expected revision。
+
+用户已经确认名称、描述和分类，并明确要求保存时，属于结构化资源写入；Agent 仍在替用户决定设定、生成图片或重编页面时，属于生成或高风险结果。是否形成 Candidate 由能力的 effect 和风险决定，不能仅按调用入口判断。
+
+### 7.4 MCP 契约
+
+Lantern 提供只监听 loopback 的 Streamable HTTP MCP endpoint，并使用独立凭证映射到当前本地用户。凭证不写入 Skill、终端输出或作品数据。`lantern agent:install` 识别兼容 Agent，部署应用级 Skill，并只维护客户端中名为 `lantern` 的 MCP 配置；重复运行用于同步 Skill、endpoint 和凭证变化。
+
+每个具有独立权限、风险或输入契约的 Capability 投影为清楚的 MCP tool。schema、描述、读写提示和审批建议从 Manifest 生成或校验；不维护第二份参数定义，也不使用接收任意 `capabilityId + arguments` 的万能写入工具。
+
+漫画和章节使用稳定 Resource Reference，不要求先拉取完整作品列表：
+
+```text
+lantern://comics/{comicId}
+lantern://chapters/{chapterId}
+http://localhost:{webPort}/comics/{comicId}
+http://localhost:{webPort}/comics/{comicId}/chapters/{chapterId}?pageId={unitId}
+```
+
+解析器校验 owner、资源状态和 Comic → Chapter → Project 关系。Resource Reference 只确定目标，不携带授权；层级不一致、资源不存在或不属于当前用户时直接失败，不能回退为标题搜索。LCD 编辑还必须固定明确 Project、expected working revision 和受控目标引用。
+
+当动作依赖构图、裁切、气泡、遮挡、层级、留白或阅读关系时，Agent 读取同一 WorkingRevision 下一个或两个 PresentationUnit 的场景结构与最终合成图，再使用返回的 frame 或 element handle 调用已开放能力。handle 只用于解析本次受控目标，不能代替稳定引用或扩大写入权限；revision 变化后必须重新读取。合成图复用预览和导出的渲染事实源。
+
+工具返回紧凑结构化结果和适用的资源引用、base revision、working revision、Task、Candidate 与下一步动作，不返回数据库记录、长期资源地址或 JSON 内的大段 base64。图片通过 MCP 原生 image content 传输。外置 Agent 提交图片时，先为明确 Asset 创建短时效 loopback 上传位置，再把 PNG、JPEG 或 WebP 登记为不可变 AssetVersion；客户端路径、对象存储键和上传位置都不能直接写入作品。
+
+所有同步写入要求一个逻辑动作使用稳定幂等键。相同键与相同输入重试返回原结果；相同键绑定不同能力或输入时返回冲突。错误码必须区分所有权、目标缺失、范围不合法、能力未开放、确认缺失、幂等冲突、Candidate 过期和 revision 冲突。
+
+### 7.5 应用级 Skill
+
+Lantern 只分发一个应用级入口 Skill，避免多个同类 Skill 争抢触发。主 `SKILL.md` 保存所有能力共同需要的规则：Lantern 是作品事实源、服从用户明确要求、发现当前能力并选择最窄动作、核心对象和生命周期差异、何时需要上下文或确认，以及不伪造工具、对象 ID、图片证据和应用状态。
+
+稳定领域知识随着对应能力开放进入 `references/`，覆盖漫画与章节、页面与阅读结构、资产与设定、画格与坐标、图片与裁切、对白与气泡、复杂编排、生成结果与 Candidate。reference 解释对象关系、坐标空间、作用范围和常见误用，不复制 MCP schema、当前工具清单、UI 点击步骤、固定 Workflow 或题材手册。
+
+MCP schema 决定工具如何调用，Capability 守卫决定调用是否允许，Skill 说明漫画领域中何时使用。Skill 缺失、过期或未触发时，服务端守卫仍须独立成立。Skill 不跟随每个工具版本更新；只有领域对象语义、通用作用范围、结果 effect 或长期协作方式变化时才同步发布。
+
+### 7.6 外置能力交付顺序
+
+当前接入基线包括安装与身份、能力发现、Resource Reference、受控图片与画面 Observation，以及漫画、章节、结构化资产和固定图片版本管理。当前逐项开放状态只由[漫画能力矩阵](./capabilities.md)维护；后续按以下顺序收敛，不同步扩展内置 Agent。
+
+1. **页面与画格基础编辑**：开放页面或滚动段的创建、命名、复制、排序和删除，以及画格创建、复制、删除、几何、边框、斜切和出血。先建立通用 expected revision、目标 handle、原子 ChangeSet 和刷新后可见的闭环；单对象低风险动作直接变更，结构动作按风险形成 Candidate。
+2. **图片、对白与文字编辑**：开放固定 AssetVersion 的放入、更换和移除、格内裁切与变换、纸面图片、基础层级，以及对白、气泡、旁白的创建、内容、位置、尺寸、形状和文字样式。Skill 同步补齐坐标空间、对象归属、裁切和文字语义；需要视觉判断的动作先读取绑定同一 revision 的结构与合成图。
+3. **阅读结构与复杂编排**：开放展示单元合并拆分、封面与过场页、叠格、跨页或跨段对象、归属转换和阅读顺序。多对象、跨展示单元或难以安全撤销的结构结果先形成 Candidate，并提供精确影响范围和应用前冲突检查。
+4. **Task、Candidate 与生成闭环**：开放 Task 查询、取消、重试和恢复，Candidate 查询、预览数据、应用、丢弃和过期状态；再投影工作台已经具备的单格分镜、整格图片和角色或场景资产图生成。Lantern 托管生成与外置 Agent 提交结果共用目标、资源版本、风险和 Candidate 规则。
+5. **版本、阅读与输出收口**：评估并开放保存快照、固定阅读结果、PNG、LCD 和完整归档等适合外置调用的能力；导入或覆盖类动作必须显式确认并原子执行。逐项审计矩阵中已有 UI 能力，为未对齐项给出实现或长期不接入结论，完成工作台、预览、导出与 MCP 对同一作品事实的代表性一致性验收。
+
+每个顺序项都按可独立使用的最小领域切片交付。例如画格几何不能只发布写工具，还要同时具备目标发现、必要 Observation、revision 冲突、Skill 坐标说明和 UI/MCP 结果一致性测试。下一个顺序项不阻止前一项继续补齐，但不能用只注册 schema、只添加 Skill 文案或只接通底层命令宣称能力已开放。
+
+### 7.7 版本、验收与非目标
+
+Capability 使用稳定 ID 和独立版本。目标、影响范围、effect 或必填输入发生不兼容变化时发布新版本；能力目录语义变化时递增目录 revision 并生成稳定内容 hash。每次调整能力都要同步生成或校验 MCP tool、服务端输入和守卫、能力目录，以及当前明确启用的调用入口；外置专属能力不能因共享目录而进入内置 Planner。
+
+每个领域切片至少验证：兼容 Agent 可以发现并执行代表性能力；owner、目标、确认、幂等和 revision 守卫有效；直接编辑只产生一次可撤销 WorkingRevision；结构和生成遵守 Candidate 边界；工作台刷新后可见相同结果；预览和导出读取相同作品事实；Skill 能正确选择能力但不复制 schema；MCP 不暴露 Prisma、对象存储凭证、原始 LCD、`WorkspaceCommand` 或任意 ChangeSet。
+
+外置接入不复刻工作台界面，不开放通用数据库、JSON Patch、LCD 替换或底层命令，不重新实现领域服务与生命周期，不以 Workflow 自动完成整部漫画，也不让 Skill 成为 API 文档、提示词集合或题材百科。
+
+内置与外置 Agent 都要记录 actor、客户端、工具版本、决策、scope、context snapshot、工具调用、校验和最终 revision。审计不保存思维链、完整创作输入、长期资源地址或无关私有内容。
 
 ## 8. 评测与可观测性
 

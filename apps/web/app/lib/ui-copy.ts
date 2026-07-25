@@ -140,6 +140,8 @@ export const uiCopy = {
     preview: {
       firstChapter: "已经是第一话",
       pageDownloadStarted: (pageNumbers: string) => `第 ${pageNumbers} 页已开始下载`,
+      chapterImagesDownloadStarted: "本话图片 ZIP 已开始下载",
+      chapterImagesDownloadFailed: "本话图片 ZIP 下载失败，请稍后重试",
       downloadFailed: "保存失败，请稍后重试",
       lcdDownloadStarted: "LCD 已开始下载",
       archiveDownloadStarted: "完整 LCD 资源已开始下载",
@@ -1221,6 +1223,7 @@ export const uiCopy = {
       backToWorkbench: "返回工作台",
       downloadSpread: "下载当前双页",
       downloadPage: "下载当前页",
+      downloadChapterImages: "下载本话图片（ZIP）",
       downloadLcd: "下载 LCD 文件",
       downloadFullLcd: "下载完整 LCD 资源",
     },

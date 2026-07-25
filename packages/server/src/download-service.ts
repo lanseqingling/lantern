@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { AppError } from "./errors";
-import { renderPagePng, renderPreviewPageGroupPng } from "./export-renderer";
+import { renderChapterPngArchive, renderPagePng, renderPreviewPageGroupPng } from "./export-renderer";
 import { getObject } from "./object-storage";
 import { verifySignedAssetPath, verifySignedExportPath } from "./signed-assets";
 import { getWorkbench } from "./workbench-service";
@@ -53,6 +53,15 @@ export async function getPreviewSpreadDownload(ownerUserId: string, chapterId: s
     bytes: await renderPreviewPageGroupPng(document, resolvedUnits),
     contentType: "image/png" as const,
     fileName: `${chapterId}-pages-${pageNumbers[0] ?? firstIndex + 1}-${pageNumbers.at(-1) ?? secondIndex + 1}.png`,
+  };
+}
+
+export async function getChapterImagesDownload(ownerUserId: string, chapterId: string) {
+  const document = await savedDocument(ownerUserId, chapterId);
+  return {
+    bytes: await renderChapterPngArchive(document),
+    contentType: "application/zip" as const,
+    fileName: `${chapterId}-images.zip`,
   };
 }
 

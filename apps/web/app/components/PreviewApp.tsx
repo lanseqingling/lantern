@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
 import { createBlankWorkbench, loadDemoWorkbench, persistDemoWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@lantern/ui";
-import { apiDownloadChapterArchive, apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, apiUpdateProjectWorkspaceSettings, configuredRuntimeAdapter } from "@/app/lib/api-client";
+import { apiDownloadChapterArchive, apiDownloadChapterImages, apiDownloadPage, apiDownloadPreviewSpread, apiDownloadSurface, apiLoadWorkbench, apiUpdateProjectWorkspaceSettings, configuredRuntimeAdapter } from "@/app/lib/api-client";
 import { MODE_SWITCH_MOTION_MS, modeSwitchMotionDelay } from "@/app/lib/ui-motion";
 import { prepareContentRouteEntry, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
 import { displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, type PageDisplayMode } from "@lantern/shared";
@@ -201,6 +201,20 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     setNotice(uiCopy.toast.preview.lcdDownloadStarted);
     setDownloadMenuOpen(false);
   };
+  const downloadChapterImages = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      if (configuredRuntimeAdapter() === "demo") throw new Error(uiCopy.toast.preview.demoExportUnsupported);
+      await apiDownloadChapterImages(chapterId);
+      setNotice(uiCopy.toast.preview.chapterImagesDownloadStarted);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : uiCopy.toast.preview.chapterImagesDownloadFailed);
+    } finally {
+      setDownloading(false);
+      setDownloadMenuOpen(false);
+    }
+  };
   const downloadChapterArchive = async () => {
     if (downloading) return;
     setDownloading(true);
@@ -236,7 +250,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? uiCopy.viewer.action.spread : uiCopy.viewer.action.singlePage} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}
         <div className="preview-save-tool">
           <button type="button" aria-label={uiCopy.preview.toolbar.downloadOptionsAria} aria-expanded={downloadMenuOpen} onClick={() => setDownloadMenuOpen((open) => !open)}><Icon name="download" /></button>
-          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? uiCopy.preview.progress.preparingDownload : downloadsAsSpread ? uiCopy.preview.action.downloadSpread : uiCopy.preview.action.downloadPage}</button><button type="button" disabled={downloading} onClick={downloadLcd}>{uiCopy.preview.action.downloadLcd}</button><button type="button" disabled={downloading} onClick={() => void downloadChapterArchive()}>{uiCopy.preview.action.downloadFullLcd}</button></div> : null}
+          {downloadMenuOpen ? <div className="preview-save-menu" role="menu"><button type="button" disabled={downloading} onClick={() => void downloadCurrentPage()}>{downloading ? uiCopy.preview.progress.preparingDownload : downloadsAsSpread ? uiCopy.preview.action.downloadSpread : uiCopy.preview.action.downloadPage}</button><button type="button" disabled={downloading} onClick={() => void downloadChapterImages()}>{uiCopy.preview.action.downloadChapterImages}</button><button type="button" disabled={downloading} onClick={downloadLcd}>{uiCopy.preview.action.downloadLcd}</button><button type="button" disabled={downloading} onClick={() => void downloadChapterArchive()}>{uiCopy.preview.action.downloadFullLcd}</button></div> : null}
         </div>
       </nav>
       {notice ? <div className="preview-notice" role="status">{notice}</div> : null}

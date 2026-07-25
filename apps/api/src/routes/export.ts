@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { AppError } from "@lantern/server/errors";
 import {
   getChapterPageDownload,
+  getChapterImagesDownload,
   getPreviewSpreadDownload,
   getSignedAssetDownload,
   getSignedExportDownload,
@@ -36,6 +37,11 @@ export function registerExportRoutes(app: FastifyInstance) {
   app.get<{ Params: { chapterId: string; firstUnitId: string; secondUnitId: string } }>("/v1/chapters/:chapterId/preview-spreads/:firstUnitId/:secondUnitId/download", async (request, reply) => {
     const user = await currentUser(request);
     return sendDownload(reply, await getPreviewSpreadDownload(user.id, request.params.chapterId, request.params.firstUnitId, request.params.secondUnitId));
+  });
+
+  app.get<{ Params: { chapterId: string } }>("/v1/chapters/:chapterId/images/download", async (request, reply) => {
+    const user = await currentUser(request);
+    return sendDownload(reply, await getChapterImagesDownload(user.id, request.params.chapterId));
   });
 
   app.get<{ Params: { chapterId: string } }>("/v1/chapters/:chapterId/archive/download", async (request, reply) => {

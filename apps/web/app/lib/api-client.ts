@@ -781,6 +781,10 @@ export async function apiDownloadPreviewSpread(chapterId: string, firstUnitId: s
   return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/preview-spreads/${encodeURIComponent(firstUnitId)}/${encodeURIComponent(secondUnitId)}/download`, `${firstUnitId}-${secondUnitId}.png`);
 }
 
+export async function apiDownloadChapterImages(chapterId: string) {
+  return downloadPageResponse(`/v1/chapters/${encodeURIComponent(chapterId)}/images/download`, `${chapterId}-images.zip`);
+}
+
 export async function apiDownloadChapterArchive(chapterId: string) {
   const response = await fetch(apiUrl(`/v1/chapters/${encodeURIComponent(chapterId)}/archive/download`), { credentials: "include" });
   if (!response.ok) {

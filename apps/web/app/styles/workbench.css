@@ -382,6 +382,8 @@
   position: absolute;
   z-index: 10;
   --stage-shift-x: 0px;
+  --canvas-stage-edge-inset: 24px;
+  --canvas-stage-left-reserved: var(--canvas-stage-edge-inset);
   top: 0;
   bottom: 0;
   left: 0;
@@ -390,14 +392,16 @@
   overscroll-behavior: none;
 }
 .workbench.mode-focus.left-open.agent-open .canvas-stage { --stage-shift-x: var(--focus-layout-shift-x); }
+.workbench.mode-focus.left-open:not(.agent-open) .page-canvas-fit-stage:not(.vertical) { --stage-shift-x: calc((var(--canvas-stage-edge-inset) - var(--canvas-stage-left-reserved)) / 2); }
 .canvas-stage.mode-free { cursor: grab; touch-action: none; }
 .canvas-stage.mode-free.is-panning { cursor: grabbing; }
 .canvas-stage.is-marquee { cursor: crosshair; }
 .canvas-stage.multi-move-ready .multi-selected { cursor: move; }
 .canvas-stage.multi-move-ready .lcd-frame.multi-selected { pointer-events: auto; }
 .canvas-world { position: absolute; z-index: 12; inset: 0; transform-origin: 0 0; will-change: transform; }
-.page-canvas-fit-stage { --stage-shift-x: 0px; position: absolute; inset: 82px 24px 88px; pointer-events: none; }
-.canvas-stage.left-open .page-canvas-fit-stage { left: 298px; }
+.page-canvas-fit-stage { --stage-shift-x: 0px; position: absolute; inset: 82px var(--canvas-stage-edge-inset) 88px; pointer-events: none; transition: left 220ms cubic-bezier(.2,.8,.2,1), right 220ms cubic-bezier(.2,.8,.2,1); }
+.canvas-stage.left-open { --canvas-stage-left-reserved: 298px; }
+.canvas-stage.left-open .page-canvas-fit-stage { left: var(--canvas-stage-left-reserved); }
 .canvas-stage.agent-open .page-canvas-fit-stage { right: 390px; }
 .page-canvas-fit-stage.vertical { display: contents; }
 .canvas-marquee { position: absolute; z-index: 67; border: 1px solid rgba(100,200,200,.94); border-radius: 9px; background: rgba(100,200,200,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.72), 0 0 0 4px rgba(100,200,200,.08), 0 8px 24px rgba(36,127,130,.12); pointer-events: none; }

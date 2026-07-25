@@ -115,7 +115,9 @@ $actual -eq $expected
 
 </details>
 
-## 通过 MCP 与 Skill 接入外置 Agent
+## 通过 MCP 与 Skill 接入外置 Agent（推荐）
+
+> 内置 Agent 暂不迭代，推荐通过 MCP + Skill 使用外置 Agent。
 
 需要从兼容的本地 Agent 使用 Lantern 时，先启动 Lantern，再让该 Agent 在 Lantern 目录中运行：
 
@@ -123,7 +125,7 @@ $actual -eq $expected
 ./lantern agent:install
 ```
 
-Windows 使用 `lantern.cmd agent:install`。命令会识别当前 Agent，安装 Lantern 应用级 Skill 并登记本地 MCP。Agent 只能使用 Lantern 当前显式开放的受控能力；Lantern 升级、端口或凭证变化后，重复运行同一命令即可同步。详细边界见 [Agent](./docs/agent.md) 与[外置 Agent 接入](./docs/external-agent.md)。
+Windows 使用 `lantern.cmd agent:install`。命令会识别当前 Agent，安装 Lantern 应用级 Skill 并登记本地 MCP。Agent 只能使用 Lantern 当前显式开放的受控能力；Lantern 升级、端口或凭证变化后，重复运行同一命令即可同步。详细边界见 [Agent](./docs/agent.md)。
 
 ## 运行与数据
 

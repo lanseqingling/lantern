@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { zipSync } from "fflate";
 import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "@lantern/shared";
 import { balloonCutCornerPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "@lantern/shared";
 import { prisma } from "./db";
@@ -254,6 +255,29 @@ export async function renderChapterPngPages(document: ComicDocument) {
     for (const surface of [...unit.surfaces].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))) outputs.push(await renderSurface(document, unit, surface, assets));
   }
   return outputs;
+}
+
+export async function renderChapterPngArchive(document: ComicDocument) {
+  const assets = await assetDataByVersion(document);
+  const unitById = new Map(document.units.map((unit) => [unit.id, unit]));
+  const pages: Buffer[] = [];
+  for (const unitId of document.reading.unitOrder) {
+    const unit = unitById.get(unitId);
+    if (!unit) continue;
+    if (unit.kind === "spread") {
+      pages.push(await renderSurface(document, unit, presentationUnitSurface(unit), assets));
+      continue;
+    }
+    for (const surface of [...unit.surfaces].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))) {
+      pages.push(await renderSurface(document, unit, surface, assets));
+    }
+  }
+  const digits = Math.max(2, String(pages.length).length);
+  const entries: Record<string, Uint8Array> = {};
+  pages.forEach((page, index) => {
+    entries[`${document.chapterId}-${String(index + 1).padStart(digits, "0")}.png`] = page;
+  });
+  return Buffer.from(zipSync(entries, { level: 6 }));
 }
 
 export async function renderChapterLongPng(document: ComicDocument, pages?: Awaited<ReturnType<typeof renderChapterPngPages>>) {

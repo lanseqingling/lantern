@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { unzipSync } from "fflate";
 import sharp from "sharp";
 import { compileChapterLayoutPlan } from "@lantern/layout-engine";
 import {
   createStructuredExportPayload,
   presentationUnitSurface,
   renderChapterLongPng,
+  renderChapterPngArchive,
   renderChapterPngPages,
   renderPagePng,
   renderPreviewPageGroupPng,
@@ -332,4 +334,34 @@ test("PNG, long PNG and structured JSON match the persistent runtime export gold
   assert.equal((payload.storyboardBeats as StoryboardBeat[])[0].versionId, golden.firstStoryboardBeatVersion);
   assert.equal((payload.storyboardBeats as StoryboardBeat[]).at(-1)?.versionId, golden.lastStoryboardBeatVersion);
   assert.deepEqual(payload.assetVersions, golden.assetVersionHeads);
+});
+
+test("chapter image archive contains numbered PNG pages in reading order", async () => {
+  const document = renderFixture();
+  document.resources = [];
+  const second = structuredClone(document.units[0]);
+  second.id = "unit-2";
+  second.surfaces = [{ ...second.surfaces[0], id: "surface-2", pageNumber: 2 }];
+  document.units.push(second);
+  document.reading.unitOrder.push(second.id);
+
+  const files = unzipSync(new Uint8Array(await renderChapterPngArchive(document)));
+  assert.deepEqual(Object.keys(files), ["render-chapter-01.png", "render-chapter-02.png"]);
+  assert.deepEqual([...files["render-chapter-01.png"].subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+});
+
+test("chapter image archive keeps a true spread as one complete image", async () => {
+  const document = renderFixture();
+  document.resources = [];
+  const unit = document.units[0];
+  unit.kind = "spread";
+  unit.canvas.width = 400;
+  unit.surfaces = [
+    { id: "surface-left", role: "left", geometry: { x: 0, y: 0, width: 200, height: 300 }, pageNumber: 1 },
+    { id: "surface-right", role: "right", geometry: { x: 200, y: 0, width: 200, height: 300 }, pageNumber: 2 },
+  ];
+
+  const files = unzipSync(new Uint8Array(await renderChapterPngArchive(document)));
+  assert.deepEqual(Object.keys(files), ["render-chapter-01.png"]);
+  assert.equal((await sharp(files["render-chapter-01.png"]).metadata()).width, 400);
 });

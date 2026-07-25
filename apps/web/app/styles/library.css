@@ -2,7 +2,7 @@
 @media (min-width: 1540px) {
   .workbench { --focus-layout-shift-x: -41px; }
   .creation-drawer { width: 270px; }
-  .canvas-stage.left-open .page-canvas-fit-stage { left: 308px; }
+  .canvas-stage.left-open { --canvas-stage-left-reserved: 308px; }
   .comic-stage-wrap { width: 460px; }
   .reference-card { width: var(--reference-base-width, 168px); }
   .object-toolbar { left: calc(50% - 278px); }
@@ -13,7 +13,7 @@
   .project-chip { left: 14px; width: 232px; }
   .creation-drawer { left: 14px; width: 232px; }
   .agent-workspace { right: 20px; width: 310px; }
-  .canvas-stage.left-open .page-canvas-fit-stage { left: 264px; }
+  .canvas-stage.left-open { --canvas-stage-left-reserved: 264px; }
   .canvas-stage.agent-open .page-canvas-fit-stage { right: 348px; }
   .canvas-stage.agent-open .vertical-scroll-navigator { right: 368px; }
   .canvas-stage.agent-open .object-inspector { right: 402px; }
@@ -27,7 +27,7 @@
 @media (max-width: 1120px) {
   .workbench { --focus-layout-shift-x: 0px; }
   .creation-drawer { transform: translateX(-110%); opacity: 0; pointer-events: none; }
-  .canvas-stage.left-open .page-canvas-fit-stage { left: 24px; }
+  .canvas-stage.left-open { --canvas-stage-left-reserved: var(--canvas-stage-edge-inset); }
   .drawer-reopen.left { display: grid; }
   .reference-card { display: none; }
 }

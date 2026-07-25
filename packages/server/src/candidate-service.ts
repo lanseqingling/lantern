@@ -167,6 +167,7 @@ export async function applyCandidate(
       projectId: candidate.projectId,
       baseRevision: candidate.baseRevision,
       source: "candidate",
+      sourceCandidateId: candidate.id,
       commands: operations,
     },
   });

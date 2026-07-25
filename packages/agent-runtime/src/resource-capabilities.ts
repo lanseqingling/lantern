@@ -17,7 +17,7 @@ export const externalResourceToolResultSchema = z.strictObject({
 const comicReferenceSchema = z.strictObject({ comic: externalResourceReferenceSchema });
 const chapterReferenceSchema = z.strictObject({ chapter: externalResourceReferenceSchema });
 const assetReferenceSchema = z.strictObject({ asset: externalResourceReferenceSchema });
-const idempotencyKeySchema = z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/, "幂等键只能包含字母、数字、点、下划线、冒号和连字符。");
+export const idempotencyKeySchema = z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/, "幂等键只能包含字母、数字、点、下划线、冒号和连字符。");
 
 const comicCreateSchema = z.strictObject({
   title: z.string().trim().min(1).max(120),

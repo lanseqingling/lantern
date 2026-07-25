@@ -10,11 +10,19 @@ Prefer a Lantern Resource Reference already supplied by the creator or returned 
 lantern://comics/{comicId}
 lantern://chapters/{chapterId}
 lantern://assets/{assetId}
+lantern://candidates/{candidateId}
 ```
 
 A current local Lantern browser link can identify the same comic or chapter. Keep the complete link so Lantern can validate any Comic → Chapter relationship. A resource reference identifies a target but does not grant access; Lantern still checks the current owner and archived state.
 
-Do not replace an available reference with a title search. List comics only when the creator has not supplied a precise reference and the target remains ambiguous.
+Use `lantern_scope_resolve` before project context:
+
+- Pass through a complete local Lantern link or `lantern://` reference when the creator supplied one.
+- Otherwise, extract an accurate Comic title and Chapter title or number from the creator's wording. Scope resolution uses exact, owner-bounded matches and refuses ambiguity; it is not fuzzy title guessing.
+- Reuse the returned Chapter or Project URI as the current discussion scope. If the user changes the intended work, resolve the new scope instead of carrying the old one forward.
+- List projects only when the creator supplied neither a usable reference nor an accurate name, or when they explicitly ask to browse their work.
+
+For page work, call `lantern_context_get` with the stable Chapter or Project `scope`. Translate phrases such as “第一页” or an exact page name into the structured `pages` locator. Select frames, images, balloons, and text only from the returned labels and aliases, then use their opaque handles. Do not ask the creator for `projectId`, `pageId`, or element IDs.
 
 ## Keep resource scopes distinct
 
@@ -23,7 +31,7 @@ Do not replace an available reference with a title search. List comics only when
 - An Asset is reusable comic material. Its name, kind, and confirmed description are structured facts; an Asset Version fixes a concrete image or other immutable resource.
 - Saving a confirmed character, scene, or prop description is a direct resource mutation. Designing missing creative details or generating an image remains a generative action and must follow the Candidate boundary exposed by Lantern.
 
-Use the resource URI returned by a create, duplicate, or read result for every follow-up mutation. After creating the first Chapter, use its returned Project only for page context and LCD editing—not as a substitute for the Comic or Chapter reference.
+Use the resource URI returned by a create, duplicate, resolve, or read result for every follow-up mutation. After creating the first Chapter, use its returned Project only for page context and LCD editing—not as a substitute for the Comic or Chapter reference.
 
 ## Apply destructive intent narrowly
 

@@ -1,8 +1,9 @@
 import { getConfig } from "./config";
 import { prisma } from "./db";
 import { AppError } from "./errors";
+import { validateComicDocument } from "@lantern/shared";
 
-export const lanternResourceTypes = ["comic", "chapter", "project", "asset"] as const;
+export const lanternResourceTypes = ["comic", "chapter", "project", "asset", "candidate"] as const;
 export type LanternResourceType = typeof lanternResourceTypes[number];
 
 export type ResolvedResourceReference = {
@@ -14,12 +15,24 @@ export type ResolvedResourceReference = {
   chapterId?: string;
   projectId?: string;
   workingRevision?: number;
+  focus?: {
+    type: "presentation_unit";
+    id: string;
+  };
 };
 
 type ParsedReference = {
   type: LanternResourceType;
   id: string;
   expectedComicId?: string;
+  focusPageId?: string;
+};
+
+export type ResourceScopeLocator = {
+  reference?: string;
+  comicTitle?: string;
+  chapterTitle?: string;
+  chapterNumber?: number;
 };
 
 function canonicalUri(type: LanternResourceType, id: string) {
@@ -34,7 +47,7 @@ function parseCanonicalReference(reference: string): ParsedReference | undefined
     return undefined;
   }
   if (url.protocol !== "lantern:") return undefined;
-  const type = ({ comics: "comic", chapters: "chapter", projects: "project", assets: "asset" } as const)[url.hostname];
+  const type = ({ comics: "comic", chapters: "chapter", projects: "project", assets: "asset", candidates: "candidate" } as const)[url.hostname];
   const [id, extra] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   if (!type || !id || extra || url.search || url.hash) return undefined;
   return { type, id };
@@ -60,7 +73,12 @@ function parseBrowserReference(reference: string): ParsedReference | undefined {
   const comicId = segments[1];
   if (segments.length === 2) return { type: "comic", id: comicId };
   if (segments[2] === "chapters" && segments[3] && segments.length === 4) {
-    return { type: "chapter", id: segments[3], expectedComicId: comicId };
+    return {
+      type: "chapter",
+      id: segments[3],
+      expectedComicId: comicId,
+      ...(url.searchParams.get("pageId") ? { focusPageId: url.searchParams.get("pageId")! } : {}),
+    };
   }
   if (segments[2] === "assets" && segments.length === 3) {
     const assetId = url.searchParams.get("asset");
@@ -78,16 +96,27 @@ function invalidReference() {
 }
 
 function notFound(type: LanternResourceType) {
-  const label = ({ comic: "漫画", chapter: "章节", project: "创作空间", asset: "资产" } as const)[type];
+  const label = ({ comic: "漫画", chapter: "章节", project: "创作空间", asset: "资产", candidate: "候选" } as const)[type];
   return new AppError("not_found", `${label}不存在或不属于当前用户。`, 404);
 }
 
-async function latestWorkingRevision(projectId: string) {
-  return (await prisma.workingRevision.findFirst({
+async function latestWorking(projectId: string) {
+  return prisma.workingRevision.findFirst({
     where: { projectId },
     orderBy: { revision: "desc" },
-    select: { revision: true },
-  }))?.revision;
+    select: { revision: true, document: true },
+  });
+}
+
+function focusFromWorking(
+  focusPageId: string | undefined,
+  working: Awaited<ReturnType<typeof latestWorking>> | undefined,
+) {
+  if (!focusPageId) return undefined;
+  if (!working || !validateComicDocument(working.document).units.some((unit) => unit.id === focusPageId)) {
+    throw new AppError("target_not_found", "链接指向的页面不存在或已经变化。", 404);
+  }
+  return { type: "presentation_unit" as const, id: focusPageId };
 }
 
 export async function resolveResourceReference(
@@ -115,6 +144,7 @@ export async function resolveResourceReference(
     });
     if (!chapter || (parsed.expectedComicId && parsed.expectedComicId !== chapter.comicId)) throw notFound(parsed.type);
     const projectId = chapter.project?.id;
+    const working = projectId ? await latestWorking(projectId) : undefined;
     return {
       type: "chapter",
       id: chapter.id,
@@ -123,7 +153,8 @@ export async function resolveResourceReference(
       comicId: chapter.comicId,
       chapterId: chapter.id,
       projectId,
-      workingRevision: projectId ? await latestWorkingRevision(projectId) : undefined,
+      workingRevision: working?.revision,
+      focus: focusFromWorking(parsed.focusPageId, working),
     };
   }
 
@@ -133,6 +164,7 @@ export async function resolveResourceReference(
       select: { id: true, chapter: { select: { id: true, title: true, number: true, comicId: true } } },
     });
     if (!project) throw notFound(parsed.type);
+    const working = await latestWorking(project.id);
     return {
       type: "project",
       id: project.id,
@@ -141,24 +173,144 @@ export async function resolveResourceReference(
       comicId: project.chapter.comicId,
       chapterId: project.chapter.id,
       projectId: project.id,
-      workingRevision: await latestWorkingRevision(project.id),
+      workingRevision: working?.revision,
     };
   }
 
-  const asset = await prisma.asset.findFirst({
-    where: { id: parsed.id, ownerUserId, archivedAt: null, comic: { archivedAt: null } },
-    select: { id: true, name: true, comicId: true },
+  if (parsed.type === "asset") {
+    const asset = await prisma.asset.findFirst({
+      where: { id: parsed.id, ownerUserId, archivedAt: null, comic: { archivedAt: null } },
+      select: { id: true, name: true, comicId: true },
+    });
+    if (!asset || (parsed.expectedComicId && parsed.expectedComicId !== asset.comicId)) throw notFound(parsed.type);
+    return {
+      type: "asset",
+      id: asset.id,
+      canonicalUri: canonicalUri("asset", asset.id),
+      displayName: asset.name,
+      comicId: asset.comicId,
+    };
+  }
+
+  const candidate = await prisma.candidate.findFirst({
+    where: {
+      id: parsed.id,
+      ownerUserId,
+      project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+    },
+    select: {
+      id: true,
+      title: true,
+      projectId: true,
+      project: { select: { chapter: { select: { id: true, comicId: true } } } },
+    },
   });
-  if (!asset || (parsed.expectedComicId && parsed.expectedComicId !== asset.comicId)) throw notFound(parsed.type);
+  if (!candidate) throw notFound(parsed.type);
+  const working = await latestWorking(candidate.projectId);
   return {
-    type: "asset",
-    id: asset.id,
-    canonicalUri: canonicalUri("asset", asset.id),
-    displayName: asset.name,
-    comicId: asset.comicId,
+    type: "candidate",
+    id: candidate.id,
+    canonicalUri: canonicalUri("candidate", candidate.id),
+    displayName: candidate.title,
+    comicId: candidate.project.chapter.comicId,
+    chapterId: candidate.project.chapter.id,
+    projectId: candidate.projectId,
+    workingRevision: working?.revision,
   };
 }
 
 export function resourceReference(type: LanternResourceType, id: string) {
   return { type, id, uri: canonicalUri(type, id) };
+}
+
+function ambiguousLocator(
+  message: string,
+  candidates: Array<{ type: LanternResourceType; id: string; label: string }>,
+) {
+  return new AppError("ambiguous_resource_locator", message, 409, {
+    candidates: candidates.map((candidate) => ({
+      type: candidate.type,
+      label: candidate.label,
+      uri: canonicalUri(candidate.type, candidate.id),
+    })),
+  });
+}
+
+export async function resolveResourceScope(
+  ownerUserId: string,
+  locator: ResourceScopeLocator,
+): Promise<ResolvedResourceReference> {
+  const reference = locator.reference?.trim();
+  const comicTitle = locator.comicTitle?.trim();
+  const chapterTitle = locator.chapterTitle?.trim();
+  const chapterNumber = locator.chapterNumber;
+  let comicId: string | undefined;
+
+  if (reference) {
+    if (comicTitle) {
+      throw new AppError("invalid_resource_locator", "已有 Lantern 引用时不要同时提供漫画名称。", 422);
+    }
+    const resolved = await resolveResourceReference(ownerUserId, reference);
+    if (resolved.type === "asset" || resolved.type === "candidate") throw invalidReference();
+    if (resolved.type !== "comic") {
+      if (chapterTitle !== undefined || chapterNumber !== undefined) {
+        throw new AppError("invalid_resource_locator", "一话或创作空间引用不能再附加另一话定位条件。", 422);
+      }
+      return resolved;
+    }
+    if (chapterTitle === undefined && chapterNumber === undefined) return resolved;
+    comicId = resolved.id;
+  } else {
+    if (!comicTitle) {
+      throw new AppError(
+        "invalid_resource_locator",
+        "请提供 Lantern 资源引用，或提供准确的漫画名称。",
+        422,
+      );
+    }
+    const comics = await prisma.comic.findMany({
+      where: { ownerUserId, archivedAt: null, title: comicTitle },
+      select: { id: true, title: true },
+      orderBy: { updatedAt: "desc" },
+      take: 6,
+    });
+    if (!comics.length) throw notFound("comic");
+    if (comics.length > 1) {
+      throw ambiguousLocator(
+        "找到多部同名漫画，请使用返回的 Lantern 引用明确目标。",
+        comics.map((comic) => ({ type: "comic", id: comic.id, label: comic.title })),
+      );
+    }
+    comicId = comics[0]!.id;
+  }
+
+  if (chapterTitle === undefined && chapterNumber === undefined) {
+    return resolveResourceReference(ownerUserId, canonicalUri("comic", comicId), "comic");
+  }
+
+  const chapters = await prisma.chapter.findMany({
+    where: {
+      ownerUserId,
+      comicId,
+      archivedAt: null,
+      comic: { archivedAt: null },
+      ...(chapterTitle !== undefined ? { title: chapterTitle } : {}),
+      ...(chapterNumber !== undefined ? { number: chapterNumber } : {}),
+    },
+    select: { id: true, title: true, number: true },
+    orderBy: [{ number: "asc" }, { createdAt: "asc" }],
+    take: 6,
+  });
+  if (!chapters.length) throw notFound("chapter");
+  if (chapters.length > 1) {
+    throw ambiguousLocator(
+      "找到多个符合条件的一话，请使用返回的 Lantern 引用明确目标。",
+      chapters.map((chapter) => ({
+        type: "chapter",
+        id: chapter.id,
+        label: `第 ${chapter.number} 话 ${chapter.title}`.trim(),
+      })),
+    );
+  }
+  return resolveResourceReference(ownerUserId, canonicalUri("chapter", chapters[0]!.id), "chapter");
 }

@@ -1,6 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { getConfig } from "@lantern/server/config";
 import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
 import { executeIdempotentExternalMutation } from "@lantern/server/external-operation-service";
@@ -30,7 +28,11 @@ import {
   setPrimaryAssetImage,
   updateAsset,
 } from "@lantern/server/asset-library-service";
-import { resolveResourceReference, resourceReference } from "@lantern/server/resource-reference-service";
+import {
+  resolveResourceReference,
+  resourceReference,
+} from "@lantern/server/resource-reference-service";
+import { createComicPageViews, validateComicDocument } from "@lantern/shared";
 import { compositionObservationSchema, compositionStructureSchema, loadWorkingCompositionObservation } from "./composition-observation";
 import { buildAgentContext } from "./context-builder";
 import {
@@ -42,7 +44,13 @@ import {
   type AgentCapabilityContextProfile,
 } from "./capability-registry";
 import { externalResourceToolResultSchema, isResourceCapabilityId } from "./resource-capabilities";
+import { isCandidateCapabilityId } from "./candidate-capabilities";
 import { analyzeImageVersions } from "./visual-context";
+import {
+  createExternalTargetHandle,
+  resolveExternalTargetHandles,
+  type ExternalTargetHandlePayload,
+} from "./external-target-handles";
 
 export const externalContextProfiles = [
   "visual_observation",
@@ -53,51 +61,48 @@ export const externalContextProfiles = [
 
 export const externalProjectsListInputSchema = z.strictObject({});
 
+const externalPageLocatorSchema = z.strictObject({
+  position: z.number().int().positive().optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+}).refine((value) => (value.position === undefined) !== (value.name === undefined), {
+  message: "页面定位只能提供 position 或 name 其中一种。",
+});
+
 export const externalContextGetInputSchema = z.strictObject({
-  projectId: z.string().min(1),
+  scope: z.string().trim().min(1).max(2048).optional(),
+  projectId: z.string().min(1).optional(),
   profile: z.enum(externalContextProfiles).default("visual_observation"),
+  pages: z.array(externalPageLocatorSchema).min(1).max(2).optional(),
   pageId: z.string().min(1).optional(),
   pageIds: z.array(z.string().min(1)).min(1).max(2).optional(),
-}).refine((value) => !(value.pageId && value.pageIds), { message: "pageId 与 pageIds 只能提供一种。" });
+}).superRefine((value, context) => {
+  if ((value.scope === undefined) === (value.projectId === undefined)) {
+    context.addIssue({ code: "custom", message: "scope 与 projectId 必须且只能提供一种。" });
+  }
+  if ([value.pages, value.pageId, value.pageIds].filter((item) => item !== undefined).length > 1) {
+    context.addIssue({ code: "custom", message: "pages、pageId 与 pageIds 只能提供一种。" });
+  }
+});
 
 export const externalCapabilitiesListInputSchema = z.strictObject({});
 
 export const externalImagesInspectInputSchema = z.strictObject({
-  projectId: z.string().min(1),
+  projectId: z.string().min(1).optional(),
   targetHandles: z.array(z.string().min(1).max(4096)).min(1).max(3),
   instruction: z.string().trim().min(1).max(2000).optional(),
 });
 
 export const externalCompositionInspectInputSchema = z.strictObject({
-  projectId: z.string().min(1),
+  projectId: z.string().min(1).optional(),
   pageHandles: z.array(z.string().min(1).max(4096)).min(1).max(2),
 });
-
-const externalTargetHandlePayloadSchema = z.strictObject({
-  version: z.literal(1),
-  ownerUserId: z.string().min(1),
-  projectId: z.string().min(1),
-  baseRevision: z.number().int().positive(),
-  expiresAt: z.number().int().positive(),
-  nonce: z.string().min(16),
-  target: z.strictObject({
-    type: z.string().min(1),
-    pageId: z.string().min(1).optional(),
-    elementId: z.string().min(1).optional(),
-    frameId: z.string().min(1).optional(),
-    storyboardBeatId: z.string().min(1).optional(),
-    assetVersionIds: z.array(z.string().min(1)).max(12),
-    dialogueIds: z.array(z.string().min(1)).max(12),
-  }),
-});
-
-type ExternalTargetHandlePayload = z.infer<typeof externalTargetHandlePayloadSchema>;
 
 export const externalProjectsListOutputSchema = z.object({
   projects: z.array(z.object({
     projectId: z.string(),
-    comic: z.object({ id: z.string(), title: z.string(), format: z.string(), defaultReadingDirection: z.string() }),
-    chapter: z.object({ id: z.string(), number: z.number().int(), title: z.string(), summary: z.string() }),
+    projectUri: z.string(),
+    comic: z.object({ id: z.string(), uri: z.string(), title: z.string(), format: z.string(), defaultReadingDirection: z.string() }),
+    chapter: z.object({ id: z.string(), uri: z.string(), number: z.number().int(), title: z.string(), summary: z.string() }),
     workingRevision: z.number().int().positive().nullable(),
     updatedAt: z.string(),
   })),
@@ -113,6 +118,7 @@ const externalContextTargetSchema = z.object({
   handle: z.string(),
   type: z.string(),
   label: z.string(),
+  aliases: z.array(z.string()),
   summary: z.string(),
   pageId: z.string().optional(),
   pageLabel: z.string().optional(),
@@ -121,6 +127,11 @@ const externalContextTargetSchema = z.object({
 
 export const externalContextGetOutputSchema = z.object({
   projectId: z.string(),
+  scope: z.strictObject({
+    comic: z.string(),
+    chapter: z.string(),
+    project: z.string(),
+  }),
   baseRevision: z.number().int().positive(),
   profile: z.enum(externalContextProfiles),
   expiresAt: z.string(),
@@ -159,35 +170,7 @@ export const externalImagesInspectOutputSchema = z.object({
 
 export const externalCompositionInspectOutputSchema = compositionObservationSchema;
 
-const handlePrefix = "lctx1";
-const handleAdditionalData = Buffer.from("lantern-context-handle-v1", "utf8");
 const defaultHandleLifetimeMs = 15 * 60 * 1000;
-
-function handleKey(secret: string) {
-  return createHash("sha256").update(`lantern-context-handle:${secret}`).digest();
-}
-
-function encodeContextTargetHandle(payload: ExternalTargetHandlePayload, secret = getConfig().LANTERN_MCP_TOKEN) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", handleKey(secret), iv);
-  cipher.setAAD(handleAdditionalData);
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
-  return [handlePrefix, iv.toString("base64url"), encrypted.toString("base64url"), cipher.getAuthTag().toString("base64url")].join(".");
-}
-
-function decodeContextTargetHandle(handle: string, secret = getConfig().LANTERN_MCP_TOKEN) {
-  try {
-    const [prefix, ivValue, encryptedValue, tagValue, extra] = handle.split(".");
-    if (prefix !== handlePrefix || !ivValue || !encryptedValue || !tagValue || extra) throw new Error("INVALID_HANDLE_SHAPE");
-    const decipher = createDecipheriv("aes-256-gcm", handleKey(secret), Buffer.from(ivValue, "base64url"));
-    decipher.setAAD(handleAdditionalData);
-    decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
-    const decoded = Buffer.concat([decipher.update(Buffer.from(encryptedValue, "base64url")), decipher.final()]).toString("utf8");
-    return externalTargetHandlePayloadSchema.parse(JSON.parse(decoded));
-  } catch {
-    throw new AppError("invalid_context_handle", "上下文目标已失效，请重新读取 Lantern 上下文。", 422);
-  }
-}
 
 export async function listExternalAgentProjects(ownerUserId: string) {
   const projects = await prisma.project.findMany({
@@ -204,14 +187,17 @@ export async function listExternalAgentProjects(ownerUserId: string) {
   return externalProjectsListOutputSchema.parse({
     projects: projects.map((project) => ({
       projectId: project.id,
+      projectUri: resourceReference("project", project.id).uri,
       comic: {
         id: project.chapter.comic.id,
+        uri: resourceReference("comic", project.chapter.comic.id).uri,
         title: project.chapter.comic.title,
         format: project.chapter.comic.format.toLowerCase(),
         defaultReadingDirection: project.chapter.comic.defaultReadingDirection.toLowerCase(),
       },
       chapter: {
         id: project.chapter.id,
+        uri: resourceReference("chapter", project.chapter.id).uri,
         number: project.chapter.number,
         title: project.chapter.title,
         summary: project.chapter.summary,
@@ -229,7 +215,7 @@ export function listExternalCapabilities() {
     catalogHash: catalog.hash,
     capabilities: catalog.capabilities.filter((capability) =>
       capability.agentAccess.external !== "disabled"
-      && (capability.effect === "observe" || isResourceCapabilityId(capability.id))),
+      && (capability.effect === "observe" || isResourceCapabilityId(capability.id) || isCandidateCapabilityId(capability.id))),
   });
 }
 
@@ -515,17 +501,82 @@ function contextRequestForProfile(profile: AgentCapabilityContextProfile) {
     : { taskType: "interaction", scope: "current_page" };
 }
 
+function normalizedLocatorText(value: string) {
+  return value.trim().toLocaleLowerCase().replaceAll(/\s+/g, "");
+}
+
+async function resolveContextRequestScope(
+  ownerUserId: string,
+  parsed: z.output<typeof externalContextGetInputSchema>,
+) {
+  if (parsed.projectId) return { projectId: parsed.projectId, focusPageId: undefined };
+  const scope = await resolveResourceReference(ownerUserId, parsed.scope!);
+  if (!scope.projectId) {
+    throw new AppError("invalid_context_scope", "页面上下文需要明确到一话或创作空间。", 422);
+  }
+  return { projectId: scope.projectId, focusPageId: scope.focus?.id };
+}
+
+async function resolvePageLocators(
+  ownerUserId: string,
+  projectId: string,
+  locators: z.infer<typeof externalPageLocatorSchema>[],
+) {
+  const working = await prisma.workingRevision.findFirst({
+    where: { projectId, project: { ownerUserId } },
+    orderBy: { revision: "desc" },
+    select: { document: true },
+  });
+  if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
+  const pages = createComicPageViews(validateComicDocument(working.document));
+  return locators.map((locator) => {
+    const matches = pages.filter((page) => {
+      if (locator.position !== undefined) return page.pageIndex + 1 === locator.position;
+      const query = normalizedLocatorText(locator.name!);
+      const aliases = [
+        page.name,
+        `第${page.pageIndex + 1}页`,
+        `Page${String(page.pageIndex + 1).padStart(2, "0")}`,
+        page.pageRole === "cover" ? "封面" : undefined,
+        page.pageRole === "interlude" ? "过场页" : undefined,
+      ].filter((value): value is string => Boolean(value));
+      return aliases.some((alias) => normalizedLocatorText(alias) === query);
+    });
+    if (!matches.length) {
+      throw new AppError("target_not_found", "没有在当前一话中找到指定页面。", 404, {
+        locator,
+        availablePages: pages.slice(0, 20).map((page) => ({
+          position: page.pageIndex + 1,
+          label: page.name?.trim() || `Page ${String(page.pageIndex + 1).padStart(2, "0")}`,
+        })),
+      });
+    }
+    if (matches.length > 1) {
+      throw new AppError("ambiguous_target", "页面名称对应多个目标，请改用页面位置。", 409, {
+        matches: matches.map((page) => ({
+          position: page.pageIndex + 1,
+          label: page.name?.trim() || `Page ${String(page.pageIndex + 1).padStart(2, "0")}`,
+        })),
+      });
+    }
+    return matches[0]!.id;
+  });
+}
+
 export async function getExternalAgentContext(
   ownerUserId: string,
   input: z.input<typeof externalContextGetInputSchema>,
   options: { now?: number; lifetimeMs?: number } = {},
 ) {
   const parsed = externalContextGetInputSchema.parse(input);
-  const requestedPageIds = parsed.pageIds ?? (parsed.pageId ? [parsed.pageId] : []);
+  const resolvedScope = await resolveContextRequestScope(ownerUserId, parsed);
+  const requestedPageIds = parsed.pages
+    ? await resolvePageLocators(ownerUserId, resolvedScope.projectId, parsed.pages)
+    : parsed.pageIds ?? (parsed.pageId ? [parsed.pageId] : resolvedScope.focusPageId ? [resolvedScope.focusPageId] : []);
   const contextRequest = contextRequestForProfile(parsed.profile);
   const context = await buildAgentContext({
     ownerUserId,
-    projectId: parsed.projectId,
+    projectId: resolvedScope.projectId,
     taskType: contextRequest.taskType,
     instruction: "Read bounded context for an external Agent.",
     scope: contextRequest.scope,
@@ -538,13 +589,11 @@ export async function getExternalAgentContext(
   }
   const now = options.now ?? Date.now();
   const expiresAt = now + (options.lifetimeMs ?? defaultHandleLifetimeMs);
-  const createHandle = (target: ExternalTargetHandlePayload["target"]) => encodeContextTargetHandle({
-    version: 1,
+  const createHandle = (target: ExternalTargetHandlePayload["target"]) => createExternalTargetHandle({
     ownerUserId,
-    projectId: parsed.projectId,
+    projectId: resolvedScope.projectId,
     baseRevision: context.workingRevision,
     expiresAt,
-    nonce: randomBytes(12).toString("base64url"),
     target,
   });
   const targets = [
@@ -560,6 +609,7 @@ export async function getExternalAgentContext(
       }),
       type: target.type,
       label: target.label,
+      aliases: target.aliases,
       summary: target.summary,
       pageId: target.pageId,
       pageLabel: target.pageLabel,
@@ -573,12 +623,18 @@ export async function getExternalAgentContext(
       }),
       type: "asset",
       label: asset.name,
+      aliases: [asset.name],
       summary: asset.description,
       assetVersionIds: asset.images.map((image) => image.versionId),
     })),
   ];
   return externalContextGetOutputSchema.parse({
     projectId: context.projectId,
+    scope: {
+      comic: resourceReference("comic", context.comic.id).uri,
+      chapter: resourceReference("chapter", context.chapter.id).uri,
+      project: resourceReference("project", context.projectId).uri,
+    },
     baseRevision: context.workingRevision,
     profile: parsed.profile,
     expiresAt: new Date(expiresAt).toISOString(),
@@ -598,27 +654,11 @@ export async function getExternalAgentContext(
 
 async function resolveContextTargetHandles(
   ownerUserId: string,
-  projectId: string,
+  projectId: string | undefined,
   handles: string[],
   now = Date.now(),
 ) {
-  const decoded = handles.map((handle) => ({ handle, payload: decodeContextTargetHandle(handle) }));
-  if (decoded.some(({ payload }) => payload.ownerUserId !== ownerUserId || payload.projectId !== projectId)) {
-    throw new AppError("invalid_context_handle", "上下文目标不属于当前创作空间。", 403);
-  }
-  if (decoded.some(({ payload }) => payload.expiresAt <= now)) {
-    throw new AppError("context_handle_expired", "上下文目标已过期，请重新读取 Lantern 上下文。", 409);
-  }
-  const working = await prisma.workingRevision.findFirst({
-    where: { projectId, project: { ownerUserId } },
-    orderBy: { revision: "desc" },
-    select: { revision: true },
-  });
-  if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
-  if (decoded.some(({ payload }) => payload.baseRevision !== working.revision)) {
-    throw new AppError("context_stale", "工作稿已经变化，请重新读取 Lantern 上下文。", 409, { currentRevision: working.revision });
-  }
-  return { workingRevision: working.revision, decoded };
+  return resolveExternalTargetHandles({ ownerUserId, projectId, handles, now });
 }
 
 export async function inspectExternalAgentImages(
@@ -636,13 +676,13 @@ export async function inspectExternalAgentImages(
   if (!versionIds.length) throw new AppError("invalid_image_context", "这些上下文目标没有可读取的图片。", 422);
   const content = await analyze({
     ownerUserId,
-    projectId: parsed.projectId,
+    projectId: resolved.projectId,
     message: parsed.instruction ?? "准确描述这些图片中可见的内容和文字。",
     versionIds,
   });
   if (!content) throw new AppError("invalid_image_context", "没有找到可读取的图片版本。", 422);
   return externalImagesInspectOutputSchema.parse({
-    projectId: parsed.projectId,
+    projectId: resolved.projectId,
     baseRevision: resolved.workingRevision,
     observation: { type: "visual_evidence", content },
     evidence,
@@ -661,19 +701,17 @@ export async function inspectExternalAgentComposition(
   const unitIds = resolved.decoded.map(({ payload }) => payload.target.pageId!);
   const composition = await loadWorkingCompositionObservation({
     ownerUserId,
-    projectId: parsed.projectId,
+    projectId: resolved.projectId,
     unitIds,
     expectedRevision: resolved.workingRevision,
   });
   const pageHandleById = new Map(resolved.decoded.map(({ handle, payload }) => [payload.target.pageId!, handle]));
   const expiresAt = Math.min(...resolved.decoded.map(({ payload }) => payload.expiresAt));
-  const createHandle = (target: ExternalTargetHandlePayload["target"]) => encodeContextTargetHandle({
-    version: 1,
+  const createHandle = (target: ExternalTargetHandlePayload["target"]) => createExternalTargetHandle({
     ownerUserId,
-    projectId: parsed.projectId,
+    projectId: resolved.projectId,
     baseRevision: resolved.workingRevision,
     expiresAt,
-    nonce: randomBytes(12).toString("base64url"),
     target,
   });
   const structure = compositionStructureSchema.parse({

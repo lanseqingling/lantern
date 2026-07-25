@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CandidateKind, TaskType } from "@prisma/client";
 import { runAgentLoop, type AgentLoopCheckpoint } from "@lantern/agent-runtime/agent-loop";
-import { getAgentCapability, plannerCapabilityCatalog, semanticCapabilityCatalogManifest, type AgentTaskType } from "@lantern/agent-runtime/capability-registry";
+import { getAgentCapability, plannerCapabilityCatalog, semanticCapabilityCatalogManifest, SEMANTIC_CAPABILITY_CATALOG_REVISION, type AgentTaskType } from "@lantern/agent-runtime/capability-registry";
 import { normalizeSelectionForCurrentView } from "@lantern/agent-runtime/context-builder";
 import { guardInteractionPlan, type InteractionInput } from "@lantern/agent-runtime/orchestrator";
 import { assetDraftSchema, explicitDialogueReferenceSchema, explicitWorkspaceReferencesSchema, interactionPlanSchema, parseCandidatePayload, type InteractionPlan } from "@lantern/agent-runtime/schemas";
@@ -102,7 +102,7 @@ test("storyboard entry editing and frame-image generation are distinct capabilit
 test("semantic capability manifest is versioned, serializable and shared by internal and external agents", () => {
   const first = semanticCapabilityCatalogManifest();
   const second = semanticCapabilityCatalogManifest();
-  assert.equal(first.revision, 7);
+  assert.equal(first.revision, SEMANTIC_CAPABILITY_CATALOG_REVISION);
   assert.equal(first.hash, second.hash);
   assert.match(first.hash, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => JSON.stringify(first));
@@ -129,6 +129,8 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "asset.image.rename",
     "asset.image.archive",
     "asset.archive",
+    "candidate.get",
+    "candidate.apply",
     "context.inspect_images",
     "context.inspect_composition",
     "storyboard.edit_single_entry",
@@ -150,7 +152,12 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   assert.deepEqual(comicUpdate?.executionModes, ["deterministic"]);
   assert.equal(comicUpdate?.agentAccess.external, "execute");
   assert.equal(comicUpdate?.agentAccess.internal, "disabled");
+  const candidateApply = first.capabilities.find((capability) => capability.id === "candidate.apply");
+  assert.equal(candidateApply?.effect, "direct_change");
+  assert.equal(candidateApply?.agentAccess.external, "execute");
+  assert.equal(candidateApply?.agentAccess.internal, "disabled");
   assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "comic.update"), false);
+  assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "candidate.apply"), false);
 });
 
 test("external Candidate Apply is direct in v1 but remains controlled by one service policy", () => {

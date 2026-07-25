@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { z } from "zod";
 import {
   AssetKind,
   AssetVersionOrigin,
@@ -21,6 +22,10 @@ import { putImage } from "@lantern/server/object-storage";
 import { commitChangeSet, getWorkbench, revertCandidateApplication } from "@lantern/server/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
 import { getExternalAgentContext, inspectExternalAgentComposition, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
+import { invokeExternalCandidateCapability } from "@lantern/agent-runtime/external-candidate-service";
+import { executeExternalDirectChange } from "@lantern/agent-runtime/external-edit-service";
+import { resolveExternalAgentScope } from "@lantern/agent-runtime/external-scope-service";
+import { SEMANTIC_CAPABILITY_CATALOG_REVISION, type AgentCapabilityDescriptor } from "@lantern/agent-runtime/capability-registry";
 import { getConfig } from "@lantern/server/config";
 import { receiveExternalAssetUpload } from "@lantern/server/external-upload-service";
 import { resolveResourceReference } from "@lantern/server/resource-reference-service";
@@ -383,7 +388,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     }, {
       id: "storyboard.edit_single_entry",
       version: 1,
-      catalogRevision: 6,
+      catalogRevision: SEMANTIC_CAPABILITY_CATALOG_REVISION,
     });
     assert.match(invocationAudit.capability?.catalogHash ?? "", /^[a-f0-9]{64}$/);
     assert.deepEqual(invocationAudit.invocation && {
@@ -591,6 +596,246 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: ids.asset } })).archivedAt, null);
     assert.equal((await prisma.asset.findUniqueOrThrow({ where: { id: ids.assetVariant } })).archivedAt, null);
     assert.equal((await prisma.canvasAssetListItem.findUniqueOrThrow({ where: { projectId_assetId: { projectId: ids.project, assetId: ids.asset } } })).hiddenAt, null);
+
+    const resolvedScope = await resolveExternalAgentScope(ids.user, {
+      comicTitle: "集成测试漫画",
+      chapterNumber: 1,
+    });
+    assert.equal(resolvedScope.comic.uri, `lantern://comics/${ids.comic}`);
+    assert.equal(resolvedScope.chapter?.uri, `lantern://chapters/${ids.chapter}`);
+    assert.equal(resolvedScope.project?.uri, `lantern://projects/${ids.project}`);
+    assert.equal(resolvedScope.workingRevision, 3);
+    const localPageScope = await resolveExternalAgentScope(ids.user, {
+      reference: `http://localhost:${getConfig().WEB_PORT}/comics/${ids.comic}/chapters/${ids.chapter}?pageId=${document.units[0].id}`,
+    });
+    assert.equal(localPageScope.focus?.type, "presentation_unit");
+
+    const writableContext = await getExternalAgentContext(ids.user, {
+      scope: resolvedScope.chapter!.uri,
+      profile: "composition_observation",
+      pages: [{ position: 1 }],
+    });
+    assert.equal(writableContext.scope.chapter, resolvedScope.chapter?.uri);
+    assert.equal(writableContext.baseRevision, 3);
+    const writablePage = writableContext.targets.find((target) => target.type === "presentation_unit");
+    const writableFrame = writableContext.targets.find((target) => target.type === "comic_frame");
+    assert.ok(writablePage && writableFrame);
+    assert.ok(writablePage.aliases.includes("第1页"));
+
+    const pageRenameCapability = {
+      id: "page.rename",
+      version: 1,
+      execution: "synchronous",
+      description: "Rename one page.",
+      inputSchema: z.strictObject({}),
+      outputSchema: z.strictObject({}),
+      target: { required: true, types: ["presentation_unit"], min: 1, max: 1 },
+      effect: "direct_change",
+      executionModes: ["deterministic"],
+      risk: "low",
+      agentAccess: { internal: "disabled", external: "execute" },
+      idempotency: "required",
+      domainCapabilities: ["update_presentation_unit"],
+      confirmation: "none",
+      userMessage: "",
+    } satisfies AgentCapabilityDescriptor;
+    const planPageRename = (name: string) => (context: Parameters<Parameters<typeof executeExternalDirectChange>[0]["plan"]>[0]) => ({
+      commands: [{
+        type: "set_presentation_unit_name" as const,
+        unitId: context.targets[0]!.target.pageId!,
+        name,
+      }],
+    });
+    let conflictPlanCalls = 0;
+    await assert.rejects(() => executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: pageRenameCapability,
+      envelope: {
+        scope: resolvedScope.chapter!.uri,
+        targetHandles: [writablePage.handle],
+        expectedRevision: 2,
+        idempotencyKey: `page-rename-conflict-${suffix}`,
+      },
+      plan: () => {
+        conflictPlanCalls += 1;
+        return { commands: [] };
+      },
+    }), /工作稿已经变化/);
+    assert.equal(conflictPlanCalls, 0);
+    assert.equal((await prisma.workingRevision.findFirstOrThrow({ where: { projectId: ids.project }, orderBy: { revision: "desc" } })).revision, 3);
+
+    await assert.rejects(() => executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: pageRenameCapability,
+      envelope: {
+        scope: resolvedScope.chapter!.uri,
+        targetHandles: [writableFrame.handle],
+        expectedRevision: 3,
+        idempotencyKey: `page-rename-wrong-target-${suffix}`,
+      },
+      plan: planPageRename("不会写入"),
+    }), /目标类型/);
+    assert.equal((await prisma.workingRevision.findFirstOrThrow({ where: { projectId: ids.project }, orderBy: { revision: "desc" } })).revision, 3);
+    await assert.rejects(() => executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: pageRenameCapability,
+      envelope: {
+        scope: resolvedScope.chapter!.uri,
+        targetHandles: [writablePage.handle, writablePage.handle],
+        expectedRevision: 3,
+        idempotencyKey: `page-rename-duplicate-target-${suffix}`,
+      },
+      plan: planPageRename("重复目标不应修改"),
+    }), /不能重复提交/);
+    assert.equal((await prisma.workingRevision.findFirstOrThrow({ where: { projectId: ids.project }, orderBy: { revision: "desc" } })).revision, 3);
+    await assert.rejects(() => executeExternalDirectChange({
+      ownerUserId: `foreign-${ids.user}`,
+      capability: pageRenameCapability,
+      envelope: {
+        scope: resolvedScope.chapter!.uri,
+        targetHandles: [writablePage.handle],
+        expectedRevision: 3,
+        idempotencyKey: `page-rename-foreign-${suffix}`,
+      },
+      plan: planPageRename("越权请求不应修改"),
+    }), /不存在或不属于当前用户/);
+    assert.equal((await prisma.workingRevision.findFirstOrThrow({ where: { projectId: ids.project }, orderBy: { revision: "desc" } })).revision, 3);
+
+    const renameEnvelope = {
+      scope: resolvedScope.chapter!.uri,
+      targetHandles: [writablePage.handle],
+      expectedRevision: 3,
+      idempotencyKey: `page-rename-${suffix}`,
+    };
+    const renamedPage = await executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: pageRenameCapability,
+      envelope: renameEnvelope,
+      plan: planPageRename("雨夜站台"),
+    });
+    assert.equal(renamedPage.workingRevision, 4);
+    const replayedRename = await executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: pageRenameCapability,
+      envelope: renameEnvelope,
+      plan: () => {
+        throw new Error("idempotent replay must not plan again");
+      },
+    });
+    assert.deepEqual(replayedRename, renamedPage);
+    assert.equal(await prisma.workingRevision.count({ where: { projectId: ids.project } }), 4);
+    await assert.rejects(() => executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: pageRenameCapability,
+      envelope: { ...renameEnvelope, expectedRevision: 4 },
+      plan: planPageRename("重复键不应修改"),
+    }), /幂等键已经用于另一项/);
+    assert.equal(await prisma.workingRevision.count({ where: { projectId: ids.project } }), 4);
+    await assert.rejects(() => executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: pageRenameCapability,
+      envelope: {
+        ...renameEnvelope,
+        expectedRevision: 4,
+        idempotencyKey: `page-rename-stale-handle-${suffix}`,
+      },
+      plan: planPageRename("过期目标不应修改"),
+    }), /工作稿已经变化/);
+    assert.equal(await prisma.workingRevision.count({ where: { projectId: ids.project } }), 4);
+
+    const refreshedContext = await getExternalAgentContext(ids.user, {
+      scope: resolvedScope.chapter!.uri,
+      profile: "composition_observation",
+      pages: [{ name: "雨夜站台" }],
+    });
+    const refreshedPage = refreshedContext.targets.find((target) => target.type === "presentation_unit");
+    assert.ok(refreshedPage);
+    const confirmedPageChange = {
+      ...pageRenameCapability,
+      id: "page.destructive_test",
+      risk: "high",
+      confirmation: "explicit",
+    } satisfies AgentCapabilityDescriptor;
+    await assert.rejects(() => executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: confirmedPageChange,
+      envelope: {
+        scope: resolvedScope.chapter!.uri,
+        targetHandles: [refreshedPage.handle],
+        expectedRevision: 4,
+        idempotencyKey: `page-confirm-missing-${suffix}`,
+      },
+      plan: planPageRename("未确认不应修改"),
+    }), /需要确认/);
+    assert.equal(await prisma.workingRevision.count({ where: { projectId: ids.project } }), 4);
+    const confirmedRename = await executeExternalDirectChange({
+      ownerUserId: ids.user,
+      capability: confirmedPageChange,
+      envelope: {
+        scope: resolvedScope.chapter!.uri,
+        targetHandles: [refreshedPage.handle],
+        expectedRevision: 4,
+        idempotencyKey: `page-confirmed-${suffix}`,
+        confirmedTargetHandles: [refreshedPage.handle],
+      },
+      plan: planPageRename("确认后的页面"),
+    });
+    assert.equal(confirmedRename.workingRevision, 5);
+    const operationAudit = await prisma.externalAgentOperation.findUniqueOrThrow({
+      where: { ownerUserId_idempotencyKey: { ownerUserId: ids.user, idempotencyKey: `page-confirmed-${suffix}` } },
+    });
+    assert.ok(operationAudit.targetReference?.startsWith(`lantern://projects/${ids.project}#targets=`));
+    assert.match(decodeURIComponent(operationAudit.targetReference ?? ""), /presentation_unit/);
+    assert.equal(operationAudit.status, "SUCCEEDED");
+
+    const externalCandidateId = `it-external-candidate-${suffix}`;
+    await prisma.candidate.create({
+      data: {
+        id: externalCandidateId,
+        ownerUserId: ids.user,
+        projectId: ids.project,
+        taskId: ids.task,
+        kind: CandidateKind.STORYBOARD,
+        title: "外置应用候选",
+        changeSummary: "修改目标分镜对白",
+        targetLabel: "雨夜候车",
+        target: { type: "storyboard_beat", id: ids.storyboardBeat },
+        baseRevision: 5,
+        payload: { mode: "replace", changeSummary: "修改目标分镜对白" },
+        operations: [{
+          type: "update_dialogue",
+          dialogueId: ids.dialogue,
+          content: "外置 Agent 已应用的对白",
+        }],
+      },
+    });
+    const candidateUri = `lantern://candidates/${externalCandidateId}`;
+    const externalCandidate = await invokeExternalCandidateCapability(ids.user, "candidate.get", {
+      candidate: candidateUri,
+    });
+    assert.equal((externalCandidate.data as { status: string }).status, "available");
+    assert.equal(externalCandidate.workingRevision, 5);
+    const candidateApplyInput = {
+      candidate: candidateUri,
+      expectedRevision: 5,
+      idempotencyKey: `candidate-apply-${suffix}`,
+    };
+    const candidateApplied = await invokeExternalCandidateCapability(ids.user, "candidate.apply", candidateApplyInput);
+    assert.equal(candidateApplied.workingRevision, 6);
+    const candidateReplay = await invokeExternalCandidateCapability(ids.user, "candidate.apply", candidateApplyInput);
+    assert.deepEqual(candidateReplay, candidateApplied);
+    assert.equal(await prisma.workingRevision.count({ where: { projectId: ids.project } }), 6);
+    assert.equal((await prisma.candidate.findUniqueOrThrow({ where: { id: externalCandidateId } })).status, CandidateStatus.APPLIED);
+    assert.equal(
+      ((await prisma.workingRevision.findUniqueOrThrow({
+        where: { projectId_revision: { projectId: ids.project, revision: 6 } },
+      })).document as unknown as { dialogues: Array<{ id: string; content: string }> }).dialogues.find((dialogue) => dialogue.id === ids.dialogue)?.content,
+      "外置 Agent 已应用的对白",
+    );
+    await assert.rejects(
+      () => invokeExternalCandidateCapability(`foreign-${ids.user}`, "candidate.get", { candidate: candidateUri }),
+      /不存在或不属于当前用户/,
+    );
   } finally {
     if (copiedComicId) {
       const copiedProjects = await prisma.project.findMany({ where: { chapter: { comicId: copiedComicId } }, select: { id: true } });

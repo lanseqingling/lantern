@@ -9,6 +9,8 @@ type ExternalMutationInput<T> = {
   capabilityVersion: number;
   idempotencyKey: string;
   input: unknown;
+  targetReference?: string;
+  resultTargetReference?: (result: T) => string | undefined;
   operation: () => Promise<T>;
 };
 
@@ -62,7 +64,7 @@ export async function executeIdempotentExternalMutation<T>(input: ExternalMutati
           capabilityVersion: input.capabilityVersion,
           idempotencyKey: input.idempotencyKey,
           inputHash: fingerprint,
-          targetReference: targetReference(input.input),
+          targetReference: input.targetReference ?? targetReference(input.input),
         },
       });
       created = true;
@@ -106,12 +108,13 @@ export async function executeIdempotentExternalMutation<T>(input: ExternalMutati
   try {
     const result = persistedJson(await input.operation());
     const resultRecord = result as unknown as { resource?: { uri?: string } };
+    const completedTargetReference = input.resultTargetReference?.(result);
     await prisma.externalAgentOperation.update({
       where: { id: operation.id },
       data: {
         status: ExternalOperationStatus.SUCCEEDED,
         result: result as unknown as Prisma.InputJsonValue,
-        targetReference: resultRecord.resource?.uri ?? operation.targetReference,
+        targetReference: completedTargetReference ?? resultRecord.resource?.uri ?? operation.targetReference,
         completedAt: new Date(),
       },
     });

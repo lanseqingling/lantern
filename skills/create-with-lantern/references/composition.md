@@ -28,9 +28,9 @@ Use structure for exact targets and parameters. Use the rendered image for visua
 
 ## Keep the observation bounded and current
 
-Use one PresentationUnit for an ordinary page or rolling segment. Request two units from `lantern_context_get` only when the creator is explicitly comparing an adjacent visible pair, then pass the returned `presentation_unit` handles to `lantern_composition_inspect`. Every result is fixed to one Working Revision; after a mutation or stale-handle error, read context and composition again.
+Use one PresentationUnit for an ordinary page or rolling segment. Pass the current Chapter or Project URI as `scope`, and locate the page by its reading position or accurate name instead of asking for an internal ID. Request two units only when the creator is explicitly comparing an adjacent visible pair, then pass the returned `presentation_unit` handles to `lantern_composition_inspect`. Every result is fixed to one Working Revision; after a mutation or stale-handle error, read context and composition again.
 
-The opaque handles returned for units, frames, and elements are the only valid targets for later LCD capabilities. Never reconstruct them from IDs shown in the structure projection.
+The returned labels and aliases help map the creator's wording to one bounded object. The opaque handles returned for units, frames, and elements are the only valid targets for later LCD capabilities. Never reconstruct them from IDs shown in the structure projection.
 
 ## Interpret geometry, crop, and order
 

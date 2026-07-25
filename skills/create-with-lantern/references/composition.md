@@ -30,12 +30,13 @@ Use structure for exact targets and parameters. Use the rendered image for visua
 
 Use one PresentationUnit for an ordinary page or rolling segment. Pass the current Chapter or Project URI as `scope`, and locate the page by its reading position or accurate name instead of asking for an internal ID. Request two units only when the creator is explicitly comparing an adjacent visible pair, then pass the returned `presentation_unit` handles to `lantern_composition_inspect`. Every result is fixed to one Working Revision; after a mutation or stale-handle error, read context and composition again.
 
-The returned labels and aliases help map the creator's wording to one bounded object. The opaque handles returned for units, frames, and elements are the only valid targets for later LCD capabilities. Never reconstruct them from IDs shown in the structure projection.
+The returned labels and aliases help map the creator's wording to one bounded object. The opaque handles returned for units, PageSurfaces, frames, and elements are the only valid targets for later LCD capabilities. Never reconstruct them from IDs shown in the structure projection.
 
 ## Interpret geometry, crop, and order
 
 - A PresentationUnit owns the complete composition canvas. A PageSurface is a physical output region within it; a spread remains one PresentationUnit.
 - Frame geometry is expressed in unit space. Frame-layer element transforms are local to their Frame and are projected into resolved unit-space geometry for observation.
+- Each projected element exposes its stored `transform`, its `coordinateSpace`, and its resolved `geometry`. Edit `transform` in the declared coordinate space; use `geometry` only to judge the final unit-space result.
 - Unit overlays compose outside frame clipping. A frame-anchored overlay follows its Frame but can remain visible beyond the frame border.
 - Image crop is part of the placed image element, not a mutation of its fixed Asset Version.
 - Moving or resizing a Frame is not the same action as changing an element's local transform or image crop. Never substitute one operation for another.

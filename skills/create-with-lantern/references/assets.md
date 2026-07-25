@@ -2,6 +2,8 @@
 
 Load this reference when the creator wants to add an image to an Asset, choose its primary image, rename or archive an image slot, or manage another form of the same character, scene, or prop.
 
+The same binary transport is used for a Comic cover and Comic visual-style images, but those are dedicated comic-level resources. Use their dedicated capabilities and keep the Comic URI as the target; do not represent either one as a generic Asset card.
+
 ## Keep identity, form, slot, and version distinct
 
 - The root Asset is the reusable identity and confirmed description.

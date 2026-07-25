@@ -39,6 +39,7 @@ export type EditorCapabilityDescriptor = {
   scope: CapabilityScope;
   humanEntry: CapabilityHumanEntry;
   agentAccess: CapabilityAgentAccess;
+  externalAgentAccess?: CapabilityAgentAccess;
   risk: CapabilityRisk;
   preconditions: string[];
   outputCommandTypes: WorkspaceCommand["type"][];
@@ -49,7 +50,7 @@ export type EditorCapabilityDescriptor = {
 export type EditorCapabilityContext = {
   fixture: Pick<WorkbenchFixture, "working" | "storyboardBeats">;
   createId: (prefix: string) => string;
-  actor: "human" | "agent";
+  actor: "human" | "agent" | "external_agent";
 };
 
 export const verticalSegmentAspectRatios = ["4:3", "1:1", "3:4", "2:3", "9:16", "9:20"] as const;
@@ -146,6 +147,23 @@ const shiftedOverlayElement = (element: OverlayElement, x: number, y = 0): Overl
 };
 const surfaceAt = (unit: PresentationUnit, point: { x: number; y: number }) => unit.surfaces.find((surface) => point.x >= surface.geometry.x && point.x <= surface.geometry.x + surface.geometry.width && point.y >= surface.geometry.y && point.y <= surface.geometry.y + surface.geometry.height) ?? unit.surfaces[0];
 
+function assertFrameGeometry(
+  unit: PresentationUnit,
+  geometry: Geometry,
+  options: { frameId?: string; surfaceScope?: Frame["surfaceScope"]; allowOverlap?: boolean } = {},
+) {
+  const bounds = { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+  const fitsSurface = options.surfaceScope === "unit"
+    ? containsGeometry(bounds, geometry)
+    : unit.surfaces.some((surface) => containsGeometry(surface.geometry, geometry));
+  if (!fitsSurface) throw new Error(options.surfaceScope === "unit" ? "画格必须完整位于展示单元内" : "画格必须完整位于一个纸面内");
+  const gutter = unit.layoutPolicy.gutter ?? 12;
+  if (!options.allowOverlap && unit.layoutPolicy.frameOverlap !== "allow"
+    && unit.frames.some((frame) => frame.id !== options.frameId && overlaps(geometry, frame.geometry, gutter))) {
+    throw new Error("画格与现有画格重叠，请调整几何或明确允许叠格");
+  }
+}
+
 function availableFrameGeometry(unit: PresentationUnit, preferred: { x: number; y: number }, size?: { width: number; height: number }) {
   const surface = unit.surfaces.find((candidate) => preferred.x >= candidate.geometry.x && preferred.x <= candidate.geometry.x + candidate.geometry.width && preferred.y >= candidate.geometry.y && preferred.y <= candidate.geometry.y + candidate.geometry.height) ?? unit.surfaces[0];
   if (!surface) throw new Error("页面没有可放置画格的纸面");
@@ -188,11 +206,11 @@ function readingIndexForGeometry(context: EditorCapabilityContext, unit: Present
   return centers.findIndex((entry) => entry.id === next.id);
 }
 
-function createEmptyFrame(context: EditorCapabilityContext, unit: PresentationUnit, geometry: Geometry): Frame {
+function createEmptyFrame(context: EditorCapabilityContext, unit: PresentationUnit, geometry: Geometry, name?: string): Frame {
   const frameId = context.createId("frame");
   return {
     id: frameId,
-    name: "新画格",
+    name: name?.trim() || "新画格",
     geometry,
     zIndex: Math.max(0, ...unit.frames.map((frame) => frame.zIndex)) + 1,
     storyRefs: [],
@@ -220,23 +238,48 @@ function dialogueReferenceCount(context: EditorCapabilityContext, dialogueId: st
 
 const createFrameCapability = defineCapability({
   id: "create_frame",
-  version: 1,
-  inputSchema: z.strictObject({ unitId: z.string().min(1), position: z.strictObject({ x: z.number(), y: z.number() }) }),
+  version: 2,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    position: z.strictObject({ x: z.number(), y: z.number() }).optional(),
+    geometry: geometrySchema.optional(),
+    name: z.string().trim().min(1).max(80).optional(),
+    readingIndex: z.number().int().nonnegative().optional(),
+    allowOverlap: z.boolean().optional(),
+  }).superRefine((input, context) => {
+    if (!input.position && !input.geometry) {
+      context.addIssue({ code: "custom", message: "position 与 geometry 至少需要提供一个。" });
+    }
+  }),
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["presentation_unit_exists", "frame_fits_available_surface", "resulting_document_is_valid"],
-  outputCommandTypes: ["add_frame"],
+  outputCommandTypes: ["set_frame_overlap_policy", "add_frame"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
     const unit = context.fixture.working.document.units.find((candidate) => candidate.id === input.unitId);
     if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
     assertPageRoleAllows(unit, "frame");
-    const geometry = availableFrameGeometry(unit, input.position);
-    const frame = createEmptyFrame(context, unit, geometry);
-    return [{ type: "add_frame", unitId: unit.id, frame, readingIndex: readingIndexForGeometry(context, unit, geometry) }];
+    const geometry = input.geometry ?? availableFrameGeometry(unit, input.position!);
+    if (input.geometry) {
+      assertFrameGeometry(unit, geometry, { allowOverlap: input.allowOverlap });
+    }
+    const frame = createEmptyFrame(context, unit, geometry, input.name);
+    return [
+      ...(input.allowOverlap && unit.layoutPolicy.frameOverlap !== "allow"
+        ? [{ type: "set_frame_overlap_policy" as const, unitId: unit.id, frameOverlap: "allow" as const }]
+        : []),
+      {
+        type: "add_frame",
+        unitId: unit.id,
+        frame,
+        readingIndex: input.readingIndex ?? readingIndexForGeometry(context, unit, geometry),
+      },
+    ];
   },
 });
 
@@ -247,6 +290,7 @@ const duplicateFrameCapability = defineCapability({
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["frame_exists", "duplicate_fits_available_surface", "resulting_document_is_valid"],
   outputCommandTypes: ["add_dialogue", "add_frame", "create_frame_storyboard_beat"],
@@ -293,6 +337,7 @@ const deleteFrameCapability = defineCapability({
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "high",
   preconditions: ["frame_exists", "storyboard_beat_is_preserved_as_unplaced"],
   outputCommandTypes: ["remove_frame", "remove_dialogue"],
@@ -321,11 +366,15 @@ const frameImageInputSchema = z.strictObject({
 
 const placeFrameImageCapability = defineCapability({
   id: "place_frame_image",
-  version: 1,
-  inputSchema: frameImageInputSchema,
+  version: 2,
+  inputSchema: frameImageInputSchema.extend({
+    transform: geometrySchema.optional(),
+    crop: normalizedRectSchema.optional(),
+  }),
   scope: "frame",
   humanEntry: "available",
   agentAccess: "preview",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["frame_exists", "frame_has_no_primary_art", "asset_version_is_fixed"],
   outputCommandTypes: ["declare_resource", "add_frame_layer", "add_layer_element"],
@@ -345,7 +394,15 @@ const placeFrameImageCapability = defineCapability({
       artLayer = { id: context.createId("art-layer"), kind: "art", name: "画面", zIndex: 10, visible: true, overflow: "clip", elements: [] };
       commands.push({ type: "add_frame_layer", unitId: input.unitId, frameId: input.frameId, layer: artLayer });
     }
-    const element: ArtElement = { id: context.createId("image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId, transform: { x: 0, y: 0, width: 1, height: 1 }, crop: { x: 0, y: 0, width: 1, height: 1 }, name: "格内主图" };
+    const element: ArtElement = {
+      id: context.createId("image"),
+      kind: "image",
+      assetId: input.assetId,
+      assetVersionId: input.assetVersionId,
+      transform: input.transform ?? { x: 0, y: 0, width: 1, height: 1 },
+      crop: input.crop ?? { x: 0, y: 0, width: 1, height: 1 },
+      name: "格内主图",
+    };
     commands.push({ type: "add_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: artLayer.id, element });
     return commands;
   },
@@ -380,6 +437,50 @@ const replaceFrameImageCapability = defineCapability({
   },
 });
 
+const replaceImageCapability = defineCapability({
+  id: "replace_image",
+  version: 1,
+  inputSchema: frameImageInputSchema.extend({
+    frameId: z.string().min(1).optional(),
+    layerId: z.string().min(1),
+    elementId: z.string().min(1),
+  }),
+  scope: "element",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  externalAgentAccess: "execute",
+  risk: "low",
+  preconditions: ["art_element_exists", "asset_version_is_fixed"],
+  outputCommandTypes: ["declare_resource", "remove_layer_element", "add_layer_element", "remove_overlay_element", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { element } = findLocatedElement(context, input);
+    if (element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
+    const commands: WorkspaceCommand[] = [];
+    if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) {
+      commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
+    }
+    const replacement: ArtElement = {
+      ...structuredClone(element),
+      assetId: input.assetId,
+      assetVersionId: input.assetVersionId,
+    };
+    if (input.frameId) {
+      commands.push(
+        { type: "remove_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, elementId: input.elementId },
+        { type: "add_layer_element", unitId: input.unitId, frameId: input.frameId, layerId: input.layerId, element: replacement },
+      );
+    } else {
+      commands.push(
+        { type: "remove_overlay_element", unitId: input.unitId, layerId: input.layerId, elementId: input.elementId },
+        { type: "add_overlay_element", unitId: input.unitId, layerId: input.layerId, element: replacement },
+      );
+    }
+    return commands;
+  },
+});
+
 const removeFrameImageCapability = defineCapability({
   id: "remove_frame_image",
   version: 1,
@@ -387,6 +488,7 @@ const removeFrameImageCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["art_element_exists"],
   outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_overlay_layer"],
@@ -446,19 +548,27 @@ const createDialogueBalloonCapability = defineCapability({
 
 const createPageImageCapability = defineCapability({
   id: "create_page_image",
-  version: 1,
+  version: 3,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
-    position: z.strictObject({ x: z.number(), y: z.number() }),
+    position: z.strictObject({ x: z.number(), y: z.number() }).optional(),
+    geometry: geometrySchema.optional(),
+    surfaceId: z.string().min(1).optional(),
     assetId: z.string().min(1),
     assetVersionId: z.string().min(1),
     mediaType: z.string().startsWith("image/"),
     width: z.number().positive().optional(),
     height: z.number().positive().optional(),
+    crop: normalizedRectSchema.optional(),
+  }).superRefine((input, context) => {
+    if (!input.position && !input.geometry) {
+      context.addIssue({ code: "custom", message: "position 与 geometry 至少需要提供一个。" });
+    }
   }),
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["presentation_unit_exists", "asset_version_is_fixed", "resulting_document_is_valid"],
   outputCommandTypes: ["declare_resource", "add_overlay_layer", "add_overlay_element"],
@@ -467,8 +577,17 @@ const createPageImageCapability = defineCapability({
   execute(input, context) {
     const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
     if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
-    const surface = surfaceAt(unit, input.position);
+    const targetPoint = input.position ?? {
+      x: input.geometry!.x + input.geometry!.width / 2,
+      y: input.geometry!.y + input.geometry!.height / 2,
+    };
+    const surface = input.surfaceId
+      ? unit.surfaces.find((candidate) => candidate.id === input.surfaceId)
+      : surfaceAt(unit, targetPoint);
     if (!surface) throw new Error("页面没有可放置图片的纸面");
+    if (input.geometry && !containsGeometry(surface.geometry, input.geometry)) {
+      throw new Error("纸面图片必须完整位于目标纸面内");
+    }
     const overlay = overlayLayerFor(context, unit, { type: "unit" }, "page_content", "纸面内容", surface.id);
     const elementWidth = Math.min(surface.geometry.width * .42, Math.max(120, surface.geometry.width * .3));
     const sourceRatio = input.width && input.height ? input.height / input.width : .75;
@@ -478,8 +597,10 @@ const createPageImageCapability = defineCapability({
       id: context.createId("page-image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId,
       transform: coverImage
         ? { x: surface.geometry.x, y: surface.geometry.y, width: surface.geometry.width, height: surface.geometry.height }
-        : { x: clamp(input.position.x - elementWidth / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - elementWidth), y: clamp(input.position.y - elementHeight / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - elementHeight), width: elementWidth, height: elementHeight },
-      crop: { x: 0, y: 0, width: 1, height: 1 }, name: "纸面图片",
+        : input.geometry
+          ? input.geometry
+          : { x: clamp(targetPoint.x - elementWidth / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - elementWidth), y: clamp(targetPoint.y - elementHeight / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - elementHeight), width: elementWidth, height: elementHeight },
+      crop: input.crop ?? { x: 0, y: 0, width: 1, height: 1 }, name: "纸面图片",
     };
     const commands: WorkspaceCommand[] = [];
     if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) {
@@ -740,6 +861,7 @@ const promoteElementToOverlayCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["frame_element_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["remove_layer_element", "add_overlay_layer", "add_overlay_element"],
@@ -763,6 +885,7 @@ const convertElementToPageCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["frame_breakout_or_cross_surface_element_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"],
@@ -868,6 +991,7 @@ const reorderOverlayElementCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["overlay_element_exists"],
   outputCommandTypes: ["reorder_overlay_layer", "remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"],
@@ -1027,6 +1151,7 @@ const setArtCropCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["art_element_exists", "crop_is_normalized"],
   outputCommandTypes: ["set_art_crop"],
@@ -1055,6 +1180,7 @@ const moveFrameCapability = defineCapability({
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["frame_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["move_frame"],
@@ -1073,6 +1199,7 @@ const setFrameOverlapPolicyCapability = defineCapability({
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["presentation_unit_exists", "forbid_requires_non_overlapping_frames"],
   outputCommandTypes: ["set_frame_overlap_policy"],
@@ -1095,6 +1222,7 @@ const reorderFrameCapability = defineCapability({
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["frame_exists"],
   outputCommandTypes: ["reorder_frame"],
@@ -1106,25 +1234,56 @@ const reorderFrameCapability = defineCapability({
   },
 });
 
-const resizeFrameCapability = defineCapability({
-  id: "resize_frame",
+const reorderFrameReadingCapability = defineCapability({
+  id: "reorder_frame_reading",
   version: 1,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
     frameId: z.string().min(1),
-    geometry: geometrySchema,
+    readingIndex: z.number().int().nonnegative(),
   }),
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
-  preconditions: ["frame_exists", "resulting_document_is_valid"],
-  outputCommandTypes: ["resize_frame"],
+  preconditions: ["frame_exists"],
+  outputCommandTypes: ["reorder_frame_reading"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
     findFrame(context, input.unitId, input.frameId);
-    return [{ type: "resize_frame", ...input }];
+    return [{ type: "reorder_frame_reading", ...input }];
+  },
+});
+
+const resizeFrameCapability = defineCapability({
+  id: "resize_frame",
+  version: 2,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    frameId: z.string().min(1),
+    geometry: geometrySchema,
+    allowOverlap: z.boolean().optional(),
+  }),
+  scope: "frame",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  externalAgentAccess: "execute",
+  risk: "low",
+  preconditions: ["frame_exists", "resulting_document_is_valid"],
+  outputCommandTypes: ["set_frame_overlap_policy", "resize_frame"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, frame } = findFrame(context, input.unitId, input.frameId);
+    assertFrameGeometry(unit, input.geometry, { frameId: frame.id, surfaceScope: frame.surfaceScope, allowOverlap: input.allowOverlap });
+    return [
+      ...(input.allowOverlap && unit.layoutPolicy.frameOverlap !== "allow"
+        ? [{ type: "set_frame_overlap_policy" as const, unitId: unit.id, frameOverlap: "allow" as const }]
+        : []),
+      { type: "resize_frame", unitId: input.unitId, frameId: input.frameId, geometry: input.geometry },
+    ];
   },
 });
 
@@ -1136,23 +1295,26 @@ const editableFrameShapeSchema = z.discriminatedUnion("kind", [
 
 const reshapeFrameCapability = defineCapability({
   id: "reshape_frame",
-  version: 1,
+  version: 2,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
     frameId: z.string().min(1),
     geometry: geometrySchema,
     shape: editableFrameShapeSchema,
+    allowOverlap: z.boolean().optional(),
   }),
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["frame_exists", "shape_is_axis_locked_quadrilateral", "resulting_document_is_valid"],
-  outputCommandTypes: ["resize_frame", "set_frame_style"],
+  outputCommandTypes: ["set_frame_overlap_policy", "resize_frame", "set_frame_style"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    findFrame(context, input.unitId, input.frameId);
+    const { unit, frame } = findFrame(context, input.unitId, input.frameId);
+    assertFrameGeometry(unit, input.geometry, { frameId: frame.id, surfaceScope: frame.surfaceScope, allowOverlap: input.allowOverlap });
     if (input.shape.kind === "polygon") {
       const crossProducts = input.shape.points.map((point, index, points) => {
         const next = points[(index + 1) % points.length];
@@ -1169,6 +1331,9 @@ const reshapeFrameCapability = defineCapability({
       if (area < .08) throw new Error("画格角度过大，请保留足够的可见区域");
     }
     return [
+      ...(input.allowOverlap && unit.layoutPolicy.frameOverlap !== "allow"
+        ? [{ type: "set_frame_overlap_policy" as const, unitId: unit.id, frameOverlap: "allow" as const }]
+        : []),
       { type: "resize_frame", unitId: input.unitId, frameId: input.frameId, geometry: input.geometry },
       { type: "set_frame_style", unitId: input.unitId, frameId: input.frameId, shape: input.shape },
     ];
@@ -1186,6 +1351,7 @@ const updateFrameBorderCapability = defineCapability({
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["frame_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["set_frame_style"],
@@ -1209,6 +1375,7 @@ const updateFrameBleedCapability = defineCapability({
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["frame_exists", "surface_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["resize_frame", "set_frame_style"],
@@ -1284,6 +1451,7 @@ const setElementTransformCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["frame_element_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["set_element_transform"],
@@ -1430,6 +1598,7 @@ const mergePagesToSpreadCapability = defineCapability({
   scope: "chapter",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "high",
   preconditions: ["adjacent_single_pages_exist", "page_geometry_and_layout_match"],
   outputCommandTypes: ["add_presentation_unit", "remove_presentation_unit"],
@@ -1529,7 +1698,7 @@ function splitCompositeCommands(context: EditorCapabilityContext, unit: Presenta
 }
 
 const splitSpreadToPagesCapability = defineCapability({
-  id: "split_spread_to_pages", version: 1, inputSchema: z.strictObject({ unitId: z.string().min(1) }), scope: "chapter", humanEntry: "available", agentAccess: "disabled", risk: "high",
+  id: "split_spread_to_pages", version: 1, inputSchema: z.strictObject({ unitId: z.string().min(1) }), scope: "chapter", humanEntry: "available", agentAccess: "disabled", externalAgentAccess: "execute", risk: "high",
   preconditions: ["spread_exists", "spread_contains_no_cross_surface_objects"], outputCommandTypes: ["add_presentation_unit", "remove_presentation_unit"], previewPolicy: "inline", undoPolicy: "atomic",
   execute(input, context) { const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId); if (!unit || unit.kind !== "spread") throw new Error("目标不是真正双页"); return splitCompositeCommands(context, unit); },
 });
@@ -1634,10 +1803,12 @@ const createPageCapability = defineCapability({
     relativeToUnitId: z.string().min(1).optional(),
     side: z.enum(["before", "after"]).optional(),
     pageRole: z.enum(["story", "cover", "interlude"]).optional(),
+    name: z.string().trim().max(80).optional(),
   }).refine((input) => input.pageRole === "cover" || Boolean(input.relativeToUnitId) === Boolean(input.side), "relativeToUnitId and side must be provided together"),
   scope: "chapter",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["working_document_exists"],
   outputCommandTypes: ["add_presentation_unit"],
@@ -1667,6 +1838,7 @@ const createPageCapability = defineCapability({
     const id = context.createId(kind === "four_panel_unit" ? "four-panel-unit" : "page");
     const unit: PresentationUnit = {
       id,
+      ...(input.name ? { name: input.name } : {}),
       kind,
       pageRole,
       canvas,
@@ -1731,6 +1903,7 @@ const updatePresentationUnitCapability = defineCapability({
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["presentation_unit_exists", "vertical_resize_preserves_frames"],
   outputCommandTypes: ["set_presentation_unit_name", "resize_vertical_segment"],
@@ -1841,6 +2014,7 @@ const duplicatePresentationUnitCapability = defineCapability({
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["presentation_unit_exists", "copied_object_ids_are_remapped", "resulting_document_is_valid"],
   outputCommandTypes: ["add_dialogue", "add_presentation_unit", "create_frame_storyboard_beat"],
@@ -1868,6 +2042,7 @@ const movePresentationUnitCapability = defineCapability({
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["presentation_unit_exists", "adjacent_presentation_unit_exists"],
   outputCommandTypes: ["move_presentation_unit"],
@@ -1886,6 +2061,46 @@ const movePresentationUnitCapability = defineCapability({
   },
 });
 
+const movePresentationUnitToCapability = defineCapability({
+  id: "move_presentation_unit_to",
+  version: 1,
+  inputSchema: z.strictObject({
+    unitId: z.string().min(1),
+    relativeToUnitId: z.string().min(1),
+    side: z.enum(["before", "after"]),
+  }),
+  scope: "chapter",
+  humanEntry: "available",
+  agentAccess: "disabled",
+  externalAgentAccess: "execute",
+  risk: "low",
+  preconditions: ["presentation_units_exist", "cover_stays_first", "resulting_order_changes"],
+  outputCommandTypes: ["move_presentation_unit"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    if (input.unitId === input.relativeToUnitId) throw new Error("页面不能相对自身排序");
+    const sourceIndex = document.reading.unitOrder.indexOf(input.unitId);
+    const targetIndex = document.reading.unitOrder.indexOf(input.relativeToUnitId);
+    if (sourceIndex < 0 || targetIndex < 0) throw new Error("找不到要排序的页面");
+    const source = document.units.find((unit) => unit.id === input.unitId);
+    const target = document.units.find((unit) => unit.id === input.relativeToUnitId);
+    if (!source || !target) throw new Error("找不到要排序的页面");
+    if (source.pageRole === "cover") throw new Error("封面页固定在本话最前");
+    if (target.pageRole === "cover" && input.side === "before") throw new Error("其他页面不能排在封面之前");
+    const finalIndex = sourceIndex < targetIndex
+      ? targetIndex - (input.side === "before" ? 1 : 0)
+      : targetIndex + (input.side === "after" ? 1 : 0);
+    if (finalIndex === sourceIndex) throw new Error("页面已经位于指定位置");
+    const direction = finalIndex < sourceIndex ? "up" as const : "down" as const;
+    return Array.from(
+      { length: Math.abs(finalIndex - sourceIndex) },
+      (): WorkspaceCommand => ({ type: "move_presentation_unit", unitId: source.id, direction }),
+    );
+  },
+});
+
 const deletePresentationUnitCapability = defineCapability({
   id: "delete_presentation_unit",
   version: 1,
@@ -1893,6 +2108,7 @@ const deletePresentationUnitCapability = defineCapability({
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "high",
   preconditions: ["presentation_unit_exists", "chapter_keeps_one_presentation_unit"],
   outputCommandTypes: ["remove_presentation_unit"],
@@ -1935,6 +2151,7 @@ const capabilityRegistry = {
   delete_frame: deleteFrameCapability,
   place_frame_image: placeFrameImageCapability,
   replace_frame_image: replaceFrameImageCapability,
+  replace_image: replaceImageCapability,
   remove_frame_image: removeFrameImageCapability,
   create_dialogue_balloon: createDialogueBalloonCapability,
   create_page_image: createPageImageCapability,
@@ -1957,6 +2174,7 @@ const capabilityRegistry = {
   move_frame: moveFrameCapability,
   set_frame_overlap_policy: setFrameOverlapPolicyCapability,
   reorder_frame: reorderFrameCapability,
+  reorder_frame_reading: reorderFrameReadingCapability,
   resize_frame: resizeFrameCapability,
   reshape_frame: reshapeFrameCapability,
   update_frame_border: updateFrameBorderCapability,
@@ -1981,6 +2199,7 @@ const capabilityRegistry = {
   set_presentation_unit_background: setPresentationUnitBackgroundCapability,
   duplicate_presentation_unit: duplicatePresentationUnitCapability,
   move_presentation_unit: movePresentationUnitCapability,
+  move_presentation_unit_to: movePresentationUnitToCapability,
   delete_presentation_unit: deletePresentationUnitCapability,
   restore_workspace_version: restoreWorkspaceVersionCapability,
 } satisfies Record<string, RegisteredCapability>;
@@ -1994,6 +2213,7 @@ function descriptor(capability: RegisteredCapability): EditorCapabilityDescripto
     scope: capability.scope,
     humanEntry: capability.humanEntry,
     agentAccess: capability.agentAccess,
+    externalAgentAccess: capability.externalAgentAccess,
     risk: capability.risk,
     preconditions: capability.preconditions,
     outputCommandTypes: capability.outputCommandTypes,
@@ -2018,6 +2238,9 @@ export function planEditorCapability(id: EditorCapabilityId, rawInput: unknown, 
   }
   if (context.actor === "agent" && capability.agentAccess === "disabled") {
     throw new Error(`capability is disabled for Agent: ${id}`);
+  }
+  if (context.actor === "external_agent" && capability.externalAgentAccess !== "execute") {
+    throw new Error(`capability is disabled for external Agent: ${id}`);
   }
   const plan = capability.plan(rawInput, context);
   return { capability: descriptor(capability), ...plan };

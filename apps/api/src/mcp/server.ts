@@ -27,7 +27,18 @@ import {
   invokeExternalCandidateCapability,
   listExternalCandidateCapabilities,
 } from "@lantern/agent-runtime/external-candidate-service";
-import { getAgentCapability } from "@lantern/agent-runtime/capability-registry";
+import {
+  invokeExternalPageCapability,
+  listExternalPageCapabilities,
+} from "@lantern/agent-runtime/external-page-service";
+import {
+  invokeExternalCompositionCapability,
+  listExternalCompositionCapabilities,
+} from "@lantern/agent-runtime/external-composition-service";
+import {
+  getAgentCapability,
+  type AgentCapabilityDescriptor,
+} from "@lantern/agent-runtime/capability-registry";
 import { AppError } from "@lantern/server/errors";
 
 const readOnlyAnnotations = {
@@ -37,7 +48,7 @@ const readOnlyAnnotations = {
   openWorldHint: false,
 } as const;
 
-function resourceAnnotations(capability: ReturnType<typeof listExternalResourceCapabilities>[number]) {
+function capabilityAnnotations(capability: AgentCapabilityDescriptor) {
   return {
     readOnlyHint: capability.effect === "observe",
     destructiveHint: capability.confirmation === "explicit",
@@ -168,7 +179,7 @@ export function createLanternMcpServer(ownerUserId: string) {
       description: capability.description,
       inputSchema: capability.inputSchema,
       outputSchema: capability.outputSchema,
-      annotations: resourceAnnotations(capability),
+      annotations: capabilityAnnotations(capability),
     }, async (input) => runTool(() => invokeExternalResourceCapability(ownerUserId, capability.id, input)));
   }
 
@@ -178,8 +189,28 @@ export function createLanternMcpServer(ownerUserId: string) {
       description: capability.description,
       inputSchema: capability.inputSchema,
       outputSchema: capability.outputSchema,
-      annotations: resourceAnnotations(capability),
+      annotations: capabilityAnnotations(capability),
     }, async (input) => runTool(() => invokeExternalCandidateCapability(ownerUserId, capability.id, input)));
+  }
+
+  for (const capability of listExternalPageCapabilities()) {
+    server.registerTool(capabilityToolName(capability.id), {
+      title: capability.id,
+      description: capability.description,
+      inputSchema: capability.inputSchema,
+      outputSchema: capability.outputSchema,
+      annotations: capabilityAnnotations(capability),
+    }, async (input) => runTool(() => invokeExternalPageCapability(ownerUserId, capability.id, input)));
+  }
+
+  for (const capability of listExternalCompositionCapabilities()) {
+    server.registerTool(capabilityToolName(capability.id), {
+      title: capability.id,
+      description: capability.description,
+      inputSchema: capability.inputSchema,
+      outputSchema: capability.outputSchema,
+      annotations: capabilityAnnotations(capability),
+    }, async (input) => runTool(() => invokeExternalCompositionCapability(ownerUserId, capability.id, input)));
   }
 
   return server;

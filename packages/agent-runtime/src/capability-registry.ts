@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { compositionObservationSchema } from "./composition-observation";
 import { candidateCapabilities } from "./candidate-capabilities";
+import { compositionCapabilities } from "./composition-capabilities";
+import { pageCapabilities } from "./page-capabilities";
 import { resourceCapabilities } from "./resource-capabilities";
 import type {
   AgentCapabilityActor,
@@ -62,6 +64,8 @@ export type AgentCapabilityDescriptor = SemanticCapabilityManifest;
 const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   ...resourceCapabilities,
   ...candidateCapabilities,
+  ...pageCapabilities,
+  ...compositionCapabilities,
   {
     id: "context.inspect_images",
     version: 1,
@@ -164,7 +168,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 9;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 13;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });

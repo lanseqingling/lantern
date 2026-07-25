@@ -14,6 +14,7 @@ export const externalTargetHandlePayloadSchema = z.strictObject({
   target: z.strictObject({
     type: z.string().min(1),
     pageId: z.string().min(1).optional(),
+    surfaceId: z.string().min(1).optional(),
     elementId: z.string().min(1).optional(),
     frameId: z.string().min(1).optional(),
     storyboardBeatId: z.string().min(1).optional(),

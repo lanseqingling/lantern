@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
 import {
   normalizeStoryboardBeats,
   validateComicDocument,
@@ -15,18 +14,14 @@ import {
   assertAgentCapabilityAccess,
   type AgentCapabilityDescriptor,
 } from "./capability-registry";
+import {
+  externalDirectChangeEnvelopeSchema,
+  type ExternalDirectChangeEnvelope,
+} from "./external-edit-contract";
 import { resolveExternalTargetHandles, type ExternalTargetHandlePayload } from "./external-target-handles";
-import { idempotencyKeySchema } from "./resource-capabilities";
 
-export const externalDirectChangeEnvelopeSchema = z.strictObject({
-  scope: z.string().trim().min(1).max(2048),
-  targetHandles: z.array(z.string().min(1).max(4096)).min(1).max(32),
-  expectedRevision: z.number().int().positive(),
-  idempotencyKey: idempotencyKeySchema,
-  confirmedTargetHandles: z.array(z.string().min(1).max(4096)).min(1).max(32).optional(),
-});
-
-export type ExternalDirectChangeEnvelope = z.infer<typeof externalDirectChangeEnvelopeSchema>;
+export { externalDirectChangeEnvelopeSchema } from "./external-edit-contract";
+export type { ExternalDirectChangeEnvelope } from "./external-edit-contract";
 
 export type ExternalDirectChangePlan = {
   commands: WorkspaceCommand[];
@@ -35,6 +30,7 @@ export type ExternalDirectChangePlan = {
 
 export type ExternalDirectChangeContext = {
   ownerUserId: string;
+  comicId: string;
   projectId: string;
   chapterId: string;
   baseRevision: number;
@@ -170,6 +166,7 @@ export async function executeExternalDirectChange(input: {
       );
       const planned = await input.plan({
         ownerUserId: input.ownerUserId,
+        comicId: scope.comicId!,
         projectId: scope.projectId!,
         chapterId: scope.chapterId!,
         baseRevision: resolved.workingRevision,
@@ -198,7 +195,7 @@ export async function executeExternalDirectChange(input: {
         baseRevision: resolved.workingRevision,
         workingRevision: result.working.revision,
         ...(planned.data !== undefined ? { data: planned.data } : {}),
-        nextActions: ["Read fresh Lantern context before making another page edit."],
+        nextActions: ["Read fresh Lantern context before making another revision-bound edit."],
       };
     },
   });

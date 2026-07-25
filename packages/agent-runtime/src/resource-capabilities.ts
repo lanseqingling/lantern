@@ -106,6 +106,33 @@ const assetUploadAttachSchema = z.strictObject({
   idempotencyKey: idempotencyKeySchema,
 });
 
+const comicImageUploadPrepareSchema = z.strictObject({
+  comic: externalResourceReferenceSchema,
+  filename: z.string().trim().min(1).max(255),
+  label: z.string().trim().min(1).max(80).optional(),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+const comicImageUploadAttachSchema = z.strictObject({
+  comic: externalResourceReferenceSchema,
+  uploadId: z.string().trim().min(1).max(128),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+const comicVisualStyleImageReferenceSchema = z.strictObject({
+  comic: externalResourceReferenceSchema,
+  imageId: z.string().trim().min(1).max(128),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+const comicVisualStyleImageRenameSchema = comicVisualStyleImageReferenceSchema.extend({
+  label: z.string().trim().min(1).max(80),
+});
+
+const comicVisualStyleImageArchiveSchema = comicVisualStyleImageReferenceSchema.extend({
+  confirmed: z.literal(true),
+});
+
 const assetImageReferenceSchema = z.strictObject({
   asset: externalResourceReferenceSchema,
   imageId: z.string().trim().min(1).max(128),
@@ -189,6 +216,96 @@ export const resourceCapabilities = [
     effect: "resource_mutation",
     risk: "high",
     domainCapabilities: ["comic.archive"],
+    confirmation: "explicit",
+  }),
+  resourceCapability({
+    id: "comic.cover.get",
+    description: "读取一部明确漫画的漫画级封面；它不同于一话中的封面页。",
+    inputSchema: comicReferenceSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "observe",
+    risk: "low",
+    domainCapabilities: ["comic.cover.get"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.cover.image.upload_prepare",
+    description: "为漫画级封面创建短时效 loopback 图片上传位置；返回 PUT 地址和一次性授权。",
+    inputSchema: comicImageUploadPrepareSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "resource_mutation",
+    risk: "low",
+    domainCapabilities: ["comic.cover.image.upload_prepare"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.cover.image.attach",
+    description: "把已上传图片登记为不可变版本并设为漫画级封面。",
+    inputSchema: comicImageUploadAttachSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "resource_mutation",
+    risk: "low",
+    domainCapabilities: ["comic.cover.image.attach"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.visual_style.get",
+    description: "读取一部明确漫画的全局视觉风格图片基线；它不是普通视觉资产或参考资料卡。",
+    inputSchema: comicReferenceSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "observe",
+    risk: "low",
+    domainCapabilities: ["comic.visual_style.get"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.visual_style.image.upload_prepare",
+    description: "为漫画全局视觉风格创建短时效 loopback 图片上传位置。",
+    inputSchema: comicImageUploadPrepareSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "resource_mutation",
+    risk: "low",
+    domainCapabilities: ["comic.visual_style.image.upload_prepare"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.visual_style.image.attach",
+    description: "把已上传图片登记为漫画全局视觉风格的不可变图片版本。",
+    inputSchema: comicImageUploadAttachSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "resource_mutation",
+    risk: "low",
+    domainCapabilities: ["comic.visual_style.image.attach"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.visual_style.image.set_primary",
+    description: "把一个明确的视觉风格图片设为漫画全局主风格图。",
+    inputSchema: comicVisualStyleImageReferenceSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "resource_mutation",
+    risk: "low",
+    domainCapabilities: ["comic.visual_style.image.set_primary"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.visual_style.image.rename",
+    description: "修改一个漫画全局视觉风格图片的显示名称。",
+    inputSchema: comicVisualStyleImageRenameSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "resource_mutation",
+    risk: "low",
+    domainCapabilities: ["comic.visual_style.image.rename"],
+    confirmation: "none",
+  }),
+  resourceCapability({
+    id: "comic.visual_style.image.archive",
+    description: "归档一个明确的漫画全局视觉风格图片。该动作要求显式确认。",
+    inputSchema: comicVisualStyleImageArchiveSchema,
+    target: { required: true, types: ["comic"], min: 1, max: 1 },
+    effect: "resource_mutation",
+    risk: "high",
+    domainCapabilities: ["comic.visual_style.image.archive"],
     confirmation: "explicit",
   }),
   resourceCapability({

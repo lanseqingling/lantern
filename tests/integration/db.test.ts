@@ -24,6 +24,8 @@ import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agen
 import { getExternalAgentContext, inspectExternalAgentComposition, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
 import { invokeExternalCandidateCapability } from "@lantern/agent-runtime/external-candidate-service";
 import { executeExternalDirectChange } from "@lantern/agent-runtime/external-edit-service";
+import { invokeExternalPageCapability } from "@lantern/agent-runtime/external-page-service";
+import { invokeExternalCompositionCapability } from "@lantern/agent-runtime/external-composition-service";
 import { resolveExternalAgentScope } from "@lantern/agent-runtime/external-scope-service";
 import { SEMANTIC_CAPABILITY_CATALOG_REVISION, type AgentCapabilityDescriptor } from "@lantern/agent-runtime/capability-registry";
 import { getConfig } from "@lantern/server/config";
@@ -102,7 +104,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       kind: AssetKind.CHARACTER,
       name: "测试角色",
       description: "必须在布局和对白修改后继续保留",
-      versions: { create: { id: ids.assetV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: assetObject.objectKey } },
+      versions: { create: { id: ids.assetV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: assetObject.objectKey, contentType: assetObject.contentType, width: assetObject.width, height: assetObject.height } },
     } });
     await prisma.assetImage.create({ data: { id: ids.assetImage, assetId: ids.asset, assetVersionId: ids.assetV1, label: "主图", sortIndex: 0 } });
     await prisma.asset.create({ data: {
@@ -115,7 +117,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       variantOfAssetId: ids.asset,
       variantLabel: "回忆时期",
       variantSortIndex: 10,
-      versions: { create: { id: ids.assetVariantV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: variantObject.objectKey } },
+      versions: { create: { id: ids.assetVariantV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: variantObject.objectKey, contentType: variantObject.contentType, width: variantObject.width, height: variantObject.height } },
     } });
     await prisma.assetImage.create({ data: { id: ids.assetVariantImage, assetId: ids.assetVariant, assetVersionId: ids.assetVariantV1, label: "主图", sortIndex: 0 } });
     await prisma.asset.create({ data: {
@@ -125,7 +127,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       kind: AssetKind.STYLE,
       name: "视觉风格",
       description: "克制的蓝绿色水彩与电影感夜景。",
-      versions: { create: { id: ids.visualStyleV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: styleObject.objectKey } },
+      versions: { create: { id: ids.visualStyleV1, version: 1, origin: AssetVersionOrigin.UPLOAD, objectKey: styleObject.objectKey, contentType: styleObject.contentType, width: styleObject.width, height: styleObject.height } },
     } });
     await prisma.assetImage.create({ data: { id: ids.visualStyleImage, assetId: ids.visualStyleAsset, assetVersionId: ids.visualStyleV1, label: "雨夜色彩参考", sortIndex: 0 } });
 
@@ -159,7 +161,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(copiedRoot.images.length, 1);
     assert.equal(copiedVariant.images.length, 1);
     const assetObjectV2 = await putImage(png, `integration/${suffix}/asset-v2`);
-    await prisma.assetVersion.create({ data: { id: ids.assetV2, assetId: ids.asset, version: 2, origin: AssetVersionOrigin.UPLOAD, objectKey: assetObjectV2.objectKey } });
+    await prisma.assetVersion.create({ data: { id: ids.assetV2, assetId: ids.asset, version: 2, origin: AssetVersionOrigin.UPLOAD, objectKey: assetObjectV2.objectKey, contentType: assetObjectV2.contentType, width: assetObjectV2.width, height: assetObjectV2.height } });
     await prisma.assetImage.create({ data: { id: ids.assetImage2, assetId: ids.asset, assetVersionId: ids.assetV2, label: "表情参考", sortIndex: 10 } });
     const reorderedAsset = await setPrimaryAssetImage(ids.user, ids.asset, ids.assetImage2);
     assert.equal(reorderedAsset.root.images[0]?.id, ids.assetImage2);
@@ -287,6 +289,62 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal((archivedVariant.data as { archivedVariantId: string }).archivedVariantId, createdVariantId);
     assert.equal(await prisma.assetVersion.count({ where: { id: attached.versionId, assetId: ids.asset } }), 1);
     assert.equal(await prisma.assetImage.count({ where: { id: attached.imageId } }), 0);
+
+    const preparedComicCover = await invokeExternalResourceCapability(ids.user, "comic.cover.image.upload_prepare", {
+      comic: comicReference,
+      filename: "comic-cover.png",
+      label: "作品封面",
+      idempotencyKey: `comic-cover-prepare-${suffix}`,
+    });
+    const comicCoverTicket = preparedComicCover.data as { uploadId: string; headers: { Authorization: string } };
+    await receiveExternalAssetUpload(comicCoverTicket.uploadId, comicCoverTicket.headers.Authorization, "image/png", png);
+    const attachedComicCover = await invokeExternalResourceCapability(ids.user, "comic.cover.image.attach", {
+      comic: comicReference,
+      uploadId: comicCoverTicket.uploadId,
+      idempotencyKey: `comic-cover-attach-${suffix}`,
+    });
+    assert.match((attachedComicCover.data as { coverUrl: string }).coverUrl, new RegExp(`/v1/comics/${ids.comic}/cover\\?v=`));
+    const comicCover = await invokeExternalResourceCapability(ids.user, "comic.cover.get", { comic: comicReference });
+    assert.equal((comicCover.data as { width: number }).width, 1);
+    assert.equal((comicCover.data as { height: number }).height, 1);
+
+    const preparedStyle = await invokeExternalResourceCapability(ids.user, "comic.visual_style.image.upload_prepare", {
+      comic: comicReference,
+      filename: "global-style.png",
+      label: "全局风格补充",
+      idempotencyKey: `comic-style-prepare-${suffix}`,
+    });
+    const styleTicket = preparedStyle.data as { uploadId: string; headers: { Authorization: string } };
+    await receiveExternalAssetUpload(styleTicket.uploadId, styleTicket.headers.Authorization, "image/png", png);
+    const attachedStyle = await invokeExternalResourceCapability(ids.user, "comic.visual_style.image.attach", {
+      comic: comicReference,
+      uploadId: styleTicket.uploadId,
+      idempotencyKey: `comic-style-attach-${suffix}`,
+    });
+    const styleImage = (attachedStyle.data as { attached: { imageId: string; versionId: string } }).attached;
+    await invokeExternalResourceCapability(ids.user, "comic.visual_style.image.rename", {
+      comic: comicReference,
+      imageId: styleImage.imageId,
+      label: "统一线条与色彩",
+      idempotencyKey: `comic-style-rename-${suffix}`,
+    });
+    const primaryStyle = await invokeExternalResourceCapability(ids.user, "comic.visual_style.image.set_primary", {
+      comic: comicReference,
+      imageId: styleImage.imageId,
+      idempotencyKey: `comic-style-primary-${suffix}`,
+    });
+    assert.equal((primaryStyle.data as { images: Array<{ id: string; isPrimary: boolean }> }).images[0]?.id, styleImage.imageId);
+    await invokeExternalResourceCapability(ids.user, "comic.visual_style.image.archive", {
+      comic: comicReference,
+      imageId: styleImage.imageId,
+      confirmed: true,
+      idempotencyKey: `comic-style-archive-${suffix}`,
+    });
+    assert.equal(await prisma.assetVersion.count({ where: { id: styleImage.versionId } }), 1);
+    assert.equal(await prisma.assetImage.count({ where: { id: styleImage.imageId } }), 0);
+    const dedicatedStyle = await invokeExternalResourceCapability(ids.user, "comic.visual_style.get", { comic: comicReference });
+    assert.deepEqual((dedicatedStyle.data as { images: Array<{ versionId: string }> }).images.map((image) => image.versionId), [ids.visualStyleV1]);
+
     const successfulExternalOperations = await prisma.externalAgentOperation.count({
       where: { ownerUserId: ids.user, status: "SUCCEEDED" },
     });
@@ -836,6 +894,413 @@ test("database candidate apply and revert preserve version heads atomically", as
       () => invokeExternalCandidateCapability(`foreign-${ids.user}`, "candidate.get", { candidate: candidateUri }),
       /不存在或不属于当前用户/,
     );
+
+    const chapterScope = resolvedScope.chapter!.uri;
+    const pageContext = (pages: Array<{ position?: number; physicalPageNumber?: number; name?: string }>) =>
+      getExternalAgentContext(ids.user, {
+        scope: chapterScope,
+        profile: "composition_observation",
+        pages,
+      });
+    const initialPageContext = await pageContext([{ physicalPageNumber: 1 }]);
+    assert.deepEqual(initialPageContext.pageSequence.map((page) => ({
+      readingPosition: page.readingPosition,
+      pageRole: page.pageRole,
+      kind: page.kind,
+      physicalPageNumbers: page.physicalPageNumbers,
+    })), [{
+      readingPosition: 1,
+      pageRole: "story",
+      kind: "single_page",
+      physicalPageNumbers: [1],
+    }]);
+    assert.equal(initialPageContext.pages[0]?.surfaces[0]?.role, "single");
+    assert.equal(initialPageContext.targets.some((target) => target.type === "page_surface"), true);
+    const initialPageHandle = initialPageContext.pages[0]!.handle;
+
+    const createdCover = await invokeExternalPageCapability(ids.user, "page.create", {
+      scope: chapterScope,
+      targetHandles: [initialPageHandle],
+      expectedRevision: 6,
+      idempotencyKey: `page-cover-create-${suffix}`,
+      pageRole: "cover",
+      name: "雨夜封面",
+    });
+    assert.equal(createdCover.workingRevision, 7);
+    const coverContext = await pageContext([{ name: "雨夜封面" }]);
+    assert.equal(coverContext.pages[0]?.pageRole, "cover");
+    assert.equal(coverContext.pages[0]?.readingPosition, 1);
+    assert.deepEqual(coverContext.pages[0]?.physicalPageNumbers, []);
+    assert.deepEqual(coverContext.pageSequence.map((page) => page.pageRole), ["cover", "story"]);
+    assert.deepEqual(coverContext.pageSequence.map((page) => page.physicalPageNumbers), [[], [1]]);
+    const comicWithChapterCover = await invokeExternalResourceCapability(ids.user, "comic.get", { comic: comicReference });
+    assert.equal(
+      (comicWithChapterCover.data as { chapters: Array<{ id: string; coverUrl?: string }> }).chapters.find((chapter) => chapter.id === ids.chapter)?.coverUrl,
+      `/v1/chapters/${ids.chapter}/cover?v=7`,
+    );
+    await assert.rejects(() => invokeExternalPageCapability(ids.user, "page.create", {
+      scope: chapterScope,
+      targetHandles: [coverContext.pages[0]!.handle],
+      expectedRevision: 7,
+      idempotencyKey: `page-cover-duplicate-${suffix}`,
+      pageRole: "cover",
+      name: "第二张封面",
+    }), /已有封面页/);
+    assert.equal((await prisma.workingRevision.findFirstOrThrow({
+      where: { projectId: ids.project },
+      orderBy: { revision: "desc" },
+    })).revision, 7);
+
+    const storyAnchor = await pageContext([{ physicalPageNumber: 1 }]);
+    const storyAnchorTarget = storyAnchor.targets.find((target) => target.type === "presentation_unit");
+    assert.ok(storyAnchorTarget);
+    assert.equal(storyAnchorTarget.label, "确认后的页面");
+    assert.equal(storyAnchorTarget.aliases.includes("第1页"), true);
+    assert.equal(storyAnchorTarget.aliases.includes("第2页"), false);
+    const createdStory = await invokeExternalPageCapability(ids.user, "page.create", {
+      scope: chapterScope,
+      targetHandles: [storyAnchor.pages[0]!.handle],
+      expectedRevision: 7,
+      idempotencyKey: `page-story-create-${suffix}`,
+      pageRole: "story",
+      name: "站台余波",
+      side: "after",
+    });
+    assert.equal(createdStory.workingRevision, 8);
+    const storyContext = await pageContext([{ name: "站台余波" }]);
+    const createdInterlude = await invokeExternalPageCapability(ids.user, "page.create", {
+      scope: chapterScope,
+      targetHandles: [storyContext.pages[0]!.handle],
+      expectedRevision: 8,
+      idempotencyKey: `page-interlude-create-${suffix}`,
+      pageRole: "interlude",
+      name: "雨幕过场",
+      side: "after",
+    });
+    assert.equal(createdInterlude.workingRevision, 9);
+    const firstInterludeContext = await pageContext([{ name: "雨幕过场" }]);
+    const secondInterlude = await invokeExternalPageCapability(ids.user, "page.create", {
+      scope: chapterScope,
+      targetHandles: [firstInterludeContext.pages[0]!.handle],
+      expectedRevision: 9,
+      idempotencyKey: `page-interlude-second-${suffix}`,
+      pageRole: "interlude",
+      name: "车门过场",
+      side: "after",
+    });
+    assert.equal(secondInterlude.workingRevision, 10);
+
+    const interludePair = await pageContext([{ name: "车门过场" }, { name: "雨幕过场" }]);
+    const mergedSpread = await invokeExternalPageCapability(ids.user, "page.merge_spread", {
+      scope: chapterScope,
+      targetHandles: interludePair.pages.map((page) => page.handle),
+      expectedRevision: 10,
+      idempotencyKey: `page-spread-merge-${suffix}`,
+    });
+    assert.equal(mergedSpread.workingRevision, 11);
+    const spreadContext = await pageContext([{ physicalPageNumber: 3 }]);
+    assert.equal(spreadContext.pages[0]?.kind, "spread");
+    assert.equal(spreadContext.pages[0]?.pageRole, "interlude");
+    assert.deepEqual(spreadContext.pages[0]?.surfaces.map((surface) => surface.role), ["left", "right"]);
+    assert.deepEqual(spreadContext.pages[0]?.surfaceReadingOrder, ["left", "right"]);
+    assert.deepEqual(spreadContext.pages[0]?.physicalPageNumbers, [3, 4]);
+    assert.equal(spreadContext.targets.filter((target) => target.type === "page_surface").length, 2);
+
+    const splitSpread = await invokeExternalPageCapability(ids.user, "page.split_spread", {
+      scope: chapterScope,
+      targetHandles: [spreadContext.pages[0]!.handle],
+      expectedRevision: 11,
+      idempotencyKey: `page-spread-split-${suffix}`,
+    });
+    assert.equal(splitSpread.workingRevision, 12);
+    const renamedInterludeContext = await pageContext([{ name: "雨幕过场" }]);
+    const renamedInterlude = await invokeExternalPageCapability(ids.user, "page.rename", {
+      scope: chapterScope,
+      targetHandles: [renamedInterludeContext.pages[0]!.handle],
+      expectedRevision: 12,
+      idempotencyKey: `page-interlude-rename-${suffix}`,
+      name: "雨幕过场·重命名",
+    });
+    assert.equal(renamedInterlude.workingRevision, 13);
+
+    const duplicateSourceContext = await pageContext([{ name: "雨幕过场·重命名" }]);
+    const duplicatedInterlude = await invokeExternalPageCapability(ids.user, "page.duplicate", {
+      scope: chapterScope,
+      targetHandles: [duplicateSourceContext.pages[0]!.handle],
+      expectedRevision: 13,
+      idempotencyKey: `page-interlude-duplicate-${suffix}`,
+    });
+    assert.equal(duplicatedInterlude.workingRevision, 14);
+    const moveContext = await pageContext([{ name: "雨幕过场·重命名 副本" }, { physicalPageNumber: 1 }]);
+    const duplicatePage = moveContext.pages.find((page) => page.name === "雨幕过场·重命名 副本");
+    const firstStoryPage = moveContext.pages.find((page) => page.physicalPageNumbers.includes(1));
+    assert.ok(duplicatePage && firstStoryPage);
+    const movedInterlude = await invokeExternalPageCapability(ids.user, "page.move", {
+      scope: chapterScope,
+      targetHandles: [duplicatePage.handle, firstStoryPage.handle],
+      expectedRevision: 14,
+      idempotencyKey: `page-interlude-move-${suffix}`,
+      side: "after",
+    });
+    assert.equal(movedInterlude.workingRevision, 15);
+    const movedContext = await pageContext([{ name: "雨幕过场·重命名 副本" }, { physicalPageNumber: 1 }]);
+    const movedDuplicate = movedContext.pages.find((page) => page.name === "雨幕过场·重命名 副本");
+    const movedFirstStory = movedContext.pages.find((page) => page.physicalPageNumbers.includes(1));
+    assert.ok(movedDuplicate && movedFirstStory);
+    assert.equal(movedContext.pageSequence[0]?.pageRole, "cover");
+    assert.equal(movedDuplicate.readingPosition, movedFirstStory.readingPosition + 1);
+
+    await assert.rejects(() => invokeExternalPageCapability(ids.user, "page.delete", {
+      scope: chapterScope,
+      targetHandles: [movedDuplicate.handle],
+      confirmedTargetHandles: [movedFirstStory.handle],
+      expectedRevision: 15,
+      idempotencyKey: `page-delete-wrong-confirmation-${suffix}`,
+    }), /需要确认/);
+    assert.equal((await prisma.workingRevision.findFirstOrThrow({
+      where: { projectId: ids.project },
+      orderBy: { revision: "desc" },
+    })).revision, 15);
+    const deleteInput = {
+      scope: chapterScope,
+      targetHandles: [movedDuplicate.handle],
+      confirmedTargetHandles: [movedDuplicate.handle],
+      expectedRevision: 15,
+      idempotencyKey: `page-delete-confirmed-${suffix}`,
+    };
+    const deletedPage = await invokeExternalPageCapability(ids.user, "page.delete", deleteInput);
+    assert.equal(deletedPage.workingRevision, 16);
+    assert.deepEqual(await invokeExternalPageCapability(ids.user, "page.delete", deleteInput), deletedPage);
+    const finalPageContext = await pageContext([{ physicalPageNumber: 1 }]);
+    assert.equal(finalPageContext.pageSequence.some((page) => page.name === "雨幕过场·重命名 副本"), false);
+    assert.equal(finalPageContext.pageSequence[0]?.pageRole, "cover");
+
+    let compositionRevision = 16;
+    const compositionPage = async () => {
+      const context = await pageContext([{ name: "站台余波" }]);
+      const inspection = await inspectExternalAgentComposition(ids.user, {
+        projectId: ids.project,
+        pageHandles: [context.pages[0]!.handle],
+      });
+      return { context, inspection, unit: inspection.output.structure.units[0]! };
+    };
+    const firstCompositionPage = await compositionPage();
+    const compositionSurface = firstCompositionPage.context.pages[0]!.surfaces[0]!;
+    const createdFrame = await invokeExternalCompositionCapability(ids.user, "frame.create", {
+      scope: chapterScope,
+      targetHandles: [compositionSurface.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-frame-create-${suffix}`,
+      geometry: { x: 48, y: 72, width: 300, height: 360 },
+      name: "雨中近景",
+      readingPosition: 1,
+      allowOverlap: false,
+    });
+    assert.equal(createdFrame.workingRevision, ++compositionRevision);
+
+    let currentComposition = await compositionPage();
+    let primaryFrame = currentComposition.unit.frames.find((frame) => frame.name === "雨中近景");
+    assert.ok(primaryFrame?.handle);
+    const shapedFrame = await invokeExternalCompositionCapability(ids.user, "frame.update", {
+      scope: chapterScope,
+      targetHandles: [primaryFrame.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-frame-shape-${suffix}`,
+      shape: {
+        kind: "polygon",
+        points: [{ x: 0, y: .08 }, { x: 1, y: 0 }, { x: .94, y: 1 }, { x: .04, y: .92 }],
+      },
+      borderWidth: 8,
+      zIndex: 30,
+      readingPosition: 1,
+    });
+    assert.equal(shapedFrame.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    primaryFrame = currentComposition.unit.frames.find((frame) => frame.name === "雨中近景");
+    assert.ok(primaryFrame?.handle);
+    const placedFrameImage = await invokeExternalCompositionCapability(ids.user, "image.place", {
+      scope: chapterScope,
+      targetHandles: [primaryFrame.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-place-frame-${suffix}`,
+      asset: `lantern://assets/${ids.asset}`,
+      assetVersionId: ids.assetV1,
+      transform: { x: -.08, y: 0, width: 1.16, height: 1 },
+      crop: { x: 0, y: .1, width: .72, height: .8 },
+    });
+    assert.equal(placedFrameImage.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    let frameImage = currentComposition.unit.elements.find((element) => element.kind === "image" && element.frameId === primaryFrame!.id);
+    assert.ok(frameImage?.handle);
+    assert.equal(frameImage.coordinateSpace, "frame_local");
+    assert.deepEqual(frameImage.transform, { x: -.08, y: 0, width: 1.16, height: 1 });
+    const replacedAndCropped = await invokeExternalCompositionCapability(ids.user, "image.update", {
+      scope: chapterScope,
+      targetHandles: [frameImage.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-replace-${suffix}`,
+      asset: `lantern://assets/${ids.asset}`,
+      assetVersionId: ids.assetVariantV1,
+      transform: { x: -.18, y: -.08, width: 1.32, height: 1.2 },
+      crop: { x: .18, y: 0, width: .7, height: .9 },
+    });
+    assert.equal(replacedAndCropped.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    frameImage = currentComposition.unit.elements.find((element) => element.id === frameImage!.id);
+    assert.ok(frameImage?.handle);
+    assert.equal(frameImage.assetVersionId, ids.assetVariantV1);
+    const promotedBreakout = await invokeExternalCompositionCapability(ids.user, "image.update", {
+      scope: chapterScope,
+      targetHandles: [frameImage.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-breakout-${suffix}`,
+      placement: "breakout",
+    });
+    assert.equal(promotedBreakout.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    let breakoutImage = currentComposition.unit.elements.find((element) => element.id === frameImage!.id);
+    assert.ok(breakoutImage?.handle);
+    assert.equal(breakoutImage.source, "overlay");
+    assert.equal(breakoutImage.overlayPurpose, "breakout");
+    assert.equal(breakoutImage.coordinateSpace, "frame_local");
+    assert.notDeepEqual(breakoutImage.geometry, breakoutImage.transform);
+    const frontBreakout = await invokeExternalCompositionCapability(ids.user, "image.update", {
+      scope: chapterScope,
+      targetHandles: [breakoutImage.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-front-${suffix}`,
+      zOrder: "front",
+    });
+    assert.equal(frontBreakout.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const overlappingFrame = await invokeExternalCompositionCapability(ids.user, "frame.create", {
+      scope: chapterScope,
+      targetHandles: [currentComposition.context.pages[0]!.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-frame-overlap-${suffix}`,
+      geometry: { x: 250, y: 250, width: 310, height: 350 },
+      name: "叠格测试",
+      readingPosition: 2,
+      allowOverlap: true,
+    });
+    assert.equal(overlappingFrame.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    let overlapFrame = currentComposition.unit.frames.find((frame) => frame.name === "叠格测试");
+    assert.ok(overlapFrame?.handle);
+    const resizedOverlap = await invokeExternalCompositionCapability(ids.user, "frame.update", {
+      scope: chapterScope,
+      targetHandles: [overlapFrame.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-frame-resize-${suffix}`,
+      geometry: { x: 270, y: 270, width: 320, height: 360 },
+      shape: { kind: "rect" },
+      zIndex: 40,
+      readingPosition: 2,
+      allowOverlap: true,
+    });
+    assert.equal(resizedOverlap.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    primaryFrame = currentComposition.unit.frames.find((frame) => frame.name === "雨中近景");
+    assert.ok(primaryFrame?.handle);
+    const bleedingFrame = await invokeExternalCompositionCapability(ids.user, "frame.update", {
+      scope: chapterScope,
+      targetHandles: [primaryFrame.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-frame-bleed-${suffix}`,
+      bleed: { edge: "left", enabled: true },
+    });
+    assert.equal(bleedingFrame.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    overlapFrame = currentComposition.unit.frames.find((frame) => frame.name === "叠格测试");
+    assert.ok(overlapFrame?.handle);
+    const duplicatedFrame = await invokeExternalCompositionCapability(ids.user, "frame.duplicate", {
+      scope: chapterScope,
+      targetHandles: [overlapFrame.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-frame-duplicate-${suffix}`,
+    });
+    assert.equal(duplicatedFrame.workingRevision, ++compositionRevision);
+    currentComposition = await compositionPage();
+    const duplicateFrame = currentComposition.unit.frames.find((frame) => frame.name === "叠格测试 副本");
+    assert.ok(duplicateFrame?.handle);
+    const deletedFrame = await invokeExternalCompositionCapability(ids.user, "frame.delete", {
+      scope: chapterScope,
+      targetHandles: [duplicateFrame.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-frame-delete-${suffix}`,
+    });
+    assert.equal(deletedFrame.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const pageImagePlaced = await invokeExternalCompositionCapability(ids.user, "image.place", {
+      scope: chapterScope,
+      targetHandles: [currentComposition.context.pages[0]!.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-page-${suffix}`,
+      asset: `lantern://assets/${ids.asset}`,
+      assetVersionId: ids.assetV1,
+      transform: { x: 380, y: 650, width: 260, height: 300 },
+      crop: { x: .1, y: .1, width: .8, height: .8 },
+    });
+    assert.equal(pageImagePlaced.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const pageImage = currentComposition.unit.elements.find((element) => element.kind === "image" && element.source === "overlay" && element.overlayPurpose === "page_content");
+    assert.ok(pageImage?.handle);
+    assert.equal(pageImage.coordinateSpace, "unit");
+    const updatedPageImage = await invokeExternalCompositionCapability(ids.user, "image.update", {
+      scope: chapterScope,
+      targetHandles: [pageImage.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-page-update-${suffix}`,
+      asset: `lantern://assets/${ids.asset}`,
+      assetVersionId: ids.assetVariantV1,
+      transform: { x: 400, y: 670, width: 280, height: 280 },
+      crop: { x: .2, y: 0, width: .7, height: .9 },
+      zOrder: "front",
+    });
+    assert.equal(updatedPageImage.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const refreshedPageImage = currentComposition.unit.elements.find((element) => element.id === pageImage.id);
+    assert.equal(refreshedPageImage?.assetVersionId, ids.assetVariantV1);
+    assert.deepEqual(refreshedPageImage?.transform, { x: 400, y: 670, width: 280, height: 280 });
+    assert.deepEqual(refreshedPageImage?.crop, { x: .2, y: 0, width: .7, height: .9 });
+    assert.equal(refreshedPageImage?.coordinateSpace, "unit");
+
+    const temporaryImagePlaced = await invokeExternalCompositionCapability(ids.user, "image.place", {
+      scope: chapterScope,
+      targetHandles: [currentComposition.context.pages[0]!.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-temporary-${suffix}`,
+      asset: `lantern://assets/${ids.asset}`,
+      assetVersionId: ids.assetV1,
+      transform: { x: 80, y: 760, width: 180, height: 220 },
+    });
+    assert.equal(temporaryImagePlaced.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const temporaryImage = currentComposition.unit.elements.find((element) => element.kind === "image" && element.transform.x === 80 && element.transform.y === 760);
+    assert.ok(temporaryImage?.handle);
+    const removedImage = await invokeExternalCompositionCapability(ids.user, "image.remove", {
+      scope: chapterScope,
+      targetHandles: [temporaryImage.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-remove-${suffix}`,
+    });
+    assert.equal(removedImage.workingRevision, ++compositionRevision);
+    currentComposition = await compositionPage();
+    assert.equal(currentComposition.unit.elements.some((element) => element.id === temporaryImage.id), false);
+    breakoutImage = currentComposition.unit.elements.find((element) => element.id === breakoutImage!.id);
+    assert.equal(breakoutImage?.overlayPurpose, "breakout");
   } finally {
     if (copiedComicId) {
       const copiedProjects = await prisma.project.findMany({ where: { chapter: { comicId: copiedComicId } }, select: { id: true } });

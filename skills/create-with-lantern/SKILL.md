@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to inspect, organize, and edit a creator's comics through the domain capabilities Lantern currently exposes. Use when the user wants to read, understand, manage, review, or continue work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "0.6.0"
-  minimum_catalog_revision: "9"
+  version: "0.9.0"
+  minimum_catalog_revision: "13"
 ---
 
 # Create with Lantern
@@ -34,6 +34,10 @@ When the request manages a Comic, Chapter, Project relationship, or structured A
 
 When the request asks to inspect or discuss page layout, cropping, overlap, balloons, layers, whitespace, or reading flow, read [references/composition.md](references/composition.md). Also read it before an available LCD edit whose parameter choice depends on those facts. Structure and final rendered evidence must refer to the same Working Revision.
 
+When the request creates, names, duplicates, orders, deletes, merges, or splits pages, read [references/pages.md](references/pages.md). Use page roles, physical page numbers, reading positions, and true-spread surfaces as distinct facts; never turn a workbench display pairing into a true spread.
+
+When the request creates or edits Frames, places or replaces fixed images, changes crop or transform, enables bleed or overlap, or creates a frame-anchored breakout, read [references/frames-and-images.md](references/frames-and-images.md). Refresh both context and composition after each successful direct change before targeting another object.
+
 ## Respect Lantern's creative boundaries
 
 - A Comic contains Chapters; the Project is the current editable chapter workspace.
@@ -41,7 +45,7 @@ When the request asks to inspect or discuss page layout, cropping, overlap, ball
 - An Asset is a reusable identity; an Asset Version fixes a concrete reference.
 - A Working Revision is mutable. A Candidate is a proposed result. A Saved Snapshot is an immutable saved baseline.
 - A synchronous deterministic capability can directly create a domain resource or an undoable Working Revision; it does not need a Task merely to match a workflow shape.
-- Generated, structural, multi-object, or otherwise high-risk results remain Candidates until Lantern reports that they were applied.
+- Generated layout proposals, multi-object creative results, and other effects declared as `candidate` remain Candidates until Lantern reports that they were applied. Deterministic page create, order, merge, and split actions follow their current catalog effect and may be direct atomic changes.
 - A host Agent may apply an available Candidate in the same user request when Lantern exposes that action; returning to the workbench is not a hidden requirement.
 - Never treat a Candidate, task result, or conversation as already applied unless Lantern reports that state.
 - Refresh context after a stale or expired handle, revision conflict, or meaningful project change.

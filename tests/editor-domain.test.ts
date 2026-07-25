@@ -346,6 +346,7 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
     "delete_frame",
     "place_frame_image",
     "replace_frame_image",
+    "replace_image",
     "remove_frame_image",
     "create_dialogue_balloon",
     "create_page_image",
@@ -368,6 +369,7 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
     "move_frame",
     "set_frame_overlap_policy",
     "reorder_frame",
+    "reorder_frame_reading",
     "resize_frame",
     "reshape_frame",
     "update_frame_border",
@@ -392,6 +394,7 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
     "set_presentation_unit_background",
     "duplicate_presentation_unit",
     "move_presentation_unit",
+    "move_presentation_unit_to",
     "delete_presentation_unit",
     "restore_workspace_version",
   ]);
@@ -714,6 +717,83 @@ test("human frame, image and dialogue management capabilities form valid atomic 
   const deletedFrame = dryRunEditorCapability("delete_frame", { unitId: unit.id, frameId: frame.id }, context());
   assert.equal(deletedFrame.result.working.document.units[0].frames.some((item) => item.id === frame.id), false);
   assert.throws(() => planEditorCapability("create_frame", { unitId: unit.id, position: { x: 80, y: 80 } }, { ...context(), actor: "agent" }), /disabled for Agent/);
+});
+
+test("external frame and image capabilities preserve exact geometry, reading order and fixed image ownership", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  unit.frames = [];
+  unit.readingSequence = [];
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-external-${++sequence}`, actor: "external_agent" as const });
+
+  const first = dryRunEditorCapability("create_frame", {
+    unitId: unit.id,
+    geometry: { x: 40, y: 60, width: 260, height: 300 },
+    name: "精确画格",
+    readingIndex: 0,
+  }, context());
+  fixture.working = first.result.working;
+  const firstFrame = fixture.working.document.units[0].frames[0]!;
+  assert.equal(firstFrame.name, "精确画格");
+  assert.deepEqual(firstFrame.geometry, { x: 40, y: 60, width: 260, height: 300 });
+
+  const second = dryRunEditorCapability("create_frame", {
+    unitId: unit.id,
+    geometry: { x: 220, y: 220, width: 260, height: 300 },
+    name: "叠格",
+    readingIndex: 1,
+    allowOverlap: true,
+  }, context());
+  fixture.working = second.result.working;
+  const secondFrame = fixture.working.document.units[0].frames.find((frame) => frame.name === "叠格")!;
+  assert.equal(fixture.working.document.units[0].layoutPolicy.frameOverlap, "allow");
+
+  fixture.working = dryRunEditorCapability("reorder_frame_reading", {
+    unitId: unit.id,
+    frameId: secondFrame.id,
+    readingIndex: 0,
+  }, context()).result.working;
+  assert.deepEqual(fixture.working.document.units[0].readingSequence.map((entry) => entry.frameId), [secondFrame.id, firstFrame.id]);
+
+  const resource = fixture.working.document.resources[0]!;
+  const placed = dryRunEditorCapability("place_frame_image", {
+    unitId: unit.id,
+    frameId: firstFrame.id,
+    assetId: resource.assetId,
+    assetVersionId: resource.assetVersionId,
+    mediaType: resource.mediaType,
+  }, context());
+  fixture.working = placed.result.working;
+  const artLayer = fixture.working.document.units[0].frames.find((frame) => frame.id === firstFrame.id)!.layers.find((layer) => layer.kind === "art")!;
+  const image = artLayer.elements.find((element) => element.kind === "image")!;
+  fixture.working = dryRunEditorCapability("set_art_crop", {
+    unitId: unit.id,
+    frameId: firstFrame.id,
+    layerId: artLayer.id,
+    elementId: image.id,
+    crop: { x: .2, y: .1, width: .6, height: .8 },
+  }, context()).result.working;
+  fixture.working = dryRunEditorCapability("promote_element_to_overlay", {
+    unitId: unit.id,
+    frameId: firstFrame.id,
+    layerId: artLayer.id,
+    elementId: image.id,
+  }, context()).result.working;
+  const breakout = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "breakout")!;
+  const replaced = dryRunEditorCapability("replace_image", {
+    unitId: unit.id,
+    layerId: breakout.id,
+    elementId: image.id,
+    assetId: "replacement-asset",
+    assetVersionId: "replacement-version",
+    mediaType: "image/png",
+    width: 800,
+    height: 1200,
+  }, context());
+  const replacement = replaced.result.working.document.units[0].overlayLayers.find((layer) => layer.id === breakout.id)!.elements.find((element) => element.id === image.id);
+  assert.equal(replacement?.kind === "image" ? replacement.assetVersionId : undefined, "replacement-version");
+  assert.deepEqual(replacement?.kind === "image" ? replacement.crop : undefined, { x: .2, y: .1, width: .6, height: .8 });
 });
 
 test("page objects, breakout and frame overlap preserve explicit ownership and visual geometry", () => {
@@ -1158,6 +1238,19 @@ test("Agent planning cannot bypass the capability allowlist", () => {
     createId: (prefix) => `${prefix}-agent`,
     actor: "agent",
   }), /disabled for Agent/);
+  assert.doesNotThrow(() => planEditorCapability("create_page", {
+    relativeToUnitId: fixture.working.document.reading.unitOrder[0],
+    side: "after",
+  }, {
+    fixture,
+    createId: (prefix) => `${prefix}-external-agent`,
+    actor: "external_agent",
+  }));
+  assert.throws(() => planEditorCapability("create_vertical_segment", { aspectRatio: "1:1" }, {
+    fixture,
+    createId: (prefix) => `${prefix}-external-agent`,
+    actor: "external_agent",
+  }), /disabled for external Agent/);
 });
 
 test("shared workspace schemas reject malformed commands at every runtime boundary", () => {

@@ -6,33 +6,48 @@ import { prepareExternalAssetUpload } from "@lantern/server/external-upload-serv
 import {
   archiveComic,
   archiveComicChapter,
+  attachExternalComicCoverImage,
   createComic,
   createComicChapter,
   duplicateComic,
   getComic,
+  getComicCoverMetadata,
   getComicChapter,
   listComics,
+  prepareExternalComicCoverUpload,
   updateComic,
   updateComicChapter,
 } from "@lantern/server/comic-service";
 import {
   archiveAssetVariant,
+  archiveComicVisualStyleImage,
   archiveAssetFamily,
   attachExternalAssetImage,
+  attachExternalComicVisualStyleImage,
   createAssetVariant,
   createComicLibraryAsset,
   deleteAssetImage,
   getAssetFamilyDetail,
+  getComicVisualStyle,
   listComicAssetCards,
   renameAssetImage,
+  renameComicVisualStyleImage,
+  prepareExternalComicVisualStyleImageUpload,
   setPrimaryAssetImage,
+  setPrimaryComicVisualStyleImage,
   updateAsset,
 } from "@lantern/server/asset-library-service";
 import {
   resolveResourceReference,
   resourceReference,
 } from "@lantern/server/resource-reference-service";
-import { createComicPageViews, validateComicDocument } from "@lantern/shared";
+import {
+  createComicPageViews,
+  orderedUnitSurfaces,
+  validateComicDocument,
+  type ComicDocument,
+  type PresentationUnit,
+} from "@lantern/shared";
 import { compositionObservationSchema, compositionStructureSchema, loadWorkingCompositionObservation } from "./composition-observation";
 import { buildAgentContext } from "./context-builder";
 import {
@@ -45,6 +60,8 @@ import {
 } from "./capability-registry";
 import { externalResourceToolResultSchema, isResourceCapabilityId } from "./resource-capabilities";
 import { isCandidateCapabilityId } from "./candidate-capabilities";
+import { isPageCapabilityId } from "./page-capabilities";
+import { isCompositionCapabilityId } from "./composition-capabilities";
 import { analyzeImageVersions } from "./visual-context";
 import {
   createExternalTargetHandle,
@@ -63,9 +80,10 @@ export const externalProjectsListInputSchema = z.strictObject({});
 
 const externalPageLocatorSchema = z.strictObject({
   position: z.number().int().positive().optional(),
+  physicalPageNumber: z.number().int().positive().optional(),
   name: z.string().trim().min(1).max(120).optional(),
-}).refine((value) => (value.position === undefined) !== (value.name === undefined), {
-  message: "页面定位只能提供 position 或 name 其中一种。",
+}).refine((value) => [value.position, value.physicalPageNumber, value.name].filter((item) => item !== undefined).length === 1, {
+  message: "页面定位只能提供 position、physicalPageNumber 或 name 其中一种。",
 });
 
 export const externalContextGetInputSchema = z.strictObject({
@@ -122,7 +140,41 @@ const externalContextTargetSchema = z.object({
   summary: z.string(),
   pageId: z.string().optional(),
   pageLabel: z.string().optional(),
+  surfaceRole: z.string().optional(),
   assetVersionIds: z.array(z.string()),
+});
+
+const externalPageSequenceItemSchema = z.strictObject({
+  readingPosition: z.number().int().positive(),
+  label: z.string().min(1),
+  name: z.string().optional(),
+  pageRole: z.enum(["story", "cover", "interlude"]),
+  kind: z.string().min(1),
+  trueSpread: z.boolean(),
+  physicalPageNumbers: z.array(z.number().int().positive()),
+});
+
+const externalPageStructureSchema = externalPageSequenceItemSchema.extend({
+  handle: z.string().min(1),
+  canvas: z.strictObject({
+    width: z.number().positive(),
+    height: z.number().positive(),
+  }),
+  surfaces: z.array(z.strictObject({
+    handle: z.string().min(1),
+    role: z.string().min(1),
+    name: z.string().optional(),
+    physicalPageNumber: z.number().int().positive().optional(),
+    geometry: z.strictObject({
+      x: z.number(),
+      y: z.number(),
+      width: z.number().positive(),
+      height: z.number().positive(),
+    }),
+  })).min(1),
+  surfaceReadingOrder: z.array(z.string().min(1)).min(1),
+  previousReadingPosition: z.number().int().positive().optional(),
+  nextReadingPosition: z.number().int().positive().optional(),
 });
 
 export const externalContextGetOutputSchema = z.object({
@@ -146,6 +198,9 @@ export const externalContextGetOutputSchema = z.object({
     settings: z.array(z.object({ id: z.string(), title: z.string(), content: z.string() })),
   }),
   chapter: z.object({ id: z.string(), title: z.string(), summary: z.string() }),
+  readingDirection: z.enum(["ltr", "rtl", "ttb"]),
+  pageSequence: z.array(externalPageSequenceItemSchema),
+  pages: z.array(externalPageStructureSchema).max(2),
   currentView: z.object({ label: z.string(), physicalPageNumbers: z.array(z.number().int()) }).optional(),
   currentPage: z.object({ id: z.string(), pageIndex: z.number().int(), kind: z.string(), comicFrameCount: z.number().int() }).optional(),
   storyboardBeats: z.array(z.object({ id: z.string(), versionId: z.string(), title: z.string(), description: z.string() })),
@@ -215,7 +270,13 @@ export function listExternalCapabilities() {
     catalogHash: catalog.hash,
     capabilities: catalog.capabilities.filter((capability) =>
       capability.agentAccess.external !== "disabled"
-      && (capability.effect === "observe" || isResourceCapabilityId(capability.id) || isCandidateCapabilityId(capability.id))),
+      && (
+        capability.effect === "observe"
+        || isResourceCapabilityId(capability.id)
+        || isCandidateCapabilityId(capability.id)
+        || isPageCapabilityId(capability.id)
+        || isCompositionCapabilityId(capability.id)
+      )),
   });
 }
 
@@ -286,6 +347,68 @@ async function executeExternalResourceCapability(
     const target = await resolveResourceReference(ownerUserId, argument(parsed, "comic"), "comic");
     if (capability.id === "comic.get") {
       return externalResourceResult(capability, { resource: resourceReference("comic", target.id), data: await getComic(ownerUserId, target.id) });
+    }
+    if (capability.id === "comic.cover.get") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await getComicCoverMetadata(ownerUserId, target.id),
+      });
+    }
+    if (capability.id === "comic.cover.image.upload_prepare") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await prepareExternalComicCoverUpload(ownerUserId, target.id, {
+          filename: argument(parsed, "filename"),
+          label: parsed.label as string | undefined,
+        }),
+        nextActions: ["PUT the raw PNG, JPEG, or WebP bytes to uploadUrl with the returned headers, then call comic.cover.image.attach with uploadId."],
+      });
+    }
+    if (capability.id === "comic.cover.image.attach") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await attachExternalComicCoverImage(ownerUserId, target.id, argument(parsed, "uploadId")),
+      });
+    }
+    if (capability.id === "comic.visual_style.get") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await getComicVisualStyle(ownerUserId, target.id),
+      });
+    }
+    if (capability.id === "comic.visual_style.image.upload_prepare") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await prepareExternalComicVisualStyleImageUpload(ownerUserId, target.id, {
+          filename: argument(parsed, "filename"),
+          label: parsed.label as string | undefined,
+        }),
+        nextActions: ["PUT the raw PNG, JPEG, or WebP bytes to uploadUrl with the returned headers, then call comic.visual_style.image.attach with uploadId."],
+      });
+    }
+    if (capability.id === "comic.visual_style.image.attach") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await attachExternalComicVisualStyleImage(ownerUserId, target.id, argument(parsed, "uploadId")),
+      });
+    }
+    if (capability.id === "comic.visual_style.image.set_primary") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await setPrimaryComicVisualStyleImage(ownerUserId, target.id, argument(parsed, "imageId")),
+      });
+    }
+    if (capability.id === "comic.visual_style.image.rename") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await renameComicVisualStyleImage(ownerUserId, target.id, argument(parsed, "imageId"), argument(parsed, "label")),
+      });
+    }
+    if (capability.id === "comic.visual_style.image.archive") {
+      return externalResourceResult(capability, {
+        resource: resourceReference("comic", target.id),
+        data: await archiveComicVisualStyleImage(ownerUserId, target.id, argument(parsed, "imageId")),
+      });
     }
     if (capability.id === "comic.update") {
       const updates = { ...parsed };
@@ -505,6 +628,44 @@ function normalizedLocatorText(value: string) {
   return value.trim().toLocaleLowerCase().replaceAll(/\s+/g, "");
 }
 
+function orderedDocumentUnits(document: ComicDocument) {
+  const units = new Map(document.units.map((unit) => [unit.id, unit]));
+  return document.reading.unitOrder.flatMap((unitId) => {
+    const unit = units.get(unitId);
+    return unit ? [unit] : [];
+  });
+}
+
+function unitPhysicalPageNumbers(unit: PresentationUnit) {
+  return unit.surfaces.flatMap((surface) =>
+    typeof surface.pageNumber === "number" ? [surface.pageNumber] : []).sort((left, right) => left - right);
+}
+
+function unitContextLabel(unit: PresentationUnit, readingPosition: number) {
+  if (unit.name?.trim()) return unit.name.trim();
+  if (unit.pageRole === "cover") return "封面";
+  const physicalPageNumbers = unitPhysicalPageNumbers(unit);
+  if (physicalPageNumbers.length) {
+    const range = physicalPageNumbers.length > 1
+      ? `${physicalPageNumbers[0]}–${physicalPageNumbers.at(-1)}`
+      : `${physicalPageNumbers[0]}`;
+    return unit.pageRole === "interlude" ? `过场页 ${range}` : `Page ${range}`;
+  }
+  return unit.pageRole === "interlude" ? `过场页 ${readingPosition}` : `Page ${readingPosition}`;
+}
+
+function pageSequenceFor(document: ComicDocument) {
+  return orderedDocumentUnits(document).map((unit, index) => ({
+    readingPosition: index + 1,
+    label: unitContextLabel(unit, index + 1),
+    ...(unit.name?.trim() ? { name: unit.name.trim() } : {}),
+    pageRole: unit.pageRole,
+    kind: unit.kind,
+    trueSpread: unit.kind === "spread",
+    physicalPageNumbers: unitPhysicalPageNumbers(unit),
+  }));
+}
+
 async function resolveContextRequestScope(
   ownerUserId: string,
   parsed: z.output<typeof externalContextGetInputSchema>,
@@ -528,15 +689,25 @@ async function resolvePageLocators(
     select: { document: true },
   });
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
-  const pages = createComicPageViews(validateComicDocument(working.document));
+  const document = validateComicDocument(working.document);
+  const pages = createComicPageViews(document);
+  const unitById = new Map(document.units.map((unit) => [unit.id, unit]));
   return locators.map((locator) => {
     const matches = pages.filter((page) => {
       if (locator.position !== undefined) return page.pageIndex + 1 === locator.position;
+      const unit = unitById.get(page.id);
+      if (locator.physicalPageNumber !== undefined) {
+        return unit?.surfaces.some((surface) => surface.pageNumber === locator.physicalPageNumber) ?? false;
+      }
       const query = normalizedLocatorText(locator.name!);
+      const physicalPageNumbers = unit ? unitPhysicalPageNumbers(unit) : [];
       const aliases = [
         page.name,
-        `第${page.pageIndex + 1}页`,
-        `Page${String(page.pageIndex + 1).padStart(2, "0")}`,
+        `阅读顺序第${page.pageIndex + 1}项`,
+        ...physicalPageNumbers.flatMap((pageNumber) => [
+          `第${pageNumber}页`,
+          `Page${String(pageNumber).padStart(2, "0")}`,
+        ]),
         page.pageRole === "cover" ? "封面" : undefined,
         page.pageRole === "interlude" ? "过场页" : undefined,
       ].filter((value): value is string => Boolean(value));
@@ -546,16 +717,18 @@ async function resolvePageLocators(
       throw new AppError("target_not_found", "没有在当前一话中找到指定页面。", 404, {
         locator,
         availablePages: pages.slice(0, 20).map((page) => ({
-          position: page.pageIndex + 1,
-          label: page.name?.trim() || `Page ${String(page.pageIndex + 1).padStart(2, "0")}`,
+          readingPosition: page.pageIndex + 1,
+          label: unitContextLabel(unitById.get(page.id)!, page.pageIndex + 1),
+          physicalPageNumbers: unitPhysicalPageNumbers(unitById.get(page.id)!),
         })),
       });
     }
     if (matches.length > 1) {
       throw new AppError("ambiguous_target", "页面名称对应多个目标，请改用页面位置。", 409, {
         matches: matches.map((page) => ({
-          position: page.pageIndex + 1,
-          label: page.name?.trim() || `Page ${String(page.pageIndex + 1).padStart(2, "0")}`,
+          readingPosition: page.pageIndex + 1,
+          label: unitContextLabel(unitById.get(page.id)!, page.pageIndex + 1),
+          physicalPageNumbers: unitPhysicalPageNumbers(unitById.get(page.id)!),
         })),
       });
     }
@@ -587,6 +760,22 @@ export async function getExternalAgentContext(
   if (requestedPageIds.length && requestedPageIds.some((pageId) => !context.currentView?.unitIds.includes(pageId))) {
     throw new AppError("not_found", "目标页面不存在或不属于当前创作空间。", 404);
   }
+  const structureWorking = await prisma.workingRevision.findFirst({
+    where: {
+      projectId: resolvedScope.projectId,
+      revision: context.workingRevision,
+      project: { ownerUserId },
+    },
+    select: { document: true },
+  });
+  if (!structureWorking) {
+    throw new AppError("revision_conflict", "页面结构已经变化，请重新读取 Lantern 上下文。", 409);
+  }
+  const document = validateComicDocument(structureWorking.document);
+  const orderedUnits = orderedDocumentUnits(document);
+  const pageSequence = pageSequenceFor(document);
+  const unitPosition = new Map(orderedUnits.map((unit, index) => [unit.id, index + 1]));
+  const unitById = new Map(orderedUnits.map((unit) => [unit.id, unit]));
   const now = options.now ?? Date.now();
   const expiresAt = now + (options.lifetimeMs ?? defaultHandleLifetimeMs);
   const createHandle = (target: ExternalTargetHandlePayload["target"]) => createExternalTargetHandle({
@@ -596,25 +785,89 @@ export async function getExternalAgentContext(
     expiresAt,
     target,
   });
-  const targets = [
-    ...context.currentPageTargets.map((target) => ({
-      handle: createHandle({
-        type: target.type,
-        pageId: target.pageId,
-        elementId: target.elementId,
-        frameId: target.frameId,
-        storyboardBeatId: target.storyboardBeatId,
-        assetVersionIds: target.assetVersionIds,
-        dialogueIds: target.dialogueIds,
-      }),
+  const visibleUnitIds = context.currentView?.unitIds ?? [];
+  const pageHandleById = new Map<string, string>();
+  const surfaceHandleById = new Map<string, string>();
+  const pageTargets = context.currentPageTargets.map((target) => {
+    const unit = unitById.get(target.pageId);
+    const readingPosition = unitPosition.get(target.pageId);
+    const physicalPageNumbers = unit ? unitPhysicalPageNumbers(unit) : [];
+    const contextualPageLabel = unit && readingPosition ? unitContextLabel(unit, readingPosition) : target.pageLabel;
+    const aliases = target.type === "presentation_unit"
+      ? [...new Set([
+          ...target.aliases.filter((alias) => !/^(?:第\d+页|Page\s*\d+)$/i.test(alias)),
+          contextualPageLabel,
+          ...(readingPosition ? [`阅读顺序第${readingPosition}项`] : []),
+          ...physicalPageNumbers.flatMap((pageNumber) => [`第${pageNumber}页`, `Page ${String(pageNumber).padStart(2, "0")}`]),
+          unit?.pageRole === "cover" ? "封面" : undefined,
+          unit?.pageRole === "interlude" ? "过场页" : undefined,
+        ].filter((value): value is string => Boolean(value)))].slice(0, 12)
+      : target.aliases;
+    const handle = createHandle({
       type: target.type,
-      label: target.label,
-      aliases: target.aliases,
+      pageId: target.pageId,
+      elementId: target.elementId,
+      frameId: target.frameId,
+      storyboardBeatId: target.storyboardBeatId,
+      assetVersionIds: target.assetVersionIds,
+      dialogueIds: target.dialogueIds,
+    });
+    if (target.type === "presentation_unit") pageHandleById.set(target.pageId, handle);
+    return {
+      handle,
+      type: target.type,
+      label: target.type === "presentation_unit" ? contextualPageLabel ?? target.label : target.label,
+      aliases,
       summary: target.summary,
       pageId: target.pageId,
-      pageLabel: target.pageLabel,
+      pageLabel: contextualPageLabel,
       assetVersionIds: target.assetVersionIds,
-    })),
+    };
+  });
+  const surfaceTargets = visibleUnitIds.flatMap((unitId) => {
+    const unit = unitById.get(unitId);
+    const readingPosition = unitPosition.get(unitId);
+    if (!unit || !readingPosition) return [];
+    const pageLabel = unitContextLabel(unit, readingPosition);
+    return unit.surfaces.map((surface) => {
+      const roleLabel = surface.role === "left"
+        ? "左页"
+        : surface.role === "right"
+          ? "右页"
+          : surface.role === "single"
+            ? "单页纸面"
+            : "滚动段纸面";
+      const label = surface.name?.trim() || (surface.pageNumber ? `第 ${surface.pageNumber} 页` : roleLabel);
+      const aliases = [...new Set([
+        label,
+        roleLabel,
+        `${pageLabel}${roleLabel}`,
+        surface.pageNumber ? `第${surface.pageNumber}页` : undefined,
+      ].filter((value): value is string => Boolean(value)))];
+      const handle = createHandle({
+        type: "page_surface",
+        pageId: unit.id,
+        surfaceId: surface.id,
+        assetVersionIds: [],
+        dialogueIds: [],
+      });
+      surfaceHandleById.set(surface.id, handle);
+      return {
+        handle,
+        type: "page_surface",
+        label,
+        aliases,
+        summary: `该纸面属于${pageLabel}，角色为 ${surface.role}。`,
+        pageId: unit.id,
+        pageLabel,
+        surfaceRole: surface.role,
+        assetVersionIds: [],
+      };
+    });
+  });
+  const targets = [
+    ...pageTargets,
+    ...surfaceTargets,
     ...context.assets.filter((asset) => asset.images.length > 0).map((asset) => ({
       handle: createHandle({
         type: "asset",
@@ -628,6 +881,27 @@ export async function getExternalAgentContext(
       assetVersionIds: asset.images.map((image) => image.versionId),
     })),
   ];
+  const selectedPages = visibleUnitIds.flatMap((unitId) => {
+    const unit = unitById.get(unitId);
+    const readingPosition = unitPosition.get(unitId);
+    const handle = pageHandleById.get(unitId);
+    if (!unit || !readingPosition || !handle) return [];
+    return [{
+      ...pageSequence[readingPosition - 1]!,
+      handle,
+      canvas: { width: unit.canvas.width, height: unit.canvas.height },
+      surfaces: unit.surfaces.map((surface) => ({
+        handle: surfaceHandleById.get(surface.id)!,
+        role: surface.role,
+        ...(surface.name?.trim() ? { name: surface.name.trim() } : {}),
+        ...(typeof surface.pageNumber === "number" ? { physicalPageNumber: surface.pageNumber } : {}),
+        geometry: surface.geometry,
+      })),
+      surfaceReadingOrder: orderedUnitSurfaces(unit, document.reading.direction).map((surface) => surface.role),
+      ...(readingPosition > 1 ? { previousReadingPosition: readingPosition - 1 } : {}),
+      ...(readingPosition < orderedUnits.length ? { nextReadingPosition: readingPosition + 1 } : {}),
+    }];
+  });
   return externalContextGetOutputSchema.parse({
     projectId: context.projectId,
     scope: {
@@ -640,6 +914,9 @@ export async function getExternalAgentContext(
     expiresAt: new Date(expiresAt).toISOString(),
     comic: context.comic,
     chapter: context.chapter,
+    readingDirection: document.reading.direction,
+    pageSequence,
+    pages: selectedPages,
     currentView: context.currentView ? {
       label: context.currentView.label,
       physicalPageNumbers: context.currentView.physicalPageNumbers,

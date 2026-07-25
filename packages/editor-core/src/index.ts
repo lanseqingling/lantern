@@ -189,6 +189,18 @@ export function applyWorkspaceChangeSet(
       findFrame(operation.unitId, operation.frameId).frame.zIndex = operation.zIndex;
       continue;
     }
+    if (operation.type === "reorder_frame_reading") {
+      const unit = findUnit(operation.unitId);
+      const currentIndex = unit.readingSequence.findIndex((entry) => entry.frameId === operation.frameId);
+      if (currentIndex < 0) throw new Error(`missing Frame reading entry: ${operation.frameId}`);
+      const [entry] = unit.readingSequence.splice(currentIndex, 1);
+      unit.readingSequence.splice(
+        Math.max(0, Math.min(operation.readingIndex, unit.readingSequence.length)),
+        0,
+        entry!,
+      );
+      continue;
+    }
     if (operation.type === "set_frame_style") {
       const { frame } = findFrame(operation.unitId, operation.frameId);
       if (operation.border) frame.border = structuredClone(operation.border);

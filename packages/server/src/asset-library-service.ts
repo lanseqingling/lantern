@@ -1,6 +1,7 @@
 import { AssetKind, AssetLibraryStatus, AssetVersionOrigin, ExternalUploadStatus, type Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { AppError } from "./errors";
+import { prepareExternalAssetUpload } from "./external-upload-service";
 import { deleteObject, deleteTemporaryObject, getTemporaryObject, putImage } from "./object-storage";
 import { createSignedAssetPath } from "./signed-assets";
 import type { UploadedImage } from "./asset-service";
@@ -62,6 +63,28 @@ async function findComicVisualStyleAsset(ownerUserId: string, comicId: string) {
   });
 }
 
+async function ensureComicVisualStyleAsset(ownerUserId: string, comicId: string) {
+  const comic = await prisma.comic.findFirst({
+    where: { id: comicId, ownerUserId, archivedAt: null },
+    select: { id: true },
+  });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  const existing = await findComicVisualStyleAsset(ownerUserId, comic.id);
+  if (existing) return existing;
+  await prisma.asset.create({
+    data: {
+      ownerUserId,
+      comicId: comic.id,
+      kind: AssetKind.STYLE,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      currentVersionNumber: 0,
+      name: "视觉风格",
+      description: "",
+    },
+  });
+  return (await findComicVisualStyleAsset(ownerUserId, comic.id))!;
+}
+
 function comicVisualStylePayload(asset: AssetWithGallery | null) {
   return { assetId: asset?.id, images: asset ? serializedImages(asset) : [] };
 }
@@ -70,6 +93,48 @@ export async function getComicVisualStyle(ownerUserId: string, comicId: string) 
   const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null }, select: { id: true } });
   if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
   return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comic.id));
+}
+
+export async function prepareExternalComicVisualStyleImageUpload(
+  ownerUserId: string,
+  comicId: string,
+  input: { filename: string; label?: string },
+) {
+  const asset = await ensureComicVisualStyleAsset(ownerUserId, comicId);
+  return prepareExternalAssetUpload(ownerUserId, asset.id, input);
+}
+
+export async function attachExternalComicVisualStyleImage(ownerUserId: string, comicId: string, uploadId: string) {
+  const asset = await ensureComicVisualStyleAsset(ownerUserId, comicId);
+  const detail = await attachExternalAssetImage(ownerUserId, asset.id, uploadId);
+  return {
+    ...comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comicId)),
+    attached: detail.attached,
+  };
+}
+
+async function requireComicVisualStyleAsset(ownerUserId: string, comicId: string) {
+  const asset = await findComicVisualStyleAsset(ownerUserId, comicId);
+  if (!asset) throw new AppError("not_found", "视觉风格图片不存在。", 404);
+  return asset;
+}
+
+export async function setPrimaryComicVisualStyleImage(ownerUserId: string, comicId: string, imageId: string) {
+  const asset = await requireComicVisualStyleAsset(ownerUserId, comicId);
+  await setPrimaryAssetImage(ownerUserId, asset.id, imageId);
+  return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comicId));
+}
+
+export async function renameComicVisualStyleImage(ownerUserId: string, comicId: string, imageId: string, label: string) {
+  const asset = await requireComicVisualStyleAsset(ownerUserId, comicId);
+  await renameAssetImage(ownerUserId, asset.id, imageId, label);
+  return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comicId));
+}
+
+export async function archiveComicVisualStyleImage(ownerUserId: string, comicId: string, imageId: string) {
+  const asset = await requireComicVisualStyleAsset(ownerUserId, comicId);
+  await deleteAssetImage(ownerUserId, asset.id, imageId);
+  return comicVisualStylePayload(await findComicVisualStyleAsset(ownerUserId, comicId));
 }
 
 export async function appendComicVisualStyleImage(ownerUserId: string, comicId: string, uploaded: UploadedImage) {
@@ -433,7 +498,7 @@ export async function listComicAssetCards(ownerUserId: string, comicId: string) 
       ownerUserId,
       archivedAt: null,
       variantOfAssetId: null,
-      kind: { notIn: [AssetKind.GENERATED_IMAGE, AssetKind.STYLE] },
+      kind: { notIn: [AssetKind.GENERATED_IMAGE, AssetKind.STYLE, AssetKind.COMIC_COVER] },
       libraryStatus: AssetLibraryStatus.LIBRARY,
       comicId: comic.id,
     },

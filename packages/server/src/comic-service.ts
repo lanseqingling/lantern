@@ -1,15 +1,28 @@
 import { randomUUID } from "node:crypto";
-import { ComicFormat, CreationStatus, ReadingDirection, TaskStatus, type Prisma } from "@prisma/client";
+import { AssetKind, AssetLibraryStatus, ComicFormat, CreationStatus, ReadingDirection, TaskStatus, type Comic, type Prisma } from "@prisma/client";
 import { validateComicDocument, type ComicDocument } from "@lantern/shared";
+import { attachExternalAssetImage } from "./asset-library-service";
 import { createUploadedAsset, type UploadedImage } from "./asset-service";
 import { prisma } from "./db";
 import { AppError } from "./errors";
 import { renderPagePng } from "./export-renderer";
+import { prepareExternalAssetUpload } from "./external-upload-service";
 import { getObject, putImage } from "./object-storage";
 import { setChapterCoverPageImage } from "./workbench-service";
 
 type ComicListCursor = { updatedAt: string; id: string };
-type ComicWithChapters = Prisma.ComicGetPayload<{ include: { chapters: true } }>;
+type ChapterWithWorking = Prisma.ChapterGetPayload<{
+  include: {
+    project: {
+      select: {
+        workingRevisions: {
+          select: { revision: true; document: true };
+        };
+      };
+    };
+  };
+}>;
+type ComicWithChapters = Comic & { chapters: ChapterWithWorking[] };
 
 const activeDeletionTaskStatuses = [TaskStatus.CREATED, TaskStatus.QUEUED, TaskStatus.RUNNING];
 
@@ -17,7 +30,25 @@ function comicCoverPath(comic: { id: string; coverObjectKey: string | null; upda
   return comic.coverObjectKey ? `/v1/comics/${encodeURIComponent(comic.id)}/cover?v=${comic.updatedAt.getTime()}` : undefined;
 }
 
-function chapterCoverPath(chapter: { id: string; coverObjectKey: string | null; updatedAt: Date }) {
+function workingRevisionHasCover(working?: { document: Prisma.JsonValue }) {
+  if (!working) return false;
+  try {
+    return validateComicDocument(structuredClone(working.document)).units.some((unit) => unit.pageRole === "cover");
+  } catch {
+    return false;
+  }
+}
+
+function chapterCoverPath(chapter: {
+  id: string;
+  coverObjectKey: string | null;
+  updatedAt: Date;
+  project?: { workingRevisions: Array<{ revision: number; document: Prisma.JsonValue }> } | null;
+}) {
+  const working = chapter.project?.workingRevisions[0];
+  if (working && workingRevisionHasCover(working)) {
+    return `/v1/chapters/${encodeURIComponent(chapter.id)}/cover?v=${working.revision}`;
+  }
   return chapter.coverObjectKey ? `/v1/chapters/${encodeURIComponent(chapter.id)}/cover?v=${chapter.updatedAt.getTime()}` : undefined;
 }
 
@@ -62,7 +93,23 @@ export async function listComics(ownerUserId: string, input: { cursor?: string; 
       archivedAt: null,
       ...(cursor ? { OR: [{ updatedAt: { lt: new Date(cursor.updatedAt) } }, { updatedAt: new Date(cursor.updatedAt), id: { lt: cursor.id } }] } : {}),
     },
-    include: { chapters: { where: { archivedAt: null }, orderBy: { number: "asc" } } },
+    include: {
+      chapters: {
+        where: { archivedAt: null },
+        orderBy: { number: "asc" },
+        include: {
+          project: {
+            select: {
+              workingRevisions: {
+                orderBy: { revision: "desc" },
+                take: 1,
+                select: { revision: true, document: true },
+              },
+            },
+          },
+        },
+      },
+    },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: limit + 1,
   });
@@ -72,7 +119,26 @@ export async function listComics(ownerUserId: string, input: { cursor?: string; 
 }
 
 export async function getComic(ownerUserId: string, comicId: string) {
-  const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null }, include: { chapters: { where: { archivedAt: null }, orderBy: { number: "asc" } } } });
+  const comic = await prisma.comic.findFirst({
+    where: { id: comicId, ownerUserId, archivedAt: null },
+    include: {
+      chapters: {
+        where: { archivedAt: null },
+        orderBy: { number: "asc" },
+        include: {
+          project: {
+            select: {
+              workingRevisions: {
+                orderBy: { revision: "desc" },
+                take: 1,
+                select: { revision: true, document: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
   if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
   return publicComic(comic);
 }
@@ -80,7 +146,7 @@ export async function getComic(ownerUserId: string, comicId: string) {
 export async function getComicChapter(ownerUserId: string, chapterId: string) {
   const chapter = await prisma.chapter.findFirst({
     where: { id: chapterId, ownerUserId, archivedAt: null, comic: { archivedAt: null } },
-    include: { project: { select: { id: true, workingRevisions: { orderBy: { revision: "desc" }, take: 1, select: { revision: true } } } } },
+    include: { project: { select: { id: true, workingRevisions: { orderBy: { revision: "desc" }, take: 1, select: { revision: true, document: true } } } } },
   });
   if (!chapter) throw new AppError("not_found", "章节不存在。", 404);
   return {
@@ -114,6 +180,103 @@ export async function getComicCover(ownerUserId: string, comicId: string) {
   const comic = await prisma.comic.findFirst({ where: { id: comicId, ownerUserId, archivedAt: null } });
   if (!comic?.coverObjectKey || !comic.coverContentType) throw new AppError("not_found", "漫画封面不存在。", 404);
   return { bytes: await getObject(comic.coverObjectKey), contentType: comic.coverContentType };
+}
+
+export async function getComicCoverMetadata(ownerUserId: string, comicId: string) {
+  const comic = await prisma.comic.findFirst({
+    where: { id: comicId, ownerUserId, archivedAt: null },
+    select: {
+      id: true,
+      coverObjectKey: true,
+      coverContentType: true,
+      coverWidth: true,
+      coverHeight: true,
+      updatedAt: true,
+    },
+  });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  return {
+    coverUrl: comicCoverPath(comic),
+    contentType: comic.coverContentType ?? undefined,
+    width: comic.coverWidth ?? undefined,
+    height: comic.coverHeight ?? undefined,
+  };
+}
+
+async function ensureComicCoverAsset(ownerUserId: string, comicId: string) {
+  const comic = await prisma.comic.findFirst({
+    where: { id: comicId, ownerUserId, archivedAt: null },
+    select: { id: true },
+  });
+  if (!comic) throw new AppError("not_found", "漫画不存在。", 404);
+  const existing = await prisma.asset.findFirst({
+    where: {
+      ownerUserId,
+      comicId: comic.id,
+      kind: AssetKind.COMIC_COVER,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      archivedAt: null,
+      variantOfAssetId: null,
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  if (existing) return existing;
+  return prisma.asset.create({
+    data: {
+      ownerUserId,
+      comicId: comic.id,
+      kind: AssetKind.COMIC_COVER,
+      libraryStatus: AssetLibraryStatus.LIBRARY,
+      currentVersionNumber: 0,
+      name: "漫画封面",
+      description: "",
+    },
+  });
+}
+
+export async function prepareExternalComicCoverUpload(
+  ownerUserId: string,
+  comicId: string,
+  input: { filename: string; label?: string },
+) {
+  const asset = await ensureComicCoverAsset(ownerUserId, comicId);
+  return prepareExternalAssetUpload(ownerUserId, asset.id, input);
+}
+
+export async function attachExternalComicCoverImage(ownerUserId: string, comicId: string, uploadId: string) {
+  const asset = await ensureComicCoverAsset(ownerUserId, comicId);
+  const detail = await attachExternalAssetImage(ownerUserId, asset.id, uploadId);
+  const attached = detail.attached;
+  const version = await prisma.assetVersion.findFirst({
+    where: {
+      id: attached.versionId,
+      assetId: asset.id,
+      asset: { ownerUserId, comicId, archivedAt: null },
+    },
+    select: {
+      objectKey: true,
+      contentType: true,
+      width: true,
+      height: true,
+    },
+  });
+  if (!version?.objectKey || !version.contentType) {
+    throw new AppError("asset_image_not_found", "漫画封面图片版本不可用。", 422);
+  }
+  const updated = await prisma.comic.update({
+    where: { id: comicId },
+    data: {
+      coverObjectKey: version.objectKey,
+      coverContentType: version.contentType,
+      coverWidth: version.width,
+      coverHeight: version.height,
+    },
+  });
+  return {
+    ...await getComicCoverMetadata(ownerUserId, comicId),
+    coverUrl: comicCoverPath(updated),
+    attached,
+  };
 }
 
 export async function updateComicCover(ownerUserId: string, comicId: string, uploaded: UploadedImage) {

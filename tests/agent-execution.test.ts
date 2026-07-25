@@ -4,6 +4,7 @@ import { CandidateKind, TaskType } from "@prisma/client";
 import { runAgentLoop, type AgentLoopCheckpoint } from "@lantern/agent-runtime/agent-loop";
 import { getAgentCapability, plannerCapabilityCatalog, semanticCapabilityCatalogManifest, SEMANTIC_CAPABILITY_CATALOG_REVISION, type AgentTaskType } from "@lantern/agent-runtime/capability-registry";
 import { normalizeSelectionForCurrentView } from "@lantern/agent-runtime/context-builder";
+import { listExternalCapabilities } from "@lantern/agent-runtime/external-agent-service";
 import { guardInteractionPlan, type InteractionInput } from "@lantern/agent-runtime/orchestrator";
 import { assetDraftSchema, explicitDialogueReferenceSchema, explicitWorkspaceReferencesSchema, interactionPlanSchema, parseCandidatePayload, type InteractionPlan } from "@lantern/agent-runtime/schemas";
 import { assertTaskCreationAllowed } from "@lantern/agent-runtime/task-service";
@@ -113,6 +114,15 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "comic.update",
     "comic.duplicate",
     "comic.archive",
+    "comic.cover.get",
+    "comic.cover.image.upload_prepare",
+    "comic.cover.image.attach",
+    "comic.visual_style.get",
+    "comic.visual_style.image.upload_prepare",
+    "comic.visual_style.image.attach",
+    "comic.visual_style.image.set_primary",
+    "comic.visual_style.image.rename",
+    "comic.visual_style.image.archive",
     "chapter.get",
     "chapter.create",
     "chapter.update",
@@ -131,6 +141,20 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "asset.archive",
     "candidate.get",
     "candidate.apply",
+    "page.create",
+    "page.rename",
+    "page.duplicate",
+    "page.move",
+    "page.delete",
+    "page.merge_spread",
+    "page.split_spread",
+    "frame.create",
+    "frame.update",
+    "frame.duplicate",
+    "frame.delete",
+    "image.place",
+    "image.update",
+    "image.remove",
     "context.inspect_images",
     "context.inspect_composition",
     "storyboard.edit_single_entry",
@@ -156,8 +180,30 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   assert.equal(candidateApply?.effect, "direct_change");
   assert.equal(candidateApply?.agentAccess.external, "execute");
   assert.equal(candidateApply?.agentAccess.internal, "disabled");
+  const pageDelete = first.capabilities.find((capability) => capability.id === "page.delete");
+  assert.equal(pageDelete?.effect, "direct_change");
+  assert.equal(pageDelete?.confirmation, "explicit");
+  assert.deepEqual(pageDelete?.domainCapabilities, ["delete_presentation_unit"]);
+  const frameUpdate = getAgentCapability("frame.update");
+  assert.equal(frameUpdate?.version, 2);
+  const frameUpdateEnvelope = {
+    scope: "lantern://chapters/chapter-1",
+    targetHandles: ["frame-handle"],
+    expectedRevision: 1,
+    idempotencyKey: "frame-shape-contract",
+  };
+  assert.equal(frameUpdate?.inputSchema.safeParse({
+    ...frameUpdateEnvelope,
+    shape: { kind: "rect" },
+  }).success, true);
   assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "comic.update"), false);
   assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "candidate.apply"), false);
+  assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "page.create"), false);
+  assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "frame.create"), false);
+  const externalCatalog = listExternalCapabilities().capabilities;
+  assert.equal(externalCatalog.some((capability) => capability.id === "page.create"), true);
+  assert.equal(externalCatalog.some((capability) => capability.id === "image.update"), true);
+  assert.equal(externalCatalog.some((capability) => capability.id === "storyboard.edit_single_entry"), false);
 });
 
 test("external Candidate Apply is direct in v1 but remains controlled by one service policy", () => {

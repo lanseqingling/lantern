@@ -1,0 +1,2 @@
+-- SQLite stores Prisma enum values as TEXT. COMIC_COVER extends the
+-- application-level AssetKind vocabulary without requiring a table rewrite.

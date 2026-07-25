@@ -267,8 +267,8 @@ html[data-lantern-route-transition="workspace"] .workspace-route-transition { an
 .route-page-transition { will-change: opacity; }
 html[data-lantern-content-route-transition="forward"] .route-page-transition { animation: contentRouteExitForward 180ms cubic-bezier(.2,.8,.2,1) both; pointer-events: none; }
 html[data-lantern-content-route-transition="back"] .route-page-transition { animation: contentRouteExitBack 180ms cubic-bezier(.2,.8,.2,1) both; pointer-events: none; }
-.route-page-transition.route-page-enter-forward { animation: contentRouteEnterForward 180ms cubic-bezier(.2,.8,.2,1) both; }
-.route-page-transition.route-page-enter-back { animation: contentRouteEnterBack 180ms cubic-bezier(.2,.8,.2,1) both; }
+.route-page-transition.route-page-enter-forward { animation: contentRouteEnterForward 180ms cubic-bezier(.2,.8,.2,1) backwards; }
+.route-page-transition.route-page-enter-back { animation: contentRouteEnterBack 180ms cubic-bezier(.2,.8,.2,1) backwards; }
 @keyframes contentRouteExitForward { to { opacity: 0; transform: translateY(-8px); filter: blur(2px); } }
 @keyframes contentRouteExitBack { to { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
 @keyframes contentRouteEnterForward { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }

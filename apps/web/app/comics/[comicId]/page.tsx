@@ -7,7 +7,7 @@ export const metadata = { title: uiCopy.metadata.comicTitle };
 export default async function ComicPage({ params }: { params: Promise<{ comicId: string }> }) {
   const { comicId } = await params;
   return (
-    <RouteTransitionSurface className="chapter-page app-surface">
+    <RouteTransitionSurface key={comicId} className="chapter-page app-surface">
       <ComicOverviewClient comicId={comicId} />
     </RouteTransitionSurface>
   );

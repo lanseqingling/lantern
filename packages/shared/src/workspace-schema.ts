@@ -76,7 +76,17 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("set_element_appearance"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1), appearance: visualAssetReferenceSchema.nullable() }),
   z.strictObject({
     type: z.literal("update_text_element"), unitId: z.string().min(1), frameId: z.string().min(1).optional(), layerId: z.string().min(1), elementId: z.string().min(1),
-    changes: z.strictObject({ content: z.string().max(4000).optional(), fontSize: z.number().min(6).max(240).optional(), writingMode: z.enum(["horizontal", "vertical"]).optional() }).refine((value) => Object.keys(value).length > 0),
+    changes: z.strictObject({
+      content: z.string().max(4000).optional(),
+      fontFamily: z.string().trim().min(1).max(160).optional(),
+      fontSize: z.number().min(6).max(240).optional(),
+      fontWeight: z.number().min(100).max(900).optional(),
+      color: z.string().min(1).max(64).optional(),
+      stroke: z.string().min(1).max(64).optional(),
+      strokeWidth: z.number().min(0).max(48).optional(),
+      align: z.enum(["left", "center", "right"]).optional(),
+      writingMode: z.enum(["horizontal", "vertical"]).optional(),
+    }).refine((value) => Object.keys(value).length > 0),
   }),
   z.strictObject({ type: z.literal("add_frame_layer"), unitId: z.string().min(1), frameId: z.string().min(1), layer: frameLayerSchema }),
   z.strictObject({ type: z.literal("add_layer_element"), unitId: z.string().min(1), frameId: z.string().min(1), layerId: z.string().min(1), element: frameElementSchema }),

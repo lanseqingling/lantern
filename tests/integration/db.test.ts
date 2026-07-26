@@ -1301,6 +1301,186 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(currentComposition.unit.elements.some((element) => element.id === temporaryImage.id), false);
     breakoutImage = currentComposition.unit.elements.find((element) => element.id === breakoutImage!.id);
     assert.equal(breakoutImage?.overlayPurpose, "breakout");
+
+    primaryFrame = currentComposition.unit.frames.find((frame) => frame.name === "雨中近景");
+    assert.ok(primaryFrame?.handle);
+    const createdBalloon = await invokeExternalCompositionCapability(ids.user, "balloon.create", {
+      scope: chapterScope,
+      targetHandles: [primaryFrame.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-balloon-create-${suffix}`,
+      content: "列车已经进站。",
+      position: { x: .72, y: .22 },
+    });
+    assert.equal(createdBalloon.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    let frameBalloon = currentComposition.unit.elements.find((element) => element.kind === "balloon" && element.frameId === primaryFrame!.id);
+    assert.ok(frameBalloon?.handle);
+    assert.equal(frameBalloon.dialogueText, "列车已经进站。");
+    const updatedBalloon = await invokeExternalCompositionCapability(ids.user, "balloon.update", {
+      scope: chapterScope,
+      targetHandles: [frameBalloon.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-balloon-update-${suffix}`,
+      content: "雨停之前，我们还有一站。",
+      transform: { x: .52, y: .05, width: .42, height: .34 },
+      tailTarget: { x: .78, y: .72 },
+      shape: "thought",
+      style: {
+        fontSize: 20,
+        textColor: "#18212a",
+        fill: "#f7fbff",
+        strokeWidth: 4,
+        writingMode: "vertical",
+      },
+    });
+    assert.equal(updatedBalloon.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    frameBalloon = currentComposition.unit.elements.find((element) => element.id === frameBalloon!.id);
+    assert.ok(frameBalloon?.handle);
+    assert.equal(frameBalloon.dialogueText, "雨停之前，我们还有一站。");
+    assert.equal(frameBalloon.shape, "thought");
+    assert.equal((frameBalloon.style as { writingMode?: string }).writingMode, "vertical");
+    const duplicatedBalloon = await invokeExternalCompositionCapability(ids.user, "balloon.duplicate", {
+      scope: chapterScope,
+      targetHandles: [frameBalloon.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-balloon-duplicate-${suffix}`,
+    });
+    assert.equal(duplicatedBalloon.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const balloonCopy = currentComposition.unit.elements.find((element) =>
+      element.kind === "balloon" && element.id !== frameBalloon!.id && element.dialogueText === frameBalloon!.dialogueText);
+    assert.ok(balloonCopy?.handle);
+    assert.notEqual(balloonCopy.dialogueId, frameBalloon.dialogueId);
+    const deletedBalloonCopy = await invokeExternalCompositionCapability(ids.user, "balloon.delete", {
+      scope: chapterScope,
+      targetHandles: [balloonCopy.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-balloon-delete-${suffix}`,
+    });
+    assert.equal(deletedBalloonCopy.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    frameBalloon = currentComposition.unit.elements.find((element) => element.id === frameBalloon!.id);
+    assert.ok(frameBalloon?.handle);
+    const breakoutBalloon = await invokeExternalCompositionCapability(ids.user, "balloon.update", {
+      scope: chapterScope,
+      targetHandles: [frameBalloon.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-balloon-breakout-${suffix}`,
+      placement: "breakout",
+    });
+    assert.equal(breakoutBalloon.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    let promotedBalloon = currentComposition.unit.elements.find((element) => element.id === frameBalloon!.id);
+    assert.ok(promotedBalloon?.handle);
+    assert.equal(promotedBalloon.overlayPurpose, "breakout");
+    assert.equal(promotedBalloon.coordinateSpace, "frame_local");
+    const paperBalloon = await invokeExternalCompositionCapability(ids.user, "balloon.update", {
+      scope: chapterScope,
+      targetHandles: [promotedBalloon.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-balloon-page-${suffix}`,
+      placement: "page",
+    });
+    assert.equal(paperBalloon.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    promotedBalloon = currentComposition.unit.elements.find((element) => element.id === frameBalloon!.id);
+    assert.ok(promotedBalloon?.handle);
+    assert.equal(promotedBalloon.coordinateSpace, "unit");
+    assert.equal(promotedBalloon.overlayPurpose, "page_content");
+
+    const createdPageBalloon = await invokeExternalCompositionCapability(ids.user, "balloon.create", {
+      scope: chapterScope,
+      targetHandles: [currentComposition.context.pages[0]!.surfaces[0]!.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-page-balloon-create-${suffix}`,
+      content: "站台广播：请注意脚下。",
+      position: { x: 540, y: 150 },
+    });
+    assert.equal(createdPageBalloon.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const pageBalloon = currentComposition.unit.elements.find((element) =>
+      element.kind === "balloon" && element.dialogueText === "站台广播：请注意脚下。");
+    assert.ok(pageBalloon?.handle);
+    assert.equal(pageBalloon.coordinateSpace, "unit");
+
+    const createdNarration = await invokeExternalCompositionCapability(ids.user, "narration.create", {
+      scope: chapterScope,
+      targetHandles: [currentComposition.context.pages[0]!.surfaces[0]!.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-narration-create-${suffix}`,
+      content: "雨幕把最后一班车切成了两段。",
+      position: { x: 180, y: 150 },
+    });
+    assert.equal(createdNarration.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    let narration = currentComposition.unit.elements.find((element) =>
+      element.kind === "text" && element.role === "narration" && element.text === "雨幕把最后一班车切成了两段。");
+    assert.ok(narration?.handle);
+    const updatedNarration = await invokeExternalCompositionCapability(ids.user, "narration.update", {
+      scope: chapterScope,
+      targetHandles: [narration.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-narration-update-${suffix}`,
+      content: "雨幕把末班车切成两段。",
+      transform: { x: 80, y: 80, width: 84, height: 260 },
+      fontFamily: "ui-serif",
+      fontSize: 28,
+      fontWeight: 800,
+      color: "#f8f4e8",
+      stroke: "#172026",
+      strokeWidth: 3,
+      align: "center",
+      writingMode: "vertical",
+    });
+    assert.equal(updatedNarration.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    narration = currentComposition.unit.elements.find((element) => element.id === narration!.id);
+    assert.ok(narration?.handle);
+    assert.equal(narration.text, "雨幕把末班车切成两段。");
+    assert.deepEqual(narration.transform, { x: 80, y: 80, width: 84, height: 260 });
+    assert.equal((narration.style as { writingMode?: string }).writingMode, "vertical");
+    const frontNarration = await invokeExternalCompositionCapability(ids.user, "narration.update", {
+      scope: chapterScope,
+      targetHandles: [narration.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-narration-front-${suffix}`,
+      zOrder: "front",
+    });
+    assert.equal(frontNarration.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    narration = currentComposition.unit.elements.find((element) => element.id === narration!.id);
+    assert.ok(narration?.handle);
+    const duplicatedNarration = await invokeExternalCompositionCapability(ids.user, "narration.duplicate", {
+      scope: chapterScope,
+      targetHandles: [narration.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-narration-duplicate-${suffix}`,
+    });
+    assert.equal(duplicatedNarration.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    const narrationCopy = currentComposition.unit.elements.find((element) =>
+      element.kind === "text" && element.role === "narration" && element.id !== narration!.id && element.text === narration!.text);
+    assert.ok(narrationCopy?.handle);
+    const deletedNarrationCopy = await invokeExternalCompositionCapability(ids.user, "narration.delete", {
+      scope: chapterScope,
+      targetHandles: [narrationCopy.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-narration-delete-${suffix}`,
+    });
+    assert.equal(deletedNarrationCopy.workingRevision, ++compositionRevision);
   } finally {
     if (copiedComicId) {
       const copiedProjects = await prisma.project.findMany({ where: { chapter: { comicId: copiedComicId } }, select: { id: true } });

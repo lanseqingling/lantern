@@ -457,7 +457,7 @@ test("paper narration stays frame-free, topmost, editable and independently remo
   const narration = narrationLayer.elements.find((element) => element.kind === "text")!;
   assert.equal(narration.kind === "text" ? narration.content : "", "请输入文本");
   assert.deepEqual(narrationLayer.anchor, { type: "unit" });
-  assert.equal(narrationLayer.surfaceId, undefined);
+  assert.equal(narrationLayer.surfaceId, unit.surfaces[0]?.id);
   assert.equal(narration.kind === "text" ? narration.style.fontSize : 0, 24);
   assert.equal(narration.kind === "text" ? narration.style.strokeWidth : 0, 2);
   assert.equal(narration.kind === "text" ? projectTextStrokeWidth({ ...narration, style: { ...narration.style, strokeWidth: 1.25 } }) : 0, 2);
@@ -595,6 +595,52 @@ test("spread splitting follows actual frame and balloon geometry", () => {
   assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨越分隔线的对象/);
   crossBalloon.transform = originalBalloonTransform;
   assert.equal(dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()).result.working.document.reading.unitOrder.length, 2);
+});
+
+test("external cross-page balloon conversion enforces the gutter-safe writing center and tail", () => {
+  const fixture = createInitialFixture();
+  let sequence = 0;
+  const humanContext = () => ({ fixture, createId: (prefix: string) => `${prefix}-gutter-human-${++sequence}`, actor: "human" as const });
+  const externalContext = () => ({ fixture, createId: (prefix: string) => `${prefix}-gutter-external-${++sequence}`, actor: "external_agent" as const });
+  fixture.working = dryRunEditorCapability("create_page", {}, humanContext()).result.working;
+  const [firstId, secondId] = fixture.working.document.reading.unitOrder;
+  fixture.working = dryRunEditorCapability("merge_pages_to_spread", { unitId: firstId, nextUnitId: secondId }, humanContext()).result.working;
+  const spread = fixture.working.document.units.find((unit) => unit.kind === "spread")!;
+  const frame = spread.frames[0]!;
+  const created = dryRunEditorCapability("create_dialogue_balloon", {
+    unitId: spread.id,
+    frameId: frame.id,
+    position: { x: .4, y: .2 },
+    content: "跨页对白",
+  }, externalContext());
+  fixture.working = created.result.working;
+  const currentFrame = fixture.working.document.units.find((unit) => unit.id === spread.id)!.frames.find((candidate) => candidate.id === frame.id)!;
+  const layer = currentFrame.layers.find((candidate) => candidate.elements.some((element) => element.kind === "balloon"))!;
+  const balloon = layer.elements.find((element) => element.kind === "balloon")!;
+  const seam = spread.surfaces[0]!.geometry.width;
+
+  assert.throws(() => dryRunEditorCapability("convert_balloon_to_cross_page", {
+    unitId: spread.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    transform: { x: seam - 150, y: 100, width: 300, height: 160 },
+    tailTarget: { x: seam, y: 420 },
+  }, externalContext()), /中缝安全区/);
+
+  const converted = dryRunEditorCapability("convert_balloon_to_cross_page", {
+    unitId: spread.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    transform: { x: seam - 100, y: 100, width: 300, height: 160 },
+    tailTarget: { x: seam + 180, y: 420 },
+  }, externalContext());
+  const crossPage = converted.result.working.document.units.find((unit) => unit.id === spread.id)!
+    .overlayLayers.find((candidate) => candidate.purpose === "cross_page")!;
+  const convertedBalloon = crossPage.elements.find((element) => element.id === balloon.id);
+  assert.deepEqual(convertedBalloon?.transform, { x: seam - 100, y: 100, width: 300, height: 160 });
+  assert.deepEqual(convertedBalloon?.kind === "balloon" ? convertedBalloon.tailTarget : undefined, { x: seam + 180, y: 420 });
 });
 
 test("a frame image must become paper-owned before it can become cross-page", () => {

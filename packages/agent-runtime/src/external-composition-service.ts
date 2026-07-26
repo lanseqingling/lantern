@@ -3,7 +3,7 @@ import { planEditorCapability, type EditorCapabilityId } from "@lantern/editor-c
 import { getAssetFamilyDetail } from "@lantern/server/asset-library-service";
 import { AppError } from "@lantern/server/errors";
 import { resolveResourceReference } from "@lantern/server/resource-reference-service";
-import type { ArtElement, Frame, FrameLayer, PresentationUnit, UnitOverlayLayer, WorkspaceCommand } from "@lantern/shared";
+import type { ArtElement, BalloonElement, Frame, FrameLayer, PresentationUnit, TextElement, UnitOverlayLayer, WorkspaceCommand } from "@lantern/shared";
 import {
   assertAgentCapabilityAccess,
   getAgentCapability,
@@ -29,6 +29,26 @@ type LocatedImage = {
   unit: PresentationUnit;
   layer: UnitOverlayLayer;
   element: ArtElement;
+  source: "overlay";
+};
+
+type LocatedBalloon = {
+  unit: PresentationUnit;
+  frame: Frame;
+  layer: FrameLayer;
+  element: BalloonElement;
+  source: "frame";
+} | {
+  unit: PresentationUnit;
+  layer: UnitOverlayLayer;
+  element: BalloonElement;
+  source: "overlay";
+};
+
+type LocatedNarration = {
+  unit: PresentationUnit;
+  layer: UnitOverlayLayer;
+  element: TextElement;
   source: "overlay";
 };
 
@@ -105,6 +125,68 @@ function targetImage(context: ExternalDirectChangeContext): LocatedImage {
   throw new AppError("target_not_found", "目标图片已不存在，请重新读取上下文。", 404);
 }
 
+function targetBalloon(context: ExternalDirectChangeContext): LocatedBalloon {
+  const { target, unit } = targetUnit(context);
+  if (target.type !== "speech_balloon" || !target.elementId) {
+    throw new AppError("invalid_target_type", "该能力需要 composition inspection 返回的 speech_balloon handle。", 422);
+  }
+  for (const frame of unit.frames) {
+    for (const layer of frame.layers) {
+      const element = layer.elements.find((candidate) => candidate.id === target.elementId);
+      if (element?.kind === "balloon") return { unit, frame, layer, element, source: "frame" };
+    }
+  }
+  for (const layer of unit.overlayLayers) {
+    const element = layer.elements.find((candidate) => candidate.id === target.elementId);
+    if (element?.kind === "balloon") return { unit, layer, element, source: "overlay" };
+  }
+  throw new AppError("target_not_found", "目标气泡已不存在，请重新读取上下文。", 404);
+}
+
+function targetNarration(context: ExternalDirectChangeContext): LocatedNarration {
+  const { target, unit } = targetUnit(context);
+  if (target.type !== "text" || !target.elementId) {
+    throw new AppError("invalid_target_type", "该能力需要 composition inspection 返回的 narration text handle。", 422);
+  }
+  for (const layer of unit.overlayLayers) {
+    const element = layer.elements.find((candidate) => candidate.id === target.elementId);
+    if (layer.purpose === "narration" && layer.anchor.type === "unit"
+      && element?.kind === "text" && element.role === "narration") {
+      return { unit, layer, element, source: "overlay" };
+    }
+  }
+  throw new AppError("invalid_text_role", "当前只开放纸面旁白；目标不是 narration TextElement。", 422);
+}
+
+function assertGutterSafeCrossPageBalloon(
+  unit: PresentationUnit,
+  transform: { x: number; y: number; width: number; height: number },
+  tailTarget?: { x: number; y: number },
+) {
+  const [left, right] = [...unit.surfaces].sort((first, second) => first.geometry.x - second.geometry.x);
+  if (unit.kind !== "spread" || !left || !right) {
+    throw new AppError("invalid_cross_page_balloon", "跨页气泡只能存在于真正双页。", 422);
+  }
+  const gutterStart = left.geometry.x + left.geometry.width;
+  const gutterEnd = right.geometry.x;
+  if (!(transform.x < gutterStart && transform.x + transform.width > gutterEnd)) {
+    throw new AppError("invalid_cross_page_balloon", "跨页气泡必须同时覆盖左右纸面。", 422);
+  }
+  if (transform.x < 0 || transform.y < 0
+    || transform.x + transform.width > unit.canvas.width
+    || transform.y + transform.height > unit.canvas.height) {
+    throw new AppError("invalid_cross_page_balloon", "跨页气泡必须完整位于真正双页画布内。", 422);
+  }
+  const safeInset = Math.min(32, Math.max(12, transform.width * .08));
+  const centerX = transform.x + transform.width / 2;
+  if (centerX >= gutterStart - safeInset && centerX <= gutterEnd + safeInset) {
+    throw new AppError("invalid_cross_page_balloon", "跨页气泡的文字中心必须避开中缝安全区。", 422);
+  }
+  if (tailTarget && tailTarget.x >= gutterStart - safeInset && tailTarget.x <= gutterEnd + safeInset) {
+    throw new AppError("invalid_cross_page_balloon", "气泡尾巴不能落在中缝安全区。", 422);
+  }
+}
+
 async function fixedImage(
   context: ExternalDirectChangeContext,
   assetReference: string,
@@ -136,7 +218,7 @@ async function fixedImage(
   };
 }
 
-function locatedElementInput(located: LocatedImage) {
+function locatedElementInput(located: LocatedImage | LocatedBalloon | LocatedNarration) {
   return {
     unitId: located.unit.id,
     ...(located.source === "frame" ? { frameId: located.frame.id } : {}),
@@ -370,6 +452,177 @@ function imageRemovePlan(context: ExternalDirectChangeContext) {
   return { commands: plan.commands, data: { action: "removed", assetVersionId: located.element.assetVersionId } };
 }
 
+function balloonCreatePlan(parsed: ParsedCompositionInput, context: ExternalDirectChangeContext) {
+  const { target, unit } = targetUnit(context);
+  const position = parsed.position as { x: number; y: number };
+  if (target.type === "comic_frame" && target.frameId) {
+    const plan = planDomainCapability("create_dialogue_balloon", {
+      unitId: unit.id,
+      frameId: target.frameId,
+      position,
+      content: parsed.content,
+    }, context);
+    return { commands: plan.commands, data: { action: "created", coordinateSpace: "frame_local" } };
+  }
+  const surface = target.type === "page_surface"
+    ? unit.surfaces.find((candidate) => candidate.id === target.surfaceId)
+    : unit.surfaces.find((candidate) =>
+        position.x >= candidate.geometry.x && position.x <= candidate.geometry.x + candidate.geometry.width
+        && position.y >= candidate.geometry.y && position.y <= candidate.geometry.y + candidate.geometry.height);
+  if (!surface) throw new AppError("invalid_balloon_position", "纸面气泡位置必须位于一个明确 PageSurface 内。", 422);
+  const plan = planDomainCapability("create_page_dialogue_balloon", {
+    unitId: unit.id,
+    surfaceId: surface.id,
+    position,
+    content: parsed.content,
+  }, context);
+  return { commands: plan.commands, data: { action: "created", coordinateSpace: "unit", surfaceRole: surface.role } };
+}
+
+function balloonUpdatePlan(parsed: ParsedCompositionInput, context: ExternalDirectChangeContext) {
+  const located = targetBalloon(context);
+  const base = locatedElementInput(located);
+  if (parsed.placement === "breakout") {
+    if (located.source !== "frame") throw new AppError("invalid_balloon_placement", "只有格内气泡可以转换为 frame-anchored 破格气泡。", 422);
+    const plan = planDomainCapability("promote_element_to_overlay", base, context);
+    return { commands: plan.commands, data: { action: "promoted_to_breakout", coordinateSpace: "frame_local" } };
+  }
+  if (parsed.placement === "page") {
+    if (located.source === "overlay" && located.layer.anchor.type === "unit" && located.layer.purpose !== "cross_page") {
+      throw new AppError("invalid_balloon_placement", "气泡已经是纸面对象。", 422);
+    }
+    const plan = planDomainCapability("convert_element_to_page", base, context);
+    return { commands: plan.commands, data: { action: "converted_to_page", coordinateSpace: "unit" } };
+  }
+  if (parsed.placement === "cross_page") {
+    assertGutterSafeCrossPageBalloon(
+      located.unit,
+      parsed.transform as { x: number; y: number; width: number; height: number },
+      parsed.tailTarget as { x: number; y: number } | undefined,
+    );
+    const plan = planDomainCapability("convert_balloon_to_cross_page", {
+      ...base,
+      transform: parsed.transform,
+      ...(parsed.tailTarget ? { tailTarget: parsed.tailTarget } : {}),
+    }, context);
+    return { commands: plan.commands, data: { action: "converted_to_cross_page", coordinateSpace: "unit", gutterSafe: true } };
+  }
+  const commands: WorkspaceCommand[] = [];
+  if (located.source === "overlay" && located.layer.purpose === "cross_page" && (parsed.transform || parsed.tailTarget)) {
+    assertGutterSafeCrossPageBalloon(
+      located.unit,
+      (parsed.transform ?? located.element.transform) as { x: number; y: number; width: number; height: number },
+      (parsed.tailTarget ?? located.element.tailTarget) as { x: number; y: number } | undefined,
+    );
+  }
+  if (typeof parsed.content === "string") {
+    commands.push(...planDomainCapability("update_dialogue", {
+      dialogueId: located.element.dialogueId,
+      content: parsed.content,
+    }, context).commands);
+  }
+  const balloonChanges: Record<string, unknown> = {};
+  if (parsed.transform) balloonChanges.transform = parsed.transform;
+  if (parsed.tailTarget) balloonChanges.tailTarget = parsed.tailTarget;
+  if (parsed.shape) balloonChanges.shape = parsed.shape;
+  if (parsed.style) balloonChanges.style = { ...located.element.style, ...(parsed.style as object) };
+  if (Object.keys(balloonChanges).length) {
+    commands.push(...planDomainCapability("update_balloon", {
+      ...base,
+      changes: balloonChanges,
+    }, context).commands);
+  }
+  if (parsed.zOrder) {
+    if (located.source !== "overlay") {
+      throw new AppError("invalid_balloon_layer", "格内气泡随画格显示；只有纸面、破格或跨页气泡可独立调整前后层级。", 422);
+    }
+    commands.push(...planDomainCapability("reorder_overlay_element", {
+      unitId: located.unit.id,
+      layerId: located.layer.id,
+      elementId: located.element.id,
+      position: parsed.zOrder,
+    }, context).commands);
+  }
+  return {
+    commands,
+    data: {
+      action: "updated",
+      dialogueId: located.element.dialogueId,
+      coordinateSpace: located.source === "frame" || located.layer.anchor.type === "frame" ? "frame_local" : "unit",
+    },
+  };
+}
+
+function balloonSingleActionPlan(capabilityId: "balloon.duplicate" | "balloon.delete", context: ExternalDirectChangeContext) {
+  const located = targetBalloon(context);
+  const plan = planDomainCapability(
+    capabilityId === "balloon.duplicate" ? "duplicate_dialogue_balloon" : "delete_dialogue_balloon",
+    locatedElementInput(located),
+    context,
+  );
+  return {
+    commands: plan.commands,
+    data: capabilityId === "balloon.duplicate"
+      ? { action: "duplicated", dialogueCopied: true }
+      : { action: "deleted" },
+  };
+}
+
+function narrationCreatePlan(parsed: ParsedCompositionInput, context: ExternalDirectChangeContext) {
+  const { target, unit } = targetUnit(context);
+  const position = parsed.position as { x: number; y: number };
+  const surface = target.type === "page_surface"
+    ? unit.surfaces.find((candidate) => candidate.id === target.surfaceId)
+    : unit.surfaces.find((candidate) =>
+        position.x >= candidate.geometry.x && position.x <= candidate.geometry.x + candidate.geometry.width
+        && position.y >= candidate.geometry.y && position.y <= candidate.geometry.y + candidate.geometry.height);
+  if (!surface) throw new AppError("invalid_narration_position", "旁白位置必须位于一个明确 PageSurface 内。", 422);
+  const plan = planDomainCapability("create_narration", {
+    unitId: unit.id,
+    surfaceId: surface.id,
+    position,
+    content: parsed.content,
+  }, context);
+  return { commands: plan.commands, data: { action: "created", coordinateSpace: "unit", surfaceRole: surface.role } };
+}
+
+function narrationUpdatePlan(parsed: ParsedCompositionInput, context: ExternalDirectChangeContext) {
+  const located = targetNarration(context);
+  const base = locatedElementInput(located);
+  const commands: WorkspaceCommand[] = [];
+  const changes = Object.fromEntries([
+    "content", "fontFamily", "fontSize", "fontWeight", "color", "stroke", "strokeWidth", "align", "writingMode",
+  ].flatMap((key) => parsed[key] === undefined ? [] : [[key, parsed[key]]]));
+  if (Object.keys(changes).length) {
+    commands.push(...planDomainCapability("update_narration", { ...base, changes }, context).commands);
+  }
+  if (parsed.transform) {
+    commands.push(...planDomainCapability("set_element_transform", {
+      ...base,
+      transform: parsed.transform,
+    }, context).commands);
+  }
+  if (parsed.zOrder) {
+    commands.push(...planDomainCapability("reorder_overlay_element", {
+      unitId: located.unit.id,
+      layerId: located.layer.id,
+      elementId: located.element.id,
+      position: parsed.zOrder,
+    }, context).commands);
+  }
+  return { commands, data: { action: "updated", coordinateSpace: "unit" } };
+}
+
+function narrationSingleActionPlan(capabilityId: "narration.duplicate" | "narration.delete", context: ExternalDirectChangeContext) {
+  const located = targetNarration(context);
+  const plan = planDomainCapability(
+    capabilityId === "narration.duplicate" ? "duplicate_narration" : "delete_narration",
+    locatedElementInput(located),
+    context,
+  );
+  return { commands: plan.commands, data: { action: capabilityId === "narration.duplicate" ? "duplicated" : "deleted" } };
+}
+
 async function compositionPlan(
   capability: AgentCapabilityDescriptor,
   parsed: ParsedCompositionInput,
@@ -383,6 +636,12 @@ async function compositionPlan(
   if (capability.id === "image.place") return imagePlacePlan(parsed, context);
   if (capability.id === "image.update") return imageUpdatePlan(parsed, context);
   if (capability.id === "image.remove") return imageRemovePlan(context);
+  if (capability.id === "balloon.create") return balloonCreatePlan(parsed, context);
+  if (capability.id === "balloon.update") return balloonUpdatePlan(parsed, context);
+  if (capability.id === "balloon.duplicate" || capability.id === "balloon.delete") return balloonSingleActionPlan(capability.id, context);
+  if (capability.id === "narration.create") return narrationCreatePlan(parsed, context);
+  if (capability.id === "narration.update") return narrationUpdatePlan(parsed, context);
+  if (capability.id === "narration.duplicate" || capability.id === "narration.delete") return narrationSingleActionPlan(capability.id, context);
   throw new AppError("capability_not_available", "该页面编排能力当前没有同步执行器。", 404);
 }
 

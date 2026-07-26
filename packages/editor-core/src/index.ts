@@ -294,7 +294,13 @@ export function applyWorkspaceChangeSet(
       const element = layer?.elements.find((item) => item.id === operation.elementId);
       if (!element || element.kind !== "text") throw new Error(`missing TextElement: ${operation.elementId}`);
       if (operation.changes.content !== undefined) element.content = operation.changes.content;
+      if (operation.changes.fontFamily !== undefined) element.style.fontFamily = operation.changes.fontFamily;
       if (operation.changes.fontSize !== undefined) element.style.fontSize = operation.changes.fontSize;
+      if (operation.changes.fontWeight !== undefined) element.style.fontWeight = operation.changes.fontWeight;
+      if (operation.changes.color !== undefined) element.style.color = operation.changes.color;
+      if (operation.changes.stroke !== undefined) element.style.stroke = operation.changes.stroke;
+      if (operation.changes.strokeWidth !== undefined) element.style.strokeWidth = operation.changes.strokeWidth;
+      if (operation.changes.align !== undefined) element.style.align = operation.changes.align;
       if (operation.changes.writingMode !== undefined) element.style.writingMode = operation.changes.writingMode;
       continue;
     }

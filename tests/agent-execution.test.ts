@@ -155,6 +155,14 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "image.place",
     "image.update",
     "image.remove",
+    "balloon.create",
+    "balloon.update",
+    "balloon.duplicate",
+    "balloon.delete",
+    "narration.create",
+    "narration.update",
+    "narration.duplicate",
+    "narration.delete",
     "context.inspect_images",
     "context.inspect_composition",
     "storyboard.edit_single_entry",
@@ -186,6 +194,15 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   assert.deepEqual(pageDelete?.domainCapabilities, ["delete_presentation_unit"]);
   const frameUpdate = getAgentCapability("frame.update");
   assert.equal(frameUpdate?.version, 2);
+  const balloonUpdate = getAgentCapability("balloon.update");
+  assert.deepEqual(balloonUpdate?.domainCapabilities, [
+    "update_dialogue",
+    "update_balloon",
+    "promote_element_to_overlay",
+    "convert_element_to_page",
+    "convert_balloon_to_cross_page",
+    "reorder_overlay_element",
+  ]);
   const frameUpdateEnvelope = {
     scope: "lantern://chapters/chapter-1",
     targetHandles: ["frame-handle"],

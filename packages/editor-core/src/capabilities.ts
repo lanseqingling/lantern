@@ -513,6 +513,7 @@ const createDialogueBalloonCapability = defineCapability({
   scope: "frame",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["frame_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["add_dialogue", "add_frame_layer", "add_layer_element"],
@@ -654,11 +655,12 @@ const setCoverPageImageCapability = defineCapability({
 
 const createPageDialogueBalloonCapability = defineCapability({
   id: "create_page_dialogue_balloon",
-  version: 1,
-  inputSchema: z.strictObject({ unitId: z.string().min(1), position: z.strictObject({ x: z.number(), y: z.number() }), content: z.string().max(2000).optional() }),
+  version: 2,
+  inputSchema: z.strictObject({ unitId: z.string().min(1), surfaceId: z.string().min(1).optional(), position: z.strictObject({ x: z.number(), y: z.number() }), content: z.string().max(2000).optional() }),
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["presentation_unit_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["add_dialogue", "add_overlay_layer", "add_overlay_element"],
@@ -668,8 +670,14 @@ const createPageDialogueBalloonCapability = defineCapability({
     const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
     if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
     assertPageRoleAllows(unit, "dialogue");
-    const surface = surfaceAt(unit, input.position);
+    const surface = input.surfaceId
+      ? unit.surfaces.find((candidate) => candidate.id === input.surfaceId)
+      : surfaceAt(unit, input.position);
     if (!surface) throw new Error("页面没有可放置对白的纸面");
+    if (input.position.x < surface.geometry.x || input.position.x > surface.geometry.x + surface.geometry.width
+      || input.position.y < surface.geometry.y || input.position.y > surface.geometry.y + surface.geometry.height) {
+      throw new Error("纸面对白的位置必须位于目标纸面内");
+    }
     const overlay = overlayLayerFor(context, unit, { type: "unit" }, "page_content", "纸面内容", surface.id);
     const dialogueId = context.createId("dialogue");
     const width = Math.min(280, unit.canvas.width * .34);
@@ -698,15 +706,17 @@ export const narrationDefaults = {
 
 const createNarrationCapability = defineCapability({
   id: "create_narration",
-  version: 1,
+  version: 2,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
+    surfaceId: z.string().min(1).optional(),
     position: z.strictObject({ x: z.number(), y: z.number() }),
     content: z.string().max(4000).optional(),
   }),
   scope: "unit",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["presentation_unit_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["add_overlay_layer", "add_overlay_element"],
@@ -715,15 +725,23 @@ const createNarrationCapability = defineCapability({
   execute(input, context) {
     const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
     if (!unit) throw new Error(`missing PresentationUnit: ${input.unitId}`);
-    const overlay = overlayLayerFor(context, unit, { type: "unit" }, "narration", "旁白");
-    const width = Math.min(narrationDefaults.horizontal.width, unit.canvas.width);
-    const height = Math.min(narrationDefaults.horizontal.height, unit.canvas.height);
+    const surface = input.surfaceId
+      ? unit.surfaces.find((candidate) => candidate.id === input.surfaceId)
+      : surfaceAt(unit, input.position);
+    if (!surface) throw new Error("页面没有可放置旁白的纸面");
+    if (input.position.x < surface.geometry.x || input.position.x > surface.geometry.x + surface.geometry.width
+      || input.position.y < surface.geometry.y || input.position.y > surface.geometry.y + surface.geometry.height) {
+      throw new Error("旁白的位置必须位于目标纸面内");
+    }
+    const overlay = overlayLayerFor(context, unit, { type: "unit" }, "narration", "旁白", surface.id);
+    const width = Math.min(narrationDefaults.horizontal.width, surface.geometry.width);
+    const height = Math.min(narrationDefaults.horizontal.height, surface.geometry.height);
     const element: TextElement = {
       id: context.createId("narration"),
       kind: "text",
       transform: {
-        x: clamp(input.position.x - width / 2, 0, unit.canvas.width - width),
-        y: clamp(input.position.y - height / 2, 0, unit.canvas.height - height),
+        x: clamp(input.position.x - width / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - width),
+        y: clamp(input.position.y - height / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - height),
         width,
         height,
       },
@@ -763,28 +781,37 @@ const updateNarrationCapability = defineCapability({
     unitId: z.string().min(1), layerId: z.string().min(1), elementId: z.string().min(1),
     changes: z.strictObject({
       content: z.string().max(4000).optional(),
+      fontFamily: z.string().trim().min(1).max(160).optional(),
       fontSize: z.number().min(6).max(240).optional(),
+      fontWeight: z.number().min(100).max(900).optional(),
+      color: z.string().min(1).max(64).optional(),
+      stroke: z.string().min(1).max(64).optional(),
+      strokeWidth: z.number().min(0).max(48).optional(),
+      align: z.enum(["left", "center", "right"]).optional(),
       writingMode: z.enum(["horizontal", "vertical"]).optional(),
     }).refine((value) => Object.keys(value).length > 0),
   }),
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["narration_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["update_text_element", "set_element_transform"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { unit, element } = findNarration(context, input);
+    const { unit, layer, element } = findNarration(context, input);
     const commands: WorkspaceCommand[] = [{ type: "update_text_element", ...input }];
     const nextWritingMode = input.changes.writingMode;
     const currentWritingMode = element.style.writingMode ?? "horizontal";
     if (nextWritingMode && nextWritingMode !== currentWritingMode) {
       const source = narrationDefaults[currentWritingMode];
       const target = narrationDefaults[nextWritingMode];
-      const width = Math.min(unit.canvas.width, element.transform.width > source.width + .5 ? element.transform.width : target.width);
-      const height = Math.min(unit.canvas.height, element.transform.height > source.height + .5 ? element.transform.height : target.height);
+      const surface = layer.surfaceId ? unit.surfaces.find((candidate) => candidate.id === layer.surfaceId) : undefined;
+      const bounds = surface?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
+      const width = Math.min(bounds.width, element.transform.width > source.width + .5 ? element.transform.width : target.width);
+      const height = Math.min(bounds.height, element.transform.height > source.height + .5 ? element.transform.height : target.height);
       const centerX = element.transform.x + element.transform.width / 2;
       const centerY = element.transform.y + element.transform.height / 2;
       commands.push({
@@ -794,8 +821,8 @@ const updateNarrationCapability = defineCapability({
         elementId: input.elementId,
         transform: {
           ...element.transform,
-          x: clamp(centerX - width / 2, 0, unit.canvas.width - width),
-          y: clamp(centerY - height / 2, 0, unit.canvas.height - height),
+          x: clamp(centerX - width / 2, bounds.x, bounds.x + bounds.width - width),
+          y: clamp(centerY - height / 2, bounds.y, bounds.y + bounds.height - height),
           width,
           height,
         },
@@ -812,21 +839,24 @@ const duplicateNarrationCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["narration_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["add_overlay_element"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { unit, element } = findNarration(context, input);
+    const { unit, layer, element } = findNarration(context, input);
+    const surface = layer.surfaceId ? unit.surfaces.find((candidate) => candidate.id === layer.surfaceId) : undefined;
+    const bounds = surface?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
     const duplicate: TextElement = {
       ...structuredClone(element),
       id: context.createId("narration"),
       name: "旁白 副本",
       transform: {
         ...element.transform,
-        x: clamp(element.transform.x + 18, 0, unit.canvas.width - element.transform.width),
-        y: clamp(element.transform.y + 18, 0, unit.canvas.height - element.transform.height),
+        x: clamp(element.transform.x + 18, bounds.x, bounds.x + bounds.width - element.transform.width),
+        y: clamp(element.transform.y + 18, bounds.y, bounds.y + bounds.height - element.transform.height),
       },
     };
     return [{ type: "add_overlay_element", unitId: unit.id, layerId: input.layerId, element: duplicate }];
@@ -840,6 +870,7 @@ const deleteNarrationCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["narration_exists"],
   outputCommandTypes: ["remove_overlay_element", "remove_overlay_layer"],
@@ -1018,18 +1049,43 @@ const duplicateDialogueBalloonCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["balloon_element_exists", "dialogue_exists"],
   outputCommandTypes: ["add_dialogue", "add_layer_element", "add_overlay_element"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { element } = findLocatedElement(context, input);
+    const located = findLocatedElement(context, input);
+    const { element } = located;
     if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
     const sourceDialogue = context.fixture.working.document.dialogues.find((dialogue) => dialogue.id === element.dialogueId);
     if (!sourceDialogue) throw new Error(`missing Dialogue: ${element.dialogueId}`);
     const dialogueId = context.createId("dialogue");
-    const balloon: BalloonElement = { ...structuredClone(element), id: context.createId("balloon"), dialogueId, name: `${element.name ?? "对白"} 副本`, transform: { ...element.transform, x: clamp(element.transform.x + .05, 0, 1 - element.transform.width), y: clamp(element.transform.y + .05, 0, 1 - element.transform.height) } };
+    const constrainedSurfaceId = !input.frameId && "surfaceId" in located.layer ? located.layer.surfaceId : undefined;
+    const constrainedSurface = constrainedSurfaceId
+      ? located.unit.surfaces.find((surface) => surface.id === constrainedSurfaceId)
+      : undefined;
+    const limit = input.frameId
+      ? { x: 0, y: 0, width: 1, height: 1, offset: .05 }
+      : {
+          x: constrainedSurface?.geometry.x ?? 0,
+          y: constrainedSurface?.geometry.y ?? 0,
+          width: constrainedSurface?.geometry.width ?? located.unit.canvas.width,
+          height: constrainedSurface?.geometry.height ?? located.unit.canvas.height,
+          offset: 18,
+        };
+    const balloon: BalloonElement = {
+      ...structuredClone(element),
+      id: context.createId("balloon"),
+      dialogueId,
+      name: `${element.name ?? "对白"} 副本`,
+      transform: {
+        ...element.transform,
+        x: clamp(element.transform.x + limit.offset, limit.x, limit.x + limit.width - element.transform.width),
+        y: clamp(element.transform.y + limit.offset, limit.y, limit.y + limit.height - element.transform.height),
+      },
+    };
     return [
       { type: "add_dialogue", dialogue: { ...structuredClone(sourceDialogue), id: dialogueId } },
       input.frameId
@@ -1046,18 +1102,23 @@ const deleteDialogueBalloonCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["balloon_element_exists"],
-  outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_dialogue"],
+  outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_overlay_layer", "remove_dialogue"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { element } = findLocatedElement(context, input);
+    const located = findLocatedElement(context, input);
+    const { element } = located;
     if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
     return [
       input.frameId
         ? { type: "remove_layer_element", ...input, frameId: input.frameId }
         : { type: "remove_overlay_element", unitId: input.unitId, layerId: input.layerId, elementId: input.elementId },
+      ...(!input.frameId && located.layer.elements.length === 1
+        ? [{ type: "remove_overlay_layer" as const, unitId: input.unitId, layerId: input.layerId }]
+        : []),
       ...(dialogueReferenceCount(context, element.dialogueId) === 1 ? [{ type: "remove_dialogue" as const, dialogueId: element.dialogueId }] : []),
     ];
   },
@@ -1070,6 +1131,7 @@ const updateDialogueCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["dialogue_exists"],
   outputCommandTypes: ["update_dialogue"],
@@ -1485,6 +1547,7 @@ const updateBalloonCapability = defineCapability({
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "low",
   preconditions: ["balloon_element_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["update_balloon"],
@@ -1752,10 +1815,11 @@ const convertImageToCrossSegmentCapability = defineCapability({ id: "convert_ima
 const convertBalloonToCrossPageCapability = defineCapability({
   id: "convert_balloon_to_cross_page",
   version: 1,
-  inputSchema: convertCrossSurfaceInputSchema,
+  inputSchema: convertCrossSurfaceInputSchema.extend({ transform: geometrySchema.optional(), tailTarget: z.strictObject({ x: z.number(), y: z.number() }).optional() }),
   scope: "element",
   humanEntry: "available",
   agentAccess: "disabled",
+  externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["spread_exists", "balloon_exists", "resulting_document_is_valid"],
   outputCommandTypes: ["remove_layer_element", "remove_overlay_element", "remove_overlay_layer", "add_overlay_layer", "add_overlay_element"],
@@ -1787,6 +1851,27 @@ const convertBalloonToCrossPageCapability = defineCapability({
         : undefined;
       commands.push({ type: "remove_overlay_element", unitId: input.unitId, layerId: input.layerId, elementId: input.elementId });
       if (overlayLocated.layer.elements.length === 1) commands.push({ type: "remove_overlay_layer", unitId: input.unitId, layerId: input.layerId });
+    }
+    geometry = input.transform ?? geometry;
+    tailTarget = input.tailTarget ?? tailTarget;
+    if (input.transform) {
+      const [left, right] = [...located.unit.surfaces].sort((first, second) => first.geometry.x - second.geometry.x);
+      if (!left || !right) throw new Error("真正双页缺少左右纸面");
+      const gutterStart = left.geometry.x + left.geometry.width;
+      const gutterEnd = right.geometry.x;
+      const crossesGutter = geometry.x < gutterStart && geometry.x + geometry.width > gutterEnd;
+      if (!crossesGutter) throw new Error("跨页气泡必须同时覆盖左右纸面");
+      if (geometry.x < 0 || geometry.y < 0 || geometry.x + geometry.width > located.unit.canvas.width || geometry.y + geometry.height > located.unit.canvas.height) {
+        throw new Error("跨页气泡必须完整位于真正双页画布内");
+      }
+      const safeInset = Math.min(32, Math.max(12, geometry.width * .08));
+      const centerX = geometry.x + geometry.width / 2;
+      if (centerX >= gutterStart - safeInset && centerX <= gutterEnd + safeInset) {
+        throw new Error("跨页气泡的文字中心必须避开中缝安全区，请让气泡中心偏向左页或右页");
+      }
+      if (tailTarget && tailTarget.x >= gutterStart - safeInset && tailTarget.x <= gutterEnd + safeInset) {
+        throw new Error("气泡尾巴不能落在中缝安全区");
+      }
     }
     const target = overlayLayerFor(context, located.unit, { type: "unit" }, "cross_page", "跨页内容");
     if (target.command) commands.push(target.command);

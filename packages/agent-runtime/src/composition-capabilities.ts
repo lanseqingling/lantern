@@ -129,6 +129,115 @@ const imageRemoveSchema = z.strictObject({
   }
 });
 
+const pointSchema = z.strictObject({
+  x: z.number().finite(),
+  y: z.number().finite(),
+});
+
+const balloonShapeSchema = z.enum(["normal", "thought", "caption_box", "cut_corner"]);
+
+const balloonStylePatchSchema = z.strictObject({
+  fontFamily: z.string().trim().min(1).max(160).optional(),
+  fontSize: z.number().min(6).max(240).optional(),
+  textColor: z.string().min(1).max(64).optional(),
+  fill: z.string().min(1).max(64).optional(),
+  stroke: z.string().min(1).max(64).optional(),
+  strokeWidth: z.number().min(0).max(48).optional(),
+  writingMode: z.enum(["horizontal", "vertical"]).optional(),
+});
+
+const balloonCreateSchema = z.strictObject({
+  ...singleTargetEnvelopeShape,
+  content: z.string().max(2000),
+  position: pointSchema,
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) {
+    context.addIssue({ code: "custom", path: ["targetHandles"], message: "创建气泡只接受一个画格、页面或纸面目标。" });
+  }
+});
+
+const balloonUpdateSchema = z.strictObject({
+  ...singleTargetEnvelopeShape,
+  content: z.string().max(2000).optional(),
+  transform: geometrySchema.optional(),
+  tailTarget: pointSchema.optional(),
+  shape: balloonShapeSchema.optional(),
+  style: balloonStylePatchSchema.optional(),
+  placement: z.enum(["breakout", "page", "cross_page"]).optional(),
+  zOrder: z.enum(["front", "back"]).optional(),
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) {
+    context.addIssue({ code: "custom", path: ["targetHandles"], message: "修改气泡只接受一个气泡目标。" });
+  }
+  if (![input.content, input.transform, input.tailTarget, input.shape, input.style, input.placement, input.zOrder].some((value) => value !== undefined)) {
+    context.addIssue({ code: "custom", message: "气泡修改不能为空。" });
+  }
+  if (input.placement && input.placement !== "cross_page"
+    && [input.content, input.transform, input.tailTarget, input.shape, input.style, input.zOrder].some((value) => value !== undefined)) {
+    context.addIssue({ code: "custom", path: ["placement"], message: "改变气泡归属后 handle 会失效；请单独调用并刷新上下文。" });
+  }
+  if (input.placement === "cross_page" && !input.transform) {
+    context.addIssue({ code: "custom", path: ["transform"], message: "跨页气泡必须同时提供跨越左右纸面的 unit 绝对几何。" });
+  }
+  if (input.placement === "cross_page" && [input.content, input.shape, input.style, input.zOrder].some((value) => value !== undefined)) {
+    context.addIssue({ code: "custom", path: ["placement"], message: "转换为跨页气泡时只可同时提供 transform 和 tailTarget；其他修改请在刷新上下文后进行。" });
+  }
+  if (input.zOrder && [input.content, input.transform, input.tailTarget, input.shape, input.style].some((value) => value !== undefined)) {
+    context.addIssue({ code: "custom", path: ["zOrder"], message: "覆盖层重排会改变对象归属；请单独调用并刷新上下文。" });
+  }
+});
+
+const singleBalloonTargetSchema = z.strictObject({
+  ...singleTargetEnvelopeShape,
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) {
+    context.addIssue({ code: "custom", path: ["targetHandles"], message: "该对白操作只接受一个气泡目标。" });
+  }
+});
+
+const narrationCreateSchema = z.strictObject({
+  ...singleTargetEnvelopeShape,
+  content: z.string().max(4000),
+  position: pointSchema,
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) {
+    context.addIssue({ code: "custom", path: ["targetHandles"], message: "创建旁白只接受一个页面或纸面目标。" });
+  }
+});
+
+const narrationUpdateSchema = z.strictObject({
+  ...singleTargetEnvelopeShape,
+  content: z.string().max(4000).optional(),
+  transform: geometrySchema.optional(),
+  fontFamily: z.string().trim().min(1).max(160).optional(),
+  fontSize: z.number().min(6).max(240).optional(),
+  fontWeight: z.number().min(100).max(900).optional(),
+  color: z.string().min(1).max(64).optional(),
+  stroke: z.string().min(1).max(64).optional(),
+  strokeWidth: z.number().min(0).max(48).optional(),
+  align: z.enum(["left", "center", "right"]).optional(),
+  writingMode: z.enum(["horizontal", "vertical"]).optional(),
+  zOrder: z.enum(["front", "back"]).optional(),
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) {
+    context.addIssue({ code: "custom", path: ["targetHandles"], message: "修改旁白只接受一个旁白目标。" });
+  }
+  if (![input.content, input.transform, input.fontFamily, input.fontSize, input.fontWeight, input.color, input.stroke, input.strokeWidth, input.align, input.writingMode, input.zOrder].some((value) => value !== undefined)) {
+    context.addIssue({ code: "custom", message: "旁白修改不能为空。" });
+  }
+  if (input.zOrder && [input.content, input.transform, input.fontFamily, input.fontSize, input.fontWeight, input.color, input.stroke, input.strokeWidth, input.align, input.writingMode].some((value) => value !== undefined)) {
+    context.addIssue({ code: "custom", path: ["zOrder"], message: "覆盖层重排会改变对象归属；请单独调用并刷新上下文。" });
+  }
+});
+
+const singleNarrationTargetSchema = z.strictObject({
+  ...singleTargetEnvelopeShape,
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) {
+    context.addIssue({ code: "custom", path: ["targetHandles"], message: "该旁白操作只接受一个旁白目标。" });
+  }
+});
+
 type CompositionManifestInput = Omit<
   SemanticCapabilityManifest,
   "version" | "execution" | "outputSchema" | "executionModes" | "agentAccess" | "idempotency" | "userMessage"
@@ -217,6 +326,86 @@ export const compositionCapabilities = [
     effect: "direct_change",
     risk: "low",
     domainCapabilities: ["remove_frame_image"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "balloon.create",
+    description: "创建一个 Dialogue 语义对象及其独立 BalloonElement。目标为画格时 position 使用 frame_local 归一化坐标；目标为页面或 PageSurface 时使用 unit 绝对坐标。创建后可用 balloon.update 调整气泡视觉，不直接把文字写进气泡协议。",
+    inputSchema: balloonCreateSchema,
+    target: { required: true, types: ["comic_frame", "presentation_unit", "page_surface"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["create_dialogue_balloon", "create_page_dialogue_balloon"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "balloon.update",
+    description: "修改一个气泡关联的 Dialogue 文本、原始 transform、尾巴目标、基础形状、横竖排和基础样式。placement=breakout 形成 frame-anchored 受控破格，placement=page 转为纸面对象；placement=cross_page 仅用于真正双页，必须提供跨越左右纸面且文字中心和尾巴避开中缝安全区的 unit 绝对几何。",
+    inputSchema: balloonUpdateSchema,
+    target: { required: true, types: ["speech_balloon"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "medium",
+    domainCapabilities: ["update_dialogue", "update_balloon", "promote_element_to_overlay", "convert_element_to_page", "convert_balloon_to_cross_page", "reorder_overlay_element"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "balloon.duplicate",
+    description: "复制一个气泡，同时复制独立的 Dialogue 语义对象；后续修改副本对白不会影响原对象。",
+    inputSchema: singleBalloonTargetSchema,
+    target: { required: true, types: ["speech_balloon"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["duplicate_dialogue_balloon"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "balloon.delete",
+    description: "删除一个明确气泡；当其 Dialogue 不再被任何气泡引用时一并清理该语义对象。",
+    inputSchema: singleBalloonTargetSchema,
+    target: { required: true, types: ["speech_balloon"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["delete_dialogue_balloon"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "narration.create",
+    description: "在正文页、过场页或明确 PageSurface 上创建 frame-free 的纸面旁白 TextElement；position 使用 unit 绝对坐标，真正双页中会固定到目标纸面。",
+    inputSchema: narrationCreateSchema,
+    target: { required: true, types: ["presentation_unit", "page_surface"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["create_narration"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "narration.update",
+    description: "修改一个纸面旁白的文字、绝对几何、字体、字号、字重、颜色、描边、对齐、横竖排和覆盖层前后层级。",
+    inputSchema: narrationUpdateSchema,
+    target: { required: true, types: ["text"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["update_narration", "set_element_transform", "reorder_overlay_element"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "narration.duplicate",
+    description: "复制一个纸面旁白，并在同一纸面内轻微错开放置。",
+    inputSchema: singleNarrationTargetSchema,
+    target: { required: true, types: ["text"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["duplicate_narration"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "narration.delete",
+    description: "删除一个明确的纸面旁白 TextElement，不影响对白语义对象。",
+    inputSchema: singleNarrationTargetSchema,
+    target: { required: true, types: ["text"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["delete_narration"],
     confirmation: "none",
   }),
 ] as const satisfies readonly SemanticCapabilityManifest[];

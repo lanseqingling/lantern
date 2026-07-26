@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to inspect, organize, and edit a creator's comics through the domain capabilities Lantern currently exposes. Use when the user wants to read, understand, manage, review, or continue work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "0.9.0"
-  minimum_catalog_revision: "13"
+  version: "1.0.0"
+  minimum_catalog_revision: "14"
 ---
 
 # Create with Lantern
@@ -37,6 +37,8 @@ When the request asks to inspect or discuss page layout, cropping, overlap, ball
 When the request creates, names, duplicates, orders, deletes, merges, or splits pages, read [references/pages.md](references/pages.md). Use page roles, physical page numbers, reading positions, and true-spread surfaces as distinct facts; never turn a workbench display pairing into a true spread.
 
 When the request creates or edits Frames, places or replaces fixed images, changes crop or transform, enables bleed or overlap, or creates a frame-anchored breakout, read [references/frames-and-images.md](references/frames-and-images.md). Refresh both context and composition after each successful direct change before targeting another object.
+
+When the request creates or edits Dialogue, balloons, narration, paper text, frame-anchored balloon breakout, or a gutter-safe cross-page balloon, read [references/dialogue-and-text.md](references/dialogue-and-text.md). Keep Dialogue semantics, visual carriers, coordinate spaces, and true-spread gutter safety distinct.
 
 ## Respect Lantern's creative boundaries
 

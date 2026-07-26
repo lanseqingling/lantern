@@ -20,8 +20,10 @@ export const externalDirectChangeResultSchema = z.strictObject({
   }),
   effect: z.literal("direct_change"),
   project: z.string().min(1),
-  baseRevision: z.number().int().positive(),
+  baseWorkingRevision: z.number().int().positive(),
   workingRevision: z.number().int().positive(),
+  draft: z.string().min(1),
+  draftRevision: z.number().int().positive(),
   data: z.unknown().optional(),
   nextActions: z.array(z.string()),
 });

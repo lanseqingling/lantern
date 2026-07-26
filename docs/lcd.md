@@ -10,7 +10,7 @@ LCD 保存一话漫画已经确认或正在编辑的作品事实，供工作台�
 故事层：StoryboardBeat（讲什么）
 作品层：PresentationUnit → PageSurface → Frame（怎样组织给读者看）
 画面层：Frame → Layer → Element（画格里怎样呈现）
-工作流层：Candidate → ChangeSet → WorkingRevision / SavedSnapshot
+工作流层：Candidate / AgentDraft → ChangeSet → ChangeProposal → WorkingRevision / SavedSnapshot
 ```
 
 这些层可以互相引用，不能互相替代。LCD 不保存对话消息、任务进度、选择状态、临时预览、画布图片卡摆放或签名资源 URL。
@@ -150,21 +150,23 @@ LCD 只保存稳定的素材与版本标识、媒体类型和必要尺寸，不�
 
 页面重排只能改变展示结构，并按稳定 Frame ID 保留既有图层、成稿和对白。新增或删除画格必须显式表达；只有完整呈现替换才能替换格内内容。
 
-手动界面和 AI 协作调用同一组命令、校验和回退语义。一次 `WorkspaceChangeSet`：
+手动界面和 AI 协作调用同一组命令与校验语义。一次 `WorkspaceChangeSet`：
 
 - 固定 `baseRevision`；
 - 包含一组同源命令；
-- 全部成功才创建新的 WorkingRevision；
+- 全部成功才推进其所属的 WorkingRevision 或 AgentDraft revision；
 - 任一命令失败则不写入；
 - 作为一次 Undo / Redo 的原子单位。
 
-## 9. 候选与保存快照
+## 9. 候选、Agent 方案与保存快照
 
 确定性手动编辑可以直接提交 ChangeSet。AI 生成、结构调整、多对象操作和其他高风险结果先成为 Candidate，记录基准 revision、影响范围和命令，不能静默覆盖工作稿。
 
 候选预览组合“当前工作稿 + Candidate”，允许在适用时切换工作稿与候选结果、应用或取消预览。预览本身不创建 revision；应用后只创建一次原子 ChangeSet。Candidate 基于旧 revision 且无法安全应用时必须标记过期并拒绝写入。
 
-SavedSnapshot 是用户显式保存后不可变的阅读和导出基线，后续编辑不能原地改写。
+SavedSnapshot 是用户显式保存后不可变的阅读和导出基线，后续编辑不能原地改写。回到历史版本通过复制其内容创建新的 WorkingRevision 与 SavedSnapshot，历史只向前增长；用户确认删除某个 SavedSnapshot 时，仅可回收已证明不再被任何作品版本、草稿、画布、资产或封面引用的固定图片版本。
+
+外部 Agent 对一话的连续编辑属于独立 AgentDraft，不直接推进正式 WorkingRevision。AgentDraft 固定一个正式基线，并以不可变草稿 revision 保存每次 ChangeSet；任务完成后冻结为 ChangeProposal。ChangeProposal 不是 LCD 对象，也不是正式版本，只固定审查所需的草稿 revision、基线和资源引用。用户接受方案时，Lantern 在一个事务中创建新的正式 WorkingRevision 与 SavedSnapshot；当前工作稿已偏离基线时拒绝接受，不自动合并。正式 SavedSnapshot 只形成线性历史。
 
 ## 10. 校验不变量
 

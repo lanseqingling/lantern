@@ -1,6 +1,8 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@lantern/ui";
+import { useDocumentBody } from "@/app/lib/client-environment";
 import { uiCopy } from "@/app/lib/ui-copy";
 
 export function DeleteConfirmDialog({
@@ -24,10 +26,11 @@ export function DeleteConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;
 }) {
+  const portalTarget = useDocumentBody();
   const titleId = `${dialogId}-title`;
   const descriptionId = `${dialogId}-description`;
 
-  return <div className="delete-confirm-overlay" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && !disabled) onCancel(); }}>
+  const dialog = <div className="delete-confirm-overlay" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && !disabled) onCancel(); }}>
     <section role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} onPointerDown={(event) => event.stopPropagation()}>
       <div className={`delete-confirm-icon ${tone}`}><Icon name={icon} /></div>
       <h2 id={titleId}>{title}</h2>
@@ -38,4 +41,6 @@ export function DeleteConfirmDialog({
       </div>
     </section>
   </div>;
+
+  return portalTarget ? createPortal(dialog, portalTarget) : null;
 }

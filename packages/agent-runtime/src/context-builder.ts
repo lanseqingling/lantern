@@ -159,6 +159,11 @@ export type ContextRequest = {
   visiblePageIds?: string[];
   selection?: ContextSelection;
   explicitReferences?: WorkspaceReference[];
+  contentOverride?: {
+    revision: number;
+    document: unknown;
+    storyboardBeats: unknown;
+  };
 };
 
 export async function buildAgentContext(request: ContextRequest) {
@@ -219,7 +224,7 @@ export async function buildAgentContext(request: ContextRequest) {
   const availableContextAssets = comicStyleAssets.length
     ? [...regularAssets.slice(0, 23), ...comicStyleAssets]
     : regularAssets.slice(0, 24);
-  const working = request.workingRevision
+  const working = request.workingRevision && !request.contentOverride
     ? await prisma.workingRevision.findUnique({
         where: { projectId_revision: { projectId: project.id, revision: request.workingRevision } },
       })
@@ -230,7 +235,12 @@ export async function buildAgentContext(request: ContextRequest) {
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
 
   const explicitReferences = (request.explicitReferences ?? []).map((reference) => workspaceRefSchema.parse(reference));
-  const document = validateComicDocument(working.document);
+  const content = request.contentOverride ?? {
+    revision: working.revision,
+    document: working.document,
+    storyboardBeats: working.storyboardBeats,
+  };
+  const document = validateComicDocument(content.document);
   const pages = createComicPageViews(document);
   await Promise.all(explicitReferences.map(async (reference) => {
     let owned = false;
@@ -270,7 +280,7 @@ export async function buildAgentContext(request: ContextRequest) {
     if (!owned) throw new AppError("not_found", "引用对象不存在或不属于当前创作空间。", 404);
   }));
 
-  const storyboardBeats = normalizeStoryboardBeats(working.storyboardBeats);
+  const storyboardBeats = normalizeStoryboardBeats(content.storyboardBeats);
   const explicitCanvasMatches = explicitReferences.flatMap((reference) => {
     if (reference.objectType !== "canvas_element") return [];
     for (const page of pages) {
@@ -435,7 +445,7 @@ export async function buildAgentContext(request: ContextRequest) {
       summary: project.chapter.summary,
     },
     projectId: project.id,
-    workingRevision: working.revision,
+    workingRevision: content.revision,
     selection: effectiveSelection,
     storyboardBeats: contextStoryboardBeats,
     currentView: includeCurrentPageLcd && visibleUnits.length ? {

@@ -15,25 +15,26 @@ Agent 的目标不是复制工作台按钮，而是用自然语言完成可审�
 - ❌ 未接入：尚不能通过该 Agent 入口完成。
 - ⚪ 不涉及：按该入口的产品职责不承担，不表示仍需在该入口补齐。
 
-| Agent 能力 | 内置 Agent | 外部 Agent（MCP + Skill） |
+| Agent 能力 | 外部 Agent（MCP + Skill） | 内置 Agent |
 |---|---:|---:|
-| 读取作品、章节、页面及角色/场景/风格资产 | 🟡 | ✅ |
-| 获取当前及最近保存页面的结构与最终渲染画面 | 🟡；仅当前工作稿 | ✅ |
-| 理解单图、单格和整页构图 | ❌ | ✅；由宿主结合原图、LCD 与 Skill 只读分析 |
-| 生成分镜图、角色图和场景图 | ✅ | ⚪；由宿主生图能力提供，MCP 不暴露图片 Provider |
-| 登记外部生成或用户上传的资产图、漫画封面和视觉风格图 | ❌ | ✅ |
-| 创建与管理普通页、封面页、特殊页和双页 | ❌ | ✅ |
-| 创建画格并编辑边框、层级与阅读顺序 | ❌ | ✅ |
-| 放置、替换、移动、缩放、裁切和移除图片 | ❌ | ✅ |
-| 创建与编排对白、气泡、旁白和文字 | ❌ | ✅ |
-| 出血、破格、纸面叠加和跨页对象编排 | ❌ | 🟡 |
+| 读取作品、章节、页面及角色/场景/风格资产 | ✅ | 🟡 |
+| 获取当前及最近保存页面的结构与最终渲染画面 | ✅ | 🟡；仅当前工作稿 |
+| 理解单图、单格和整页构图 | ✅；由宿主结合原图、LCD 与 Skill 只读分析 | ❌ |
+| 生成分镜图、角色图和场景图 | ⚪；由宿主生图能力提供，MCP 不暴露图片 Provider | ✅ |
+| 登记外部生成或用户上传的资产图、漫画封面和视觉风格图 | ✅ | ❌ |
+| 创建与管理普通页、封面页、特殊页和双页 | ✅ | ❌ |
+| 创建画格并编辑边框、层级与阅读顺序 | ✅ | ❌ |
+| 放置、替换、移动、缩放、裁切和移除图片 | ✅ | ❌ |
+| 创建与编排对白、气泡、旁白和文字 | ✅ | ❌ |
+| 出血、破格、纸面叠加和跨页对象编排 | 🟡 | ❌ |
 | 多格、整页和多对象生成或重排 | ❌ | ❌ |
-| Task、Candidate、Apply 与撤销闭环 | 🟡 | 🟡 |
+| Task、Candidate 与单结果处理 | 🟡 | 🟡 |
+| AgentDraft、ChangeProposal 与整项任务审查 | ✅ | ⚪ |
 | 选区、遮罩、局部重画和扩图 | ❌ | ❌ |
-| 单页构图与人物/场景/风格一致性检查 | ❌ | ✅；限定单页，只读输出 |
-| 相邻分镜连续性与创作表达检查 | ❌ | ✅；限定相邻页面，只读输出 |
-| 跨页漫画解析与可复用模板制作 | ❌ | 🟡 |
-| 多 Agent / Workflow / Skill Workflow 协作 | ❌ | 🟡 |
+| 单页构图与人物/场景/风格一致性检查 | ✅；限定单页，只读输出 | ❌ |
+| 相邻分镜连续性与创作表达检查 | ✅；限定相邻页面，只读输出 | ❌ |
+| 跨页漫画解析与可复用模板制作 | 🟡 | ❌ |
+| 多 Agent / Workflow / Skill Workflow 协作 | 🟡 | ❌ |
 
 其中，外部 Agent 已可管理页漫页面与真正双页，编排画格、固定图片、对白、气泡和旁白，并处理裁切、层级、出血、frame-anchored 破格及中缝安全的单气泡跨页。它还可以分别读取未保存 Working Revision 与最近 SavedSnapshot 的 LCD、整页预览和固定资源原图，通过 Skill 完成单页构图与人物/场景/风格一致性检查，以及相邻分镜连续性与创作表达检查。两类检查均为只读；任意跨展示单元、多对象重排、自动修复与高级精修仍未闭环，漫画解析尚未形成稳定模板对象。
 
@@ -73,7 +74,7 @@ flowchart LR
 
 ## 3. Capability 与写入边界
 
-UI、内置 Agent 和 MCP 只调用已登记的语义 Capability。每项 Capability 以共享 schema 为唯一事实源，至少声明：
+UI、MCP 和内置 Agent 只调用已登记的语义 Capability。每项 Capability 以共享 schema 为唯一事实源，至少声明：
 
 - 稳定 ID、版本、输入输出 schema 和适用对象；
 - 所需上下文、执行方式、作用范围和幂等规则；
@@ -89,7 +90,9 @@ Agent 不得直接写 LCD、数据库、底层 WorkspaceCommand，也不能提�
 | `direct_change` | 确定、有界且可撤销的页面、画格和图片编排 | ChangeSet |
 | `candidate` | 生成式结构方案、多对象创作或其他需要预览的高风险结果 | Candidate |
 
-外部 Agent 可以在同一轮请求中继续 Apply，不要求用户回到工作台；这不取消内部的 Candidate、版本校验和 Apply 机制。删除整页、整话、整部作品等大范围破坏性操作必须获得明确确认。直接修改进入普通撤销历史，外部 Agent 不控制工作台的撤销游标。
+UI 的确定性编辑直接形成正式 WorkingRevision。外部 Agent 的一话内容编辑则先进入隔离 AgentDraft：任务内的多个 ChangeSet 可以连续执行，不逐项打断用户，也不改变正式工作稿。Candidate 被选用时只合入 AgentDraft。任务完成后，Agent 必须冻结为 ChangeProposal 并把本地审查链接交给用户；未经 Lantern 可验证的用户动作，外部 Agent 不能把方案提升或保存为正式版本。
+
+删除页面、画格或图片等一话内容可以在 AgentDraft 中随整项方案审查。归档或删除漫画、一话和共享资产不属于单话草稿，仍要求确认准确对象。外部 Agent 不控制工作台的 Undo 游标；方案被用户接受时，Lantern 原子创建一个新的正式 WorkingRevision 和 SavedSnapshot。
 
 ## 4. 上下文与结果生命周期
 
@@ -98,11 +101,24 @@ Agent 不得直接写 LCD、数据库、底层 WorkspaceCommand，也不能提�
 一次可靠编辑至少依赖：
 
 - 当前作品、章节、页面和相关资产的有界上下文；
-- 同一 WorkingRevision 下的结构数据与最终渲染画面；
+- 同一 WorkingRevision、AgentDraft revision 或 SavedSnapshot 下的结构数据与最终渲染画面；
 - 绑定修订版本的对象 handle，防止基于过期观察写入；
-- Capability 返回的 ChangeSet、Candidate、AssetVersion 或 Observation。
+- Capability 返回的 ChangeSet、Candidate、AgentDraft、ChangeProposal、AssetVersion 或 Observation。
 
-内置 Agent 的对话、任务和候选由 Lantern 管理；外部 Agent 的对话、规划和记忆属于宿主，Lantern 只保存与作品相关的任务、候选、变更和资源事实。会话取消、失败或删除不能破坏已经确认的作品内容。
+内置 Agent 的对话、任务和候选由 Lantern 管理；外部 Agent 的对话、规划和记忆属于宿主，Lantern 保存与作品相关的草稿 revision、冻结方案、变更和资源事实。会话取消、失败或删除不能破坏正式工作稿或保存版本。
+
+外部任务的版本链路为：
+
+```text
+WorkingRevision ──创建──> AgentDraft ──连续 ChangeSet──> AgentDraft revision
+                                      └─ Candidate 合入
+AgentDraft revision ──冻结──> ChangeProposal
+ChangeProposal ──用户应用并保存──> 新 WorkingRevision + SavedSnapshot
+               ├─保留方案
+               └─丢弃方案
+```
+
+ChangeProposal 固定 `baseWorkingRevision` 和冻结的草稿 revision。当前正式工作稿仍等于基线时才能应用；若用户已继续编辑，方案标记为过期，仍可查看和丢弃，但不能自动覆盖或合并。正式 SavedSnapshot 历史保持线性，不向用户展示 Git 式分支树。
 
 ## 5. 协作编排模型
 
@@ -136,6 +152,7 @@ MCP 是外部 Agent 的能力传输层，负责：
 - 暴露经过筛选的 Capability；
 - 登记外部生成或用户上传的图片；
 - 返回结构化结果、错误、版本冲突和确认要求。
+- 为一话内容编辑创建并推进 AgentDraft，完成后冻结 ChangeProposal 和审查链接。
 
 外部 Agent 的图片生成完全由宿主 Agent 或用户负责。Lantern MCP 不代理内部生图 Provider，只接收结果、写入不可变 AssetVersion，再通过 Capability 放置、替换或裁切。
 
@@ -144,7 +161,7 @@ Lantern 分发一个应用级入口 Skill，内部按领域参考和 Skill Workf
 - 理解 LCD、页面结构、坐标、画格、图片、气泡和 Candidate；
 - 组合结构观察、最终渲染、角色/场景/风格资产来维持一致性；
 - 遵守出血格、破格、装订线、安全区、跨页对象、阅读顺序和气泡避让等漫画规范；
-- 判断何时直接修改、何时产生 Candidate、何时必须确认；
+- 判断何时推进 AgentDraft、何时使用 Candidate、何时冻结方案以及何时必须确认；
 - 组织单页构图检查、一致性检查、分镜分析和漫画解析等 Skill Workflow。
 
 Skill 只定义知识和操作方法，不复制 MCP schema、完整工具目录或 UI 步骤，也不承担服务端权限校验。服务端不能相信 Skill 一定被读取或正确执行。
@@ -163,6 +180,6 @@ Skill 只定义知识和操作方法，不复制 MCP schema、完整工具目录
 - 创建与编排对白、气泡、旁白和基础文字；
 - 支持有限的纸面叠加、跨页气泡和跨页对象；
 - 观察整页结构与最终画面，检查编排结果并继续修改；
-- 对高风险结果完成 Candidate、确认、Apply 和撤销闭环。
+- 把一次任务的所有编辑冻结为 ChangeProposal，由用户在统一对比界面应用并保存、保留或丢弃。
 
 这一闭环不依赖浏览器自动化、直接 HTTP API、原始 LCD 写入或编写模板代码。选区与遮罩、局部重画、扩图、自动连续性修复、稳定模板系统、完整多 Agent / Workflow，以及条漫专属能力属于扩展范围。

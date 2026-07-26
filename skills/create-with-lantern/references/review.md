@@ -5,7 +5,7 @@ Load this reference for page-composition review, character or scene consistency,
 ## Gather one coherent evidence set
 
 1. Resolve the Chapter or Project.
-2. Read one page, one true spread, or two adjacent PresentationUnits with `source: working`.
+2. Read one page, one true spread, or two adjacent PresentationUnits from the source being judged: `source: agent_draft` during an external creation task, otherwise `source: working`.
 3. Inspect their final page preview and LCD structure at that same source revision.
 4. Use exact placed-image or `asset_version` handles to fetch the relevant character, scene, prop, and visual-style images. When a relevant asset is not already used on the page, pass up to three stable Asset references in the context request so Lantern can return their bounded version handles. Inspect no more than three images at once.
 5. Use the Comic and Chapter summaries, settings, StoryboardBeats, reading direction, and fixed image versions returned in context.

@@ -28,19 +28,19 @@ test("Prisma client readiness verifies the generated schema instead of trusting 
     await mkdir(path.join(root, "node_modules", ".prisma", "client"), { recursive: true });
     await mkdir(path.join(root, "node_modules", "@prisma", "client"), { recursive: true });
     await writeFile(path.join(root, "package.json"), '{"name":"fixture"}\n');
-    await writeFile(path.join(root, "prisma", "schema.prisma"), schema);
-    await writeFile(path.join(root, "node_modules", ".prisma", "client", "schema.prisma"), schema.replace("sqlite", "postgresql"));
+    await writeFile(path.join(root, "prisma", "schema.prisma"), `\uFEFF${schema.replace(/\n/g, "\r\n")}`);
+    await writeFile(path.join(root, "node_modules", ".prisma", "client", "schema.prisma"), schema);
 
     const state = prismaSchemaState(root);
     await writeFile(path.join(root, "node_modules", ".lantern-prisma-schema-state"), `${state}\n`);
+    assert.equal(generatedPrismaSchemaMatches(root), true);
+    recordPrismaClientState(root, state);
+    assert.equal(prismaClientReady(root, state), true);
+
+    await writeFile(path.join(root, "node_modules", ".prisma", "client", "schema.prisma"), schema.replace("sqlite", "postgresql"));
     assert.equal(generatedPrismaSchemaMatches(root), false);
     assert.equal(prismaClientReady(root, state), false);
     assert.throws(() => recordPrismaClientState(root, state), /does not match/);
-
-    await writeFile(path.join(root, "node_modules", ".prisma", "client", "schema.prisma"), schema);
-    recordPrismaClientState(root, state);
-    assert.equal(generatedPrismaSchemaMatches(root), true);
-    assert.equal(prismaClientReady(root, state), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

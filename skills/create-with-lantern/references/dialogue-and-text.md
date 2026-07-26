@@ -1,6 +1,6 @@
 # Dialogue, balloons, and paper narration
 
-Load this reference for the currently exposed deterministic text-composition capabilities. These operations modify one explicit object at a time and produce revision-bound, undoable Working Revision changes.
+Load this reference for the currently exposed deterministic text-composition capabilities. These operations modify one explicit object at a time and produce revision-bound AgentDraft changes that are reviewed together at task completion.
 
 ## Keep meaning separate from appearance
 

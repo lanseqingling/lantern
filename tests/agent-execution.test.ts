@@ -141,6 +141,7 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "asset.archive",
     "candidate.get",
     "candidate.apply",
+    "agent_draft.finish",
     "page.create",
     "page.rename",
     "page.duplicate",
@@ -223,7 +224,7 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   assert.equal(externalCatalog.some((capability) => capability.id === "storyboard.edit_single_entry"), false);
 });
 
-test("external Candidate Apply is direct in v1 but remains controlled by one service policy", () => {
+test("legacy Candidate application policy remains explicit while external MCP merges into AgentDraft", () => {
   const invocation = { actor: "external", client: { name: "codex" } } as const;
   assert.doesNotThrow(() => assertCandidateApplicationAllowed(invocation));
   assert.throws(

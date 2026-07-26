@@ -37,6 +37,6 @@ Only adjacent ordinary pages with the same `story` or `interlude` role can becom
 - Split one true-spread handle.
 - Delete only after the creator confirms the exact page. Pass the same handle in `targetHandles` and `confirmedTargetHandles`.
 
-Every page mutation is revision-bound, idempotent, atomic, and undoable in Lantern. After success, read fresh context before locating another page. Reuse the same idempotency key only for an exact retry of the same logical action.
+Every page mutation is revision-bound, idempotent, and atomic inside the AgentDraft. After the first success, continue from that draft and read fresh context before locating another page. Reuse the same idempotency key only for an exact retry of the same logical action. The finished task becomes one ChangeProposal for the creator to review.
 
 Page-manga capabilities do not authorize rolling-segment creation, device viewport management, scroll grouping, or cross-segment composition.

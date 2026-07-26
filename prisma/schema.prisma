@@ -112,6 +112,19 @@ enum CreationStatus {
   COMPLETED
 }
 
+enum AgentDraftStatus {
+  ACTIVE
+  READY
+}
+
+enum ChangeProposalStatus {
+  AVAILABLE
+  RETAINED
+  APPLIED
+  DISCARDED
+  STALE
+}
+
 model User {
   id          String   @id @default(cuid())
   email       String   @unique
@@ -132,6 +145,8 @@ model User {
   canvasAssetItems   CanvasAssetListItem[]
   externalUploads    ExternalAssetUpload[]
   externalOperations ExternalAgentOperation[]
+  agentDrafts        AgentDraft[]
+  changeProposals    ChangeProposal[]
 }
 
 model Comic {
@@ -225,6 +240,8 @@ model Project {
   tasks            GenerationTask[]
   candidates       Candidate[]
   snapshots        SavedSnapshot[]
+  agentDrafts      AgentDraft[]
+  changeProposals  ChangeProposal[]
 
   @@index([ownerUserId])
 }
@@ -263,6 +280,75 @@ model SavedSnapshot {
 
   @@index([ownerUserId, chapterId, createdAt])
   @@index([projectId, sourceWorkingRevision])
+}
+
+/// An isolated, mutable branch used by an external Agent while it is carrying
+/// out one user task. Official WorkingRevision rows are never advanced by draft
+/// edits.
+model AgentDraft {
+  id                  String           @id @default(cuid())
+  ownerUserId         String
+  projectId           String
+  baseWorkingRevision Int
+  title               String           @default("Agent 方案")
+  sourceHost          String?
+  status              AgentDraftStatus @default(ACTIVE)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  owner     User                 @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project   Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  revisions AgentDraftRevision[]
+  proposal  ChangeProposal?
+
+  @@index([ownerUserId, projectId, status, updatedAt])
+  @@index([projectId, baseWorkingRevision])
+}
+
+/// Draft revisions are immutable so a frozen proposal keeps stable evidence
+/// even when another Agent task continues from the same official baseline.
+model AgentDraftRevision {
+  id                         String   @id @default(cuid())
+  agentDraftId               String
+  revision                   Int
+  document                   Json
+  storyboardBeats            Json
+  storyboardBeatVersionHeads Json     @default(dbgenerated("'{}'"))
+  assetVersionHeads          Json     @default(dbgenerated("'{}'"))
+  changeSet                  Json?
+  createdAt                  DateTime @default(now())
+
+  agentDraft AgentDraft       @relation(fields: [agentDraftId], references: [id], onDelete: Restrict)
+  proposals  ChangeProposal[]
+
+  @@unique([agentDraftId, revision])
+  @@index([agentDraftId, createdAt])
+}
+
+/// A frozen Agent result. It can be retained for later comparison, applied to
+/// the current official draft by an explicit UI action, or discarded.
+model ChangeProposal {
+  id                      String               @id @default(cuid())
+  ownerUserId             String
+  projectId               String
+  agentDraftId            String               @unique
+  agentDraftRevisionId    String
+  baseWorkingRevision     Int
+  title                   String
+  summary                 String               @default("")
+  status                  ChangeProposalStatus @default(AVAILABLE)
+  acceptedWorkingRevision Int?
+  acceptedSnapshotId      String?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  owner         User               @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project       Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  agentDraft    AgentDraft         @relation(fields: [agentDraftId], references: [id], onDelete: Restrict)
+  draftRevision AgentDraftRevision @relation(fields: [agentDraftRevisionId], references: [id], onDelete: Restrict)
+
+  @@index([ownerUserId, projectId, status, createdAt])
+  @@index([projectId, baseWorkingRevision])
 }
 
 model StoryboardBeat {

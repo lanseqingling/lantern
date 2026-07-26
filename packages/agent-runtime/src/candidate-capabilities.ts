@@ -12,7 +12,10 @@ export const externalCandidateToolResultSchema = z.strictObject({
   }),
   project: z.string().min(1),
   baseRevision: z.number().int().positive(),
-  workingRevision: z.number().int().positive(),
+  workingRevision: z.number().int().positive().optional(),
+  baseWorkingRevision: z.number().int().positive().optional(),
+  draft: z.string().min(1).optional(),
+  draftRevision: z.number().int().positive().optional(),
   data: z.unknown().optional(),
   nextActions: z.array(z.string()),
 });
@@ -57,7 +60,7 @@ export const candidateCapabilities = [
   }),
   candidateCapability({
     id: "candidate.apply",
-    description: "把一个明确且仍可用的 Candidate 应用到其固定创作空间。宿主可在同一用户请求中继续调用；应用时必须提供 Candidate 基准对应的 expected revision。",
+    description: "把一个明确且仍可用的 Candidate 合入隔离 AgentDraft，而不是正式工作稿。应用时必须提供 Candidate 基准对应的 expected revision；完成整项任务后再冻结草稿供用户审阅。",
     inputSchema: candidateApplySchema,
     target: { required: true, types: ["candidate"], min: 1, max: 1 },
     effect: "direct_change",

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
 import { getObject } from "@lantern/server/object-storage";
+import { getAgentDraft, parseAgentDraftReference } from "@lantern/server/version-service";
 import { executeIdempotentExternalMutation } from "@lantern/server/external-operation-service";
 import { prepareExternalAssetUpload } from "@lantern/server/external-upload-service";
 import {
@@ -44,6 +45,7 @@ import {
 } from "@lantern/server/resource-reference-service";
 import {
   createComicPageViews,
+  normalizeStoryboardBeats,
   orderedUnitSurfaces,
   validateComicDocument,
   type ComicDocument,
@@ -63,6 +65,7 @@ import { externalResourceToolResultSchema, isResourceCapabilityId } from "./reso
 import { isCandidateCapabilityId } from "./candidate-capabilities";
 import { isPageCapabilityId } from "./page-capabilities";
 import { isCompositionCapabilityId } from "./composition-capabilities";
+import { isAgentDraftCapabilityId } from "./agent-draft-capabilities";
 import {
   createExternalTargetHandle,
   resolveExternalTargetHandles,
@@ -89,7 +92,8 @@ const externalPageLocatorSchema = z.strictObject({
 export const externalContextGetInputSchema = z.strictObject({
   scope: z.string().trim().min(1).max(2048).optional(),
   projectId: z.string().min(1).optional(),
-  source: z.enum(["working", "latest_saved"]).default("working"),
+  source: z.enum(["working", "latest_saved", "agent_draft"]).default("working"),
+  draft: z.string().trim().min(1).max(2048).optional(),
   profile: z.enum(externalContextProfiles).default("visual_observation"),
   assets: z.array(z.string().trim().min(1).max(2048)).max(3).optional(),
   pages: z.array(externalPageLocatorSchema).min(1).max(2).optional(),
@@ -101,6 +105,9 @@ export const externalContextGetInputSchema = z.strictObject({
   }
   if ([value.pages, value.pageId, value.pageIds].filter((item) => item !== undefined).length > 1) {
     context.addIssue({ code: "custom", message: "pages、pageId 与 pageIds 只能提供一种。" });
+  }
+  if ((value.source === "agent_draft") !== Boolean(value.draft)) {
+    context.addIssue({ code: "custom", message: "source 为 agent_draft 时必须且只能提供 draft。" });
   }
 });
 
@@ -186,6 +193,13 @@ const externalObservationSourceSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("working"),
     workingRevision: z.number().int().positive(),
+    createdAt: z.string(),
+  }),
+  z.strictObject({
+    kind: z.literal("agent_draft"),
+    draftId: z.string().min(1),
+    baseWorkingRevision: z.number().int().positive(),
+    draftRevision: z.number().int().positive(),
     createdAt: z.string(),
   }),
   z.strictObject({
@@ -303,6 +317,7 @@ export function listExternalCapabilities() {
         || isCandidateCapabilityId(capability.id)
         || isPageCapabilityId(capability.id)
         || isCompositionCapabilityId(capability.id)
+        || isAgentDraftCapabilityId(capability.id)
       )),
   });
 }
@@ -758,8 +773,26 @@ async function resolvePageLocators(
 async function loadExternalContextSource(
   ownerUserId: string,
   projectId: string,
-  source: "working" | "latest_saved",
+  source: "working" | "latest_saved" | "agent_draft",
+  draftReference?: string,
 ) {
+  if (source === "agent_draft") {
+    const loaded = await getAgentDraft(ownerUserId, parseAgentDraftReference(draftReference ?? ""));
+    if (loaded.draft.projectId !== projectId) throw new AppError("invalid_context_scope", "Agent 工作草稿不属于当前创作空间。", 403);
+    return {
+      document: validateComicDocument(loaded.revision.document),
+      storyboardBeats: normalizeStoryboardBeats(loaded.revision.storyboardBeats),
+      revision: loaded.revision.revision,
+      draftId: loaded.draft.id,
+      source: {
+        kind: "agent_draft" as const,
+        draftId: loaded.draft.id,
+        baseWorkingRevision: loaded.draft.baseWorkingRevision,
+        draftRevision: loaded.revision.revision,
+        createdAt: loaded.revision.createdAt.toISOString(),
+      },
+    };
+  }
   if (source === "latest_saved") {
     const snapshot = await prisma.savedSnapshot.findFirst({
       where: {
@@ -772,11 +805,12 @@ async function loadExternalContextSource(
     if (!snapshot) throw new AppError("not_found", "当前一话还没有已保存版本。", 404);
     const sourceWorking = await prisma.workingRevision.findUnique({
       where: { projectId_revision: { projectId, revision: snapshot.sourceWorkingRevision } },
-      select: { id: true },
+      select: { id: true, storyboardBeats: true },
     });
     if (!sourceWorking) throw new AppError("not_found", "已保存版本的来源修订不存在。", 404);
     return {
       document: validateComicDocument(snapshot.document),
+      storyboardBeats: normalizeStoryboardBeats(sourceWorking.storyboardBeats),
       revision: snapshot.sourceWorkingRevision,
       snapshotId: snapshot.id,
       source: {
@@ -797,6 +831,7 @@ async function loadExternalContextSource(
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
   return {
     document: validateComicDocument(working.document),
+    storyboardBeats: normalizeStoryboardBeats(working.storyboardBeats),
     revision: working.revision,
     source: {
       kind: "working" as const,
@@ -813,7 +848,7 @@ export async function getExternalAgentContext(
 ) {
   const parsed = externalContextGetInputSchema.parse(input);
   const resolvedScope = await resolveContextRequestScope(ownerUserId, parsed);
-  const observationSource = await loadExternalContextSource(ownerUserId, resolvedScope.projectId, parsed.source);
+  const observationSource = await loadExternalContextSource(ownerUserId, resolvedScope.projectId, parsed.source, parsed.draft);
   const explicitAssetReferences = await Promise.all((parsed.assets ?? []).map(async (reference) => {
     const resolved = await resolveResourceReference(ownerUserId, reference, "asset");
     const asset = await prisma.asset.findFirst({
@@ -852,6 +887,11 @@ export async function getExternalAgentContext(
     visiblePageIds: requestedPageIds.length ? requestedPageIds : undefined,
     selection: { type: "none", ...(requestedPageIds[0] ? { pageId: requestedPageIds[0] } : {}) },
     explicitReferences: explicitAssetReferences,
+    contentOverride: {
+      revision: observationSource.revision,
+      document: observationSource.document,
+      storyboardBeats: observationSource.storyboardBeats,
+    },
   });
   if (requestedPageIds.length && requestedPageIds.some((pageId) => !context.currentView?.unitIds.includes(pageId))) {
     throw new AppError("not_found", "目标页面不存在或不属于当前创作空间。", 404);
@@ -868,6 +908,7 @@ export async function getExternalAgentContext(
     projectId: resolvedScope.projectId,
     baseRevision: context.workingRevision,
     ...(observationSource.snapshotId ? { snapshotId: observationSource.snapshotId } : {}),
+    ...(observationSource.draftId ? { draftId: observationSource.draftId } : {}),
     expiresAt,
     target,
   });
@@ -1116,6 +1157,7 @@ export async function inspectExternalAgentComposition(
     unitIds,
     expectedRevision: resolved.workingRevision,
     ...(resolved.source.kind === "saved_snapshot" ? { snapshotId: resolved.source.snapshotId } : {}),
+    ...(resolved.source.kind === "agent_draft" ? { draftId: resolved.source.draftId } : {}),
   });
   const pageHandleById = new Map(resolved.decoded.map(({ handle, payload }) => [payload.target.pageId!, handle]));
   const expiresAt = Math.min(...resolved.decoded.map(({ payload }) => payload.expiresAt));
@@ -1124,6 +1166,7 @@ export async function inspectExternalAgentComposition(
     projectId: resolved.projectId,
     baseRevision: resolved.workingRevision,
     ...(resolved.source.kind === "saved_snapshot" ? { snapshotId: resolved.source.snapshotId } : {}),
+    ...(resolved.source.kind === "agent_draft" ? { draftId: resolved.source.draftId } : {}),
     expiresAt,
     target,
   });

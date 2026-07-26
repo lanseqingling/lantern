@@ -27,18 +27,18 @@ Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑�
 
 - 漫画画布：页面或滚动段位于工作台中央，资产、分镜、参考图片和 Agent 对话围绕作品展开；参考图片只有明确放入画格或纸面后才进入成稿。
 
-- 受控编辑：UI 与产品内外的 Agent 共用语义能力和作品边界；普通编辑可撤销，生成、结构和多对象结果先形成 Candidate，由创作者决定是否应用。
+- 受控编辑：UI 与产品内外的 Agent 共用语义能力和作品边界；工作台编辑进入可撤销工作稿，外部 Agent 的一话任务进入隔离草稿并在完成后形成可整体审查的方案。
 
 ```text
-qu工作台 / 内置 Agent / 外部 Agent（MCP + Skill）
+工作台 / 内置 Agent / 外部 Agent（MCP + Skill）
                 ↓
           受控语义能力
                 ↓
-      可撤销工作稿或待确认 Candidate
+ 工作稿 / Candidate / 隔离 Agent 草稿
                 ↓
-             LCD 作品
+       用户审查并保存正式版本
                 ↓
-          预览、保存与导出
+         LCD 预览与导出
 ```
 
 <p align="center">
@@ -67,6 +67,8 @@ qu工作台 / 内置 Agent / 外部 Agent（MCP + Skill）
 | 相邻分镜连续性与创作表达检查 | ⚪ | ✅ | ❌ |
 | 格内图片、角色与场景资产生成 | ✅ | ⚪ | ✅ |
 | Candidate 查看、应用与冲突保护 | ✅ | 🟡 | ✅ |
+| Agent 隔离草稿、方案链接与整体审查 | ✅ | ✅ | ⚪ |
+| 正式版本列表、对比与指定版本回退 | ✅ | ⚪ | ⚪ |
 | 阅读预览、图片下载与 LCD 导入导出 | ✅ | ❌ | ❌ |
 | 画内效果与表现型气泡 | 🟡 | ❌ | ❌ |
 | 选区、遮罩、局部重画与扩图 | ❌ | ❌ | ❌ |
@@ -128,6 +130,12 @@ $actual -eq $expected
 
 Windows 使用 `lantern.cmd agent:install`。命令会识别当前 Agent，安装 Lantern 应用级 Skill 并登记本地 MCP。Agent 只能使用 Lantern 当前显式开放的受控能力；Lantern 升级、端口或凭证变化后，重复运行同一命令即可同步。详细边界见 [Agent](./docs/agent.md)。
 
+第一次使用可以从 [外部 Agent 创作快速上手](./docs/agent-quickstart.md) 开始，直接复制几个简单 Prompt，体验创建作品、编排页面、继续修改和视觉检查。外部 Agent 完成一话内容任务后会返回本地审查链接；你也可以从工作台右上角的历史入口查看方案，决定应用并保存、保留或丢弃。
+
+## 运行与数据
+
+在源码或发行目录中，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`。
+
 如果希望在任意目录直接使用 `lantern`，先在 Lantern 目录运行一次：
 
 ```bash
@@ -135,12 +143,6 @@ npm link
 ```
 
 之后可以在任意目录执行 `lantern start`、`lantern agent:install` 等命令。
-
-第一次使用可以从 [外部 Agent 创作快速上手](./docs/agent-quickstart.md) 开始，直接复制几个简单 Prompt，体验创建作品、编排页面、继续修改和视觉检查。
-
-## 运行与数据
-
-在源码或发行目录中，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`；完成上方的命令链接后，也可以使用 `lantern <command>`。
 
 | 命令 | 用途 |
 |---|---|
@@ -161,7 +163,7 @@ npm link
 
 ### 备份与恢复
 
-备份包含作品、工作稿、消息、任务、候选、快照和本地对象文件，不包含模型 Key、安装令牌、日志或临时文件。备份和恢复前需要停止 Lantern：
+备份包含作品、工作稿、Agent 草稿与方案、消息、任务、候选、快照和本地对象文件，不包含模型 Key、安装令牌、日志或临时文件。备份和恢复前需要停止 Lantern：
 
 ```bash
 ./lantern stop

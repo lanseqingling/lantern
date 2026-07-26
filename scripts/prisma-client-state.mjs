@@ -16,6 +16,10 @@ function stateFilePath(repositoryRoot) {
   return path.join(repositoryRoot, "node_modules", ".lantern-prisma-schema-state");
 }
 
+function schemaContents(filename) {
+  return readFileSync(filename, "utf8").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+}
+
 export function prismaSchemaState(repositoryRoot) {
   const hash = createHash("sha256");
   for (const filename of ["package.json", path.join("prisma", "schema.prisma")]) {
@@ -28,7 +32,7 @@ export function prismaSchemaState(repositoryRoot) {
 export function generatedPrismaSchemaMatches(repositoryRoot) {
   const generated = generatedSchemaPath(repositoryRoot);
   if (!generated || !existsSync(generated)) return false;
-  return readFileSync(generated).equals(readFileSync(sourceSchemaPath(repositoryRoot)));
+  return schemaContents(generated) === schemaContents(sourceSchemaPath(repositoryRoot));
 }
 
 export function prismaClientReady(repositoryRoot, expectedState = prismaSchemaState(repositoryRoot)) {

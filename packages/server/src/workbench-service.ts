@@ -450,8 +450,13 @@ export async function commitChangeSet(args: {
   changeSet: WorkspaceChangeSet;
   candidateId?: string;
   revertCandidatesAppliedAfterRevision?: number;
+  saveSnapshotForChapterId?: string;
+  appliedChangeProposalId?: string;
 }) {
-  await getOwnedProject(args.ownerUserId, args.projectId);
+  const ownedProject = await getOwnedProject(args.ownerUserId, args.projectId);
+  if (args.saveSnapshotForChapterId && args.saveSnapshotForChapterId !== ownedProject.chapterId) {
+    throw new AppError("validation", "保存版本的一话与当前创作空间不一致。", 400);
+  }
   return prisma.$transaction(async (tx) => {
     const current = await tx.workingRevision.findFirst({ where: { projectId: args.projectId }, orderBy: { revision: "desc" } });
     if (!current) throw new AppError("not_found", "工作稿不存在。", 404);
@@ -526,9 +531,49 @@ export async function commitChangeSet(args: {
       },
       data: { status: "STALE" },
     });
+    await tx.changeProposal.updateMany({
+      where: {
+        projectId: args.projectId,
+        ownerUserId: args.ownerUserId,
+        status: { in: ["AVAILABLE", "RETAINED"] },
+        baseWorkingRevision: { lt: next.revision },
+      },
+      data: { status: "STALE" },
+    });
+    const savedSnapshot = args.saveSnapshotForChapterId
+      ? await tx.savedSnapshot.create({
+          data: {
+            ownerUserId: args.ownerUserId,
+            chapterId: args.saveSnapshotForChapterId,
+            projectId: args.projectId,
+            sourceWorkingRevision: next.revision,
+            document: next.document as Prisma.InputJsonValue,
+            storyboardBeatVersions: next.storyboardBeatVersionHeads as Prisma.InputJsonValue,
+            assetVersions: next.assetVersionHeads as Prisma.InputJsonValue,
+          },
+        })
+      : undefined;
+    if (args.appliedChangeProposalId) {
+      if (!savedSnapshot) throw new AppError("validation", "应用 Agent 方案必须同时形成保存版本。", 400);
+      const appliedProposal = await tx.changeProposal.updateMany({
+        where: {
+          id: args.appliedChangeProposalId,
+          ownerUserId: args.ownerUserId,
+          projectId: args.projectId,
+          status: { in: ["AVAILABLE", "RETAINED", "STALE"] },
+        },
+        data: {
+          status: "APPLIED",
+          acceptedWorkingRevision: next.revision,
+          acceptedSnapshotId: savedSnapshot.id,
+        },
+      });
+      if (appliedProposal.count !== 1) throw new AppError("conflict", "Agent 方案已经变化，无法完成应用。", 409);
+    }
     const resolved = await withResolvedResources(next.document);
     return {
       ...result,
+      ...(savedSnapshot ? { savedSnapshotId: savedSnapshot.id } : {}),
       working: {
         ...result.working,
         documentId: next.id,

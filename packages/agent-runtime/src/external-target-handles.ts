@@ -10,6 +10,7 @@ export const externalTargetHandlePayloadSchema = z.strictObject({
   projectId: z.string().min(1),
   baseRevision: z.number().int().positive(),
   snapshotId: z.string().min(1).optional(),
+  draftId: z.string().min(1).optional(),
   expiresAt: z.number().int().positive(),
   nonce: z.string().min(16),
   target: z.strictObject({
@@ -86,10 +87,15 @@ export async function resolveExternalTargetHandles(input: {
     throw new AppError("context_handle_expired", "上下文目标已过期，请重新读取 Lantern 上下文。", 409);
   }
   const snapshotIds = [...new Set(decoded.map(({ payload }) => payload.snapshotId ?? null))];
+  const draftIds = [...new Set(decoded.map(({ payload }) => payload.draftId ?? null))];
   if (snapshotIds.length !== 1) {
     throw new AppError("invalid_context_handle", "同一次调用的上下文目标必须来自同一个作品版本。", 422);
   }
   const snapshotId = snapshotIds[0];
+  if (draftIds.length !== 1 || (snapshotId && draftIds[0])) {
+    throw new AppError("invalid_context_handle", "同一次调用的上下文目标必须来自同一个作品版本。", 422);
+  }
+  const draftId = draftIds[0];
   if (snapshotId) {
     if (!input.allowSavedSnapshot) {
       throw new AppError("saved_snapshot_read_only", "已保存版本目标仅供观察，不能用于修改当前工作稿。", 422);
@@ -118,6 +124,43 @@ export async function resolveExternalTargetHandles(input: {
         snapshotId: snapshot.id,
         sourceWorkingRevision: snapshot.sourceWorkingRevision,
         createdAt: snapshot.createdAt.toISOString(),
+      },
+      decoded,
+    };
+  }
+  if (draftId) {
+    const draft = await prisma.agentDraft.findFirst({
+      where: {
+        id: draftId,
+        projectId,
+        ownerUserId: input.ownerUserId,
+        project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+      },
+      include: { revisions: { orderBy: { revision: "desc" }, take: 1, select: { revision: true, createdAt: true } } },
+    });
+    const revision = draft?.revisions[0];
+    if (!draft || !revision) throw new AppError("not_found", "Agent 工作草稿不存在。", 404);
+    if (draft.status !== "ACTIVE") throw new AppError("conflict", "Agent 工作草稿已经冻结，不能继续编辑。", 409);
+    if (input.expectedRevision !== undefined && input.expectedRevision !== revision.revision) {
+      throw new AppError("revision_conflict", "Agent 工作草稿已经变化，请重新读取 Lantern 上下文。", 409, {
+        expectedRevision: input.expectedRevision,
+        currentRevision: revision.revision,
+      });
+    }
+    if (decoded.some(({ payload }) => payload.baseRevision !== revision.revision)) {
+      throw new AppError("context_stale", "Agent 工作草稿已经变化，请重新读取 Lantern 上下文。", 409, {
+        currentRevision: revision.revision,
+      });
+    }
+    return {
+      projectId,
+      workingRevision: revision.revision,
+      source: {
+        kind: "agent_draft" as const,
+        draftId: draft.id,
+        baseWorkingRevision: draft.baseWorkingRevision,
+        draftRevision: revision.revision,
+        createdAt: revision.createdAt.toISOString(),
       },
       decoded,
     };

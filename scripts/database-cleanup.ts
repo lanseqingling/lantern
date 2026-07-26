@@ -16,6 +16,9 @@ export async function clearComicData(prisma: PrismaClient, comicId: string) {
 
   await prisma.$transaction([
     prisma.candidate.deleteMany({ where: { projectId: { in: projectIds } } }),
+    prisma.changeProposal.deleteMany({ where: { projectId: { in: projectIds } } }),
+    prisma.agentDraftRevision.deleteMany({ where: { agentDraft: { projectId: { in: projectIds } } } }),
+    prisma.agentDraft.deleteMany({ where: { projectId: { in: projectIds } } }),
     prisma.generationAttempt.deleteMany({ where: { taskId: { in: taskIds } } }),
     prisma.generationTask.deleteMany({ where: { projectId: { in: projectIds } } }),
     prisma.messageReference.deleteMany({ where: { messageId: { in: messageIds } } }),

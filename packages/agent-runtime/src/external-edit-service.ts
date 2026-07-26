@@ -9,7 +9,12 @@ import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
 import { executeIdempotentExternalMutation } from "@lantern/server/external-operation-service";
 import { resolveResourceReference, resourceReference } from "@lantern/server/resource-reference-service";
-import { commitChangeSet } from "@lantern/server/workbench-service";
+import {
+  agentDraftReference,
+  commitAgentDraftChange,
+  createAgentDraft,
+  getAgentDraft,
+} from "@lantern/server/version-service";
 import {
   assertAgentCapabilityAccess,
   type AgentCapabilityDescriptor,
@@ -127,6 +132,26 @@ async function loadExternalChangeFixture(
   };
 }
 
+async function loadExternalDraftFixture(ownerUserId: string, draftId: string) {
+  const { draft, revision } = await getAgentDraft(ownerUserId, draftId);
+  return {
+    draft,
+    revision,
+    fixture: {
+      working: {
+        documentId: revision.id,
+        chapterId: "agent-draft",
+        projectId: draft.projectId,
+        createdAt: revision.createdAt.toISOString(),
+        state: "working" as const,
+        revision: revision.revision,
+        document: validateComicDocument(revision.document),
+      },
+      storyboardBeats: normalizeStoryboardBeats(revision.storyboardBeats),
+    },
+  };
+}
+
 export async function executeExternalDirectChange(input: {
   ownerUserId: string;
   capability: AgentCapabilityDescriptor;
@@ -158,32 +183,44 @@ export async function executeExternalDirectChange(input: {
       const targets = resolved.decoded.map(({ handle, payload }) => ({ handle, target: payload.target }));
       completedTargetReference = targetAuditReference(projectReference, targets);
       assertCapabilityContract(input.capability, targets, envelope.confirmedTargetHandles);
-      const fixture = await loadExternalChangeFixture(
-        input.ownerUserId,
-        scope.projectId!,
-        scope.chapterId!,
-        resolved.workingRevision,
-      );
+      const draftState = resolved.source.kind === "agent_draft"
+        ? await loadExternalDraftFixture(input.ownerUserId, resolved.source.draftId)
+        : await (async () => {
+            // Resolve the official fixture once before branching so a task can
+            // never start from a revision other than the handles it received.
+            await loadExternalChangeFixture(
+              input.ownerUserId,
+              scope.projectId!,
+              scope.chapterId!,
+              resolved.workingRevision,
+            );
+            const created = await createAgentDraft({
+              ownerUserId: input.ownerUserId,
+              projectId: scope.projectId!,
+              baseWorkingRevision: resolved.workingRevision,
+            });
+            return loadExternalDraftFixture(input.ownerUserId, created.draft.id);
+          })();
       const planned = await input.plan({
         ownerUserId: input.ownerUserId,
         comicId: scope.comicId!,
         projectId: scope.projectId!,
         chapterId: scope.chapterId!,
-        baseRevision: resolved.workingRevision,
-        fixture,
+        baseRevision: draftState.revision.revision,
+        fixture: draftState.fixture,
         targets,
       });
       if (!planned.commands.length) {
         throw new AppError("empty_change", "该编辑没有产生任何作品变化。", 422);
       }
-      const result = await commitChangeSet({
+      const result = await commitAgentDraftChange({
         ownerUserId: input.ownerUserId,
-        projectId: scope.projectId!,
-        expectedRevision: resolved.workingRevision,
+        draftId: draftState.draft.id,
+        expectedDraftRevision: draftState.revision.revision,
         changeSet: {
           id: `external:${input.capability.id}:${randomUUID()}`,
           projectId: scope.projectId!,
-          baseRevision: resolved.workingRevision,
+          baseRevision: draftState.revision.revision,
           source: "manual",
           commands: planned.commands,
         },
@@ -192,10 +229,15 @@ export async function executeExternalDirectChange(input: {
         capability: { id: input.capability.id, version: input.capability.version },
         effect: "direct_change" as const,
         project: projectReference,
-        baseRevision: resolved.workingRevision,
-        workingRevision: result.working.revision,
+        baseWorkingRevision: draftState.draft.baseWorkingRevision,
+        workingRevision: draftState.draft.baseWorkingRevision,
+        draft: agentDraftReference(draftState.draft.id),
+        draftRevision: result.revision.revision,
         ...(planned.data !== undefined ? { data: planned.data } : {}),
-        nextActions: ["Read fresh Lantern context before making another revision-bound edit."],
+        nextActions: [
+          "Read fresh Lantern context with source=agent_draft and the returned draft before another edit.",
+          "When the requested work is complete, freeze the draft into a reviewable proposal.",
+        ],
       };
     },
   });

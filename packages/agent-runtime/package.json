@@ -13,6 +13,7 @@
     "./external-edit-service": "./src/external-edit-service.ts",
     "./external-page-service": "./src/external-page-service.ts",
     "./external-agent-service": "./src/external-agent-service.ts",
+    "./external-agent-draft-service": "./src/external-agent-draft-service.ts",
     "./external-scope-service": "./src/external-scope-service.ts",
     "./conversation-service": "./src/conversation-service.ts",
     "./interaction-service": "./src/interaction-service.ts",

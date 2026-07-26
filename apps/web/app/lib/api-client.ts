@@ -30,6 +30,70 @@ export type WorkbenchLoad = {
   chapter: { id: string; number: number; title: string; summary: string };
 };
 
+export type VersionTimeline = {
+  current: {
+    id: string;
+    kind: "working";
+    label: string;
+    typeLabel: string;
+    workingRevision: number;
+    createdAt: string;
+    disabled: true;
+  };
+  items: Array<{
+    id: string;
+    kind: "saved_snapshot" | "change_proposal";
+    label: string;
+    typeLabel: string;
+    createdAt: string;
+    disabled: false;
+    sourceWorkingRevision?: number;
+    baseWorkingRevision?: number;
+    status?: string;
+    summary?: string;
+  }>;
+};
+
+export type VersionComparison = {
+  project: {
+    id: string;
+    chapterId: string;
+    comicId: string;
+    comicFormat: "page" | "vertical" | "four_panel";
+    readingDirection: "ltr" | "rtl";
+  };
+  current: {
+    kind: "working";
+    revision: number;
+    createdAt: string;
+    document: WorkbenchFixture["working"]["document"];
+    resolvedResources: WorkbenchFixture["working"]["resolvedResources"];
+  };
+  target: ({
+    kind: "saved_snapshot";
+    sourceWorkingRevision: number;
+  } | {
+    kind: "change_proposal";
+    title: string;
+    summary: string;
+    status: "available" | "retained" | "applied" | "discarded" | "stale";
+    baseWorkingRevision: number;
+    draftRevision: number;
+  }) & {
+    id: string;
+    createdAt: string;
+    document: WorkbenchFixture["working"]["document"];
+    resolvedResources: WorkbenchFixture["working"]["resolvedResources"];
+  };
+  differences: Array<{
+    unitId: string;
+    currentUnitId?: string;
+    targetUnitId?: string;
+    state: "added" | "removed" | "changed" | "unchanged";
+  }>;
+  firstDifferenceIndex: number;
+};
+
 function apiBase() {
   return "/api/backend";
 }
@@ -712,6 +776,45 @@ export function apiRestoreSnapshot(chapterId: string, expectedWorkingRevision: n
     ...result,
     working: { ...result.working, resolvedResources: normalizeResolvedResources(result.working.resolvedResources) },
   }));
+}
+
+export function apiGetVersionTimeline(projectId: string) {
+  return api<VersionTimeline>(`/v1/projects/${encodeURIComponent(projectId)}/versions`);
+}
+
+export async function apiGetVersionComparison(kind: "saved_snapshot" | "change_proposal", id: string) {
+  const result = await api<VersionComparison>(`/v1/version-comparisons/${kind}/${encodeURIComponent(id)}`);
+  return {
+    ...result,
+    current: { ...result.current, resolvedResources: normalizeResolvedResources(result.current.resolvedResources) },
+    target: { ...result.target, resolvedResources: normalizeResolvedResources(result.target.resolvedResources) },
+  };
+}
+
+export function apiRetainChangeProposal(proposalId: string) {
+  return api(`/v1/change-proposals/${encodeURIComponent(proposalId)}/retain`, { method: "POST", body: "{}" });
+}
+
+export function apiDiscardChangeProposal(proposalId: string) {
+  return api(`/v1/change-proposals/${encodeURIComponent(proposalId)}/discard`, { method: "POST", body: "{}" });
+}
+
+export function apiApplyChangeProposal(proposalId: string) {
+  return api<{ workingRevision: number; snapshotId: string }>(`/v1/change-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", body: "{}" });
+}
+
+export function apiRestoreSavedSnapshot(snapshotId: string, expectedWorkingRevision: number) {
+  return api<{ workingRevision: number; snapshotId: string }>(`/v1/saved-snapshots/${encodeURIComponent(snapshotId)}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ expectedWorkingRevision }),
+  });
+}
+
+export function apiDeleteSavedSnapshot(snapshotId: string) {
+  return api<{ deletedSnapshotId: string; deletedAssetVersions: number; objectCleanupFailures: number }>(
+    `/v1/saved-snapshots/${encodeURIComponent(snapshotId)}`,
+    { method: "DELETE" },
+  );
 }
 
 async function downloadPageResponse(path: string, fallbackName: string) {

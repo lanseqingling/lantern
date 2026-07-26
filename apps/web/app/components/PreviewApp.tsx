@@ -236,6 +236,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
 
   return (
     <main className={`preview-shell route-page-transition ${entryTransition} ${isVertical ? "format-vertical" : "format-page"}`}>
+      <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <section ref={isVertical ? verticalReaderRef : undefined} onScroll={isVertical ? handleVerticalScroll : undefined} className={`reader paged-reader ${isVertical ? "vertical-reader" : displayedPageIndices.length === 2 || currentGroup?.trueSpread ? "is-spread" : "is-single"} ${currentGroup?.trueSpread ? "is-true-spread" : ""}`} data-testid="preview-reader">
         {!isVertical ? <button type="button" className="preview-page-turn previous" aria-label={uiCopy.viewer.action.previousPage} onClick={goPrevious} /> : null}
         <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"} style={previewPageWrapStyle}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={orderedUnits[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={orderedUnits[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>

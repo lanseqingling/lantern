@@ -46,7 +46,7 @@ The returned labels and aliases help map the creator's wording to one bounded ob
 
 For visual analysis, first identify the exact unit, frame, or element from structure, then describe only the relevant visible result from the rendered image. Treat crop, clipping, overlap, whitespace, and reading flow as findings only when the final composition supports them.
 
-For an available mutation, preserve every property outside the creator's stated intent. Target only returned opaque handles, use the observation's Working Revision as required by the capability, and inspect the new revision again before claiming the visual result is correct. Structural, multi-object, generated, or otherwise high-risk changes remain Candidates when the catalog says so.
+For an available mutation, preserve every property outside the creator's stated intent. Target only returned opaque handles, use the observation's source revision as required by the capability, and inspect the new AgentDraft revision again before claiming the visual result is correct. Structural, multi-object, generated, or otherwise high-risk changes remain Candidates when the catalog says so; the complete task is still frozen as one ChangeProposal.
 
 Before proposing a visual change, identify the exact unit and element handle, describe the relevant visible evidence, and preserve any creator decision that is not part of the requested change.
 

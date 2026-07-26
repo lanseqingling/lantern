@@ -109,6 +109,13 @@ export const compositionObservationSchema = z.strictObject({
       createdAt: z.string(),
     }),
     z.strictObject({
+      kind: z.literal("agent_draft"),
+      draftId: z.string().min(1),
+      baseWorkingRevision: z.number().int().positive(),
+      draftRevision: z.number().int().positive(),
+      createdAt: z.string(),
+    }),
+    z.strictObject({
       kind: z.literal("saved_snapshot"),
       snapshotId: z.string().min(1),
       sourceWorkingRevision: z.number().int().positive(),
@@ -163,12 +170,23 @@ export async function loadWorkingCompositionObservation(input: {
   unitIds: string[];
   expectedRevision?: number;
   snapshotId?: string;
+  draftId?: string;
 }) {
   const requestedUnitIds = [...new Set(input.unitIds)];
   if (!requestedUnitIds.length || requestedUnitIds.length > 2) {
     throw new AppError("validation", "一次只能观察一个或两个展示单元。", 400);
   }
-  const source = input.snapshotId
+  const source = input.draftId
+    ? await prisma.agentDraft.findFirst({
+        where: {
+          id: input.draftId,
+          projectId: input.projectId,
+          ownerUserId: input.ownerUserId,
+          project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+        },
+        include: { revisions: { orderBy: { revision: "desc" }, take: 1, select: { revision: true, document: true, createdAt: true } } },
+      })
+    : input.snapshotId
     ? await prisma.savedSnapshot.findFirst({
         where: {
           id: input.snapshotId,
@@ -186,12 +204,16 @@ export async function loadWorkingCompositionObservation(input: {
         orderBy: { revision: "desc" },
         select: { revision: true, document: true, createdAt: true },
       });
-  if (!source) throw new AppError("not_found", input.snapshotId ? "已保存版本不存在。" : "工作稿不存在。", 404);
-  const revision = "sourceWorkingRevision" in source ? source.sourceWorkingRevision : source.revision;
+  if (!source) throw new AppError("not_found", input.draftId ? "Agent 工作草稿不存在。" : input.snapshotId ? "已保存版本不存在。" : "工作稿不存在。", 404);
+  const draftRevision = "revisions" in source ? source.revisions[0] : undefined;
+  if ("revisions" in source && !draftRevision) throw new AppError("not_found", "Agent 工作草稿没有可用修订。", 404);
+  const revision = "revisions" in source
+    ? draftRevision!.revision
+    : "sourceWorkingRevision" in source ? source.sourceWorkingRevision : source.revision;
   if (input.expectedRevision !== undefined && revision !== input.expectedRevision) {
     throw new AppError("context_stale", "作品版本已经变化，请重新读取 Lantern 上下文。", 409, { currentRevision: revision });
   }
-  const document = validateComicDocument(source.document);
+  const document = validateComicDocument("revisions" in source ? draftRevision!.document : source.document);
   const unitById = new Map(document.units.map((unit) => [unit.id, unit]));
   const units = requestedUnitIds
     .map((unitId) => unitById.get(unitId))
@@ -265,7 +287,15 @@ export async function loadWorkingCompositionObservation(input: {
   return {
     projectId: input.projectId,
     baseRevision: revision,
-    source: "sourceWorkingRevision" in source
+    source: "revisions" in source
+      ? {
+          kind: "agent_draft" as const,
+          draftId: source.id,
+          baseWorkingRevision: source.baseWorkingRevision,
+          draftRevision: draftRevision!.revision,
+          createdAt: draftRevision!.createdAt.toISOString(),
+        }
+      : "sourceWorkingRevision" in source
       ? {
           kind: "saved_snapshot" as const,
           snapshotId: source.id,

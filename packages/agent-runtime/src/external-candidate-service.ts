@@ -1,5 +1,3 @@
-import { CandidateKind } from "@prisma/client";
-import { applyCandidate } from "@lantern/server/candidate-service";
 import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
 import { executeIdempotentExternalMutation } from "@lantern/server/external-operation-service";
@@ -14,6 +12,12 @@ import {
   externalCandidateToolResultSchema,
   isCandidateCapabilityId,
 } from "./candidate-capabilities";
+import {
+  agentDraftReference,
+  commitAgentDraftChange,
+  createAgentDraft,
+} from "@lantern/server/version-service";
+import type { WorkspaceCommand } from "@lantern/shared";
 
 function argument(input: Record<string, unknown>, name: string) {
   const value = input[name];
@@ -63,32 +67,43 @@ async function executeExternalCandidateCapability(
     });
   }
   if (capability.id === "candidate.apply") {
-    const candidateTarget = candidate.target as { type?: unknown; pageId?: unknown; id?: unknown };
-    const expectedFrameTarget = candidate.kind === CandidateKind.FRAME_IMAGE
-      && candidateTarget.type === "comic_frame"
-      && typeof candidateTarget.pageId === "string"
-      && typeof candidateTarget.id === "string"
-      ? { unitId: candidateTarget.pageId, frameId: candidateTarget.id }
-      : undefined;
-    const applied = await applyCandidate(
+    const expectedRevision = parsed.expectedRevision as number;
+    if (candidate.status !== "AVAILABLE" || candidate.baseRevision !== expectedRevision || target.workingRevision !== expectedRevision) {
+      throw new AppError("context_stale", "候选或当前稿已经变化，请重新读取后再操作。", 409);
+    }
+    const commands = candidate.operations as unknown as WorkspaceCommand[];
+    if (!Array.isArray(commands) || !commands.length) throw new AppError("empty_change", "该候选没有可合入的作品变化。", 422);
+    const created = await createAgentDraft({
       ownerUserId,
-      candidate.id,
-      {
-        expectedWorkingRevision: parsed.expectedRevision as number,
-        ...(expectedFrameTarget ? { expectedFrameTarget } : {}),
+      projectId: target.projectId,
+      baseWorkingRevision: expectedRevision,
+      title: candidate.title,
+      sourceHost: "lantern-mcp",
+    });
+    const applied = await commitAgentDraftChange({
+      ownerUserId,
+      draftId: created.draft.id,
+      expectedDraftRevision: created.revision.revision,
+      changeSet: {
+        id: `external-candidate:${candidate.id}`,
+        projectId: target.projectId,
+        baseRevision: created.revision.revision,
+        source: "candidate",
+        sourceCandidateId: candidate.id,
+        commands,
       },
-      { actor: "external", client: { name: "lantern-mcp", version: "0.5.0" } },
-    );
-    const workingRevision = "revision" in applied ? applied.revision : applied.working.revision;
+    });
     return externalCandidateToolResultSchema.parse({
       capability: { id: capability.id, version: capability.version },
       effect: capability.effect,
       candidate: reference,
       project,
       baseRevision: candidate.baseRevision,
-      workingRevision,
-      data: { status: "applied" },
-      nextActions: ["Read fresh Lantern context before making another page edit."],
+      baseWorkingRevision: expectedRevision,
+      draft: agentDraftReference(created.draft.id),
+      draftRevision: applied.revision.revision,
+      data: { status: "merged_into_agent_draft" },
+      nextActions: ["Read the returned AgentDraft context before another edit, then freeze it when the task is complete."],
     });
   }
   throw new AppError("capability_not_available", "该 Candidate 能力当前没有同步执行器。", 404);

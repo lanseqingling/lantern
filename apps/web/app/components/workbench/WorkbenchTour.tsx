@@ -7,7 +7,7 @@ import { Icon, type IconName } from "@lantern/ui";
 import { useClientMounted } from "@/app/lib/client-environment";
 import { uiCopy } from "@/app/lib/ui-copy";
 
-type PanelSnapshot = { leftOpen: boolean; agentOpen: boolean };
+type PanelSnapshot = { leftOpen: boolean; agentOpen: boolean; versionsOpen: boolean };
 type TargetRect = { id: string; left: number; top: number; width: number; height: number; radius: number };
 type CalloutPlacement = "right" | "left" | "above" | "tools";
 
@@ -22,7 +22,7 @@ type TourCallout = {
 
 type TourStep = {
   id: string;
-  panel?: "left" | "agent";
+  panel?: "left" | "agent" | "versions";
   callouts: TourCallout[];
 };
 
@@ -92,6 +92,17 @@ const workbenchTourSteps: TourStep[] = [
         placement: "tools",
       },
     ],
+  },
+  {
+    id: "version-history",
+    panel: "versions",
+    callouts: [{
+      id: "version-history",
+      title: uiCopy.workbench.versions.title,
+      content: uiCopy.tour.workbench.stepContent.versionHistory,
+      targets: ["version-history"],
+      placement: "left",
+    }],
   },
   {
     id: "agent-composer",
@@ -245,20 +256,24 @@ function connectorPath(line: CalloutLayout["line"]) {
 export function WorkbenchTour({
   leftOpen,
   agentOpen,
+  versionsOpen,
   onLeftOpenChange,
   onAgentOpenChange,
+  onVersionsOpenChange,
 }: {
   leftOpen: boolean;
   agentOpen: boolean;
+  versionsOpen: boolean;
   onLeftOpenChange: (open: boolean) => void;
   onAgentOpenChange: (open: boolean) => void;
+  onVersionsOpenChange: (open: boolean) => void;
 }) {
   const mounted = useClientMounted();
   const [active, setActive] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [targets, setTargets] = useState<TargetRect[]>([]);
   const panelSnapshotRef = useRef<PanelSnapshot | null>(null);
-  const panelStateRef = useRef<PanelSnapshot>({ leftOpen, agentOpen });
+  const panelStateRef = useRef<PanelSnapshot>({ leftOpen, agentOpen, versionsOpen });
   const nextActionRef = useRef<HTMLButtonElement>(null);
   const maskId = `workbench-tour-mask-${useId().replace(/:/g, "")}`;
   const step = workbenchTourSteps[stepIndex];
@@ -276,6 +291,7 @@ export function WorkbenchTour({
     if (!snapshot) return;
     onLeftOpenChange(snapshot.leftOpen);
     onAgentOpenChange(snapshot.agentOpen);
+    onVersionsOpenChange(snapshot.versionsOpen);
   };
 
   const completeTour = () => {
@@ -286,8 +302,8 @@ export function WorkbenchTour({
   };
 
   useEffect(() => {
-    panelStateRef.current = { leftOpen, agentOpen };
-  }, [agentOpen, leftOpen]);
+    panelStateRef.current = { leftOpen, agentOpen, versionsOpen };
+  }, [agentOpen, leftOpen, versionsOpen]);
 
   useEffect(() => {
     if (hasCompletedTour()) return;
@@ -299,7 +315,8 @@ export function WorkbenchTour({
     if (!active) return;
     if (step.panel === "left") onLeftOpenChange(true);
     if (step.panel === "agent") onAgentOpenChange(true);
-  }, [active, onAgentOpenChange, onLeftOpenChange, step.panel]);
+    if (step.panel === "versions") onVersionsOpenChange(true);
+  }, [active, onAgentOpenChange, onLeftOpenChange, onVersionsOpenChange, step.panel]);
 
   useEffect(() => {
     if (!active) return;
@@ -326,7 +343,7 @@ export function WorkbenchTour({
       observer?.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [active, agentOpen, leftOpen, step]);
+  }, [active, agentOpen, leftOpen, step, versionsOpen]);
 
   const calloutLayouts = useMemo(() => {
     if (!active) return [];

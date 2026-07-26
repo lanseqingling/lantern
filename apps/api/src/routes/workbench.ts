@@ -15,6 +15,14 @@ import { buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-b
 import { createProjectConversation, updateConversation } from "@lantern/agent-runtime/conversation-service";
 import { explicitWorkspaceReferencesSchema } from "@lantern/agent-runtime/schemas";
 import { currentUser, ok } from "../http";
+import {
+  applyChangeProposal,
+  deleteSavedSnapshot,
+  getVersionComparison,
+  getVersionTimeline,
+  restoreSavedSnapshot,
+  updateChangeProposalStatus,
+} from "@lantern/server/version-service";
 
 const selectionSchema = z.object({
   type: z.string().min(1),
@@ -103,5 +111,42 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
   app.post<{ Params: { chapterId: string }; Body: { expectedWorkingRevision: number } }>("/v1/chapters/:chapterId/restore-snapshot", async (request) => {
     const user = await currentUser(request);
     return ok(request, await restoreLatestChapterSnapshot(user.id, request.params.chapterId, request.body.expectedWorkingRevision));
+  });
+
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/versions", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await getVersionTimeline(user.id, request.params.projectId));
+  });
+
+  app.get<{ Params: { kind: string; id: string } }>("/v1/version-comparisons/:kind/:id", async (request) => {
+    const user = await currentUser(request);
+    const kind = z.enum(["saved_snapshot", "change_proposal"]).parse(request.params.kind);
+    return ok(request, await getVersionComparison(user.id, kind, request.params.id));
+  });
+
+  app.post<{ Params: { proposalId: string } }>("/v1/change-proposals/:proposalId/retain", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await updateChangeProposalStatus(user.id, request.params.proposalId, "retain"));
+  });
+
+  app.post<{ Params: { proposalId: string } }>("/v1/change-proposals/:proposalId/discard", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await updateChangeProposalStatus(user.id, request.params.proposalId, "discard"));
+  });
+
+  app.post<{ Params: { proposalId: string } }>("/v1/change-proposals/:proposalId/apply", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await applyChangeProposal(user.id, request.params.proposalId));
+  });
+
+  app.post<{ Params: { snapshotId: string }; Body: { expectedWorkingRevision: number } }>("/v1/saved-snapshots/:snapshotId/restore", async (request) => {
+    const user = await currentUser(request);
+    const body = z.object({ expectedWorkingRevision: z.number().int().positive() }).parse(request.body);
+    return ok(request, await restoreSavedSnapshot(user.id, request.params.snapshotId, body.expectedWorkingRevision));
+  });
+
+  app.delete<{ Params: { snapshotId: string } }>("/v1/saved-snapshots/:snapshotId", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await deleteSavedSnapshot(user.id, request.params.snapshotId));
   });
 }

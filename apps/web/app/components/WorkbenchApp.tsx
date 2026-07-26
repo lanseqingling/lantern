@@ -11,6 +11,7 @@ import { AgentWorkspace, CanvasStage, CreationDock, CreationDrawer, ObjectToolba
 import { FloatingMenu, MenuDivider, MenuSection } from "./workbench/FloatingPrimitives";
 import { ReferenceCard } from "./workbench/ReferenceCard";
 import { WorkbenchTour } from "./workbench/WorkbenchTour";
+import { VersionPanel } from "./workbench/VersionPanel";
 import { useOutsidePointerDismiss } from "./workbench/useOutsidePointerDismiss";
 import { Icon, type IconName } from "@lantern/ui";
 import type {
@@ -372,6 +373,19 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [future, setFuture] = useState<HistoryEntry[]>([]);
   const [leftOpen, setLeftOpen] = useState(true);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(() => searchParams.get("versions") === "open");
+  const openAgentWorkspace = useCallback(() => {
+    setVersionsOpen(false);
+    setAgentOpen(true);
+  }, []);
+  const setAgentWorkspaceOpen = useCallback((open: boolean) => {
+    if (open) setVersionsOpen(false);
+    setAgentOpen(open);
+  }, []);
+  const setVersionWorkspaceOpen = useCallback((open: boolean) => {
+    if (open) setAgentOpen(false);
+    setVersionsOpen(open);
+  }, []);
   const [projectMenu, setProjectMenu] = useState(false);
   const [importingArchive, setImportingArchive] = useState(false);
   const [archiveImportFile, setArchiveImportFile] = useState<File | null>(null);
@@ -388,6 +402,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [comicContextMenu, setComicContextMenu] = useState<ComicContextMenuState | null>(null);
   const [downloadingCanvasImageId, setDownloadingCanvasImageId] = useState<string | null>(null);
   const [addingCanvasImageAssetId, setAddingCanvasImageAssetId] = useState<string | null>(null);
+
   const [imageViewer, setImageViewer] = useState<ImageViewerRequest | null>(null);
   const [frameImageTarget, setFrameImageTarget] = useState<FrameImageTarget | null>(null);
   const [frameImageCandidatePreview, setFrameImageCandidatePreview] = useState<FrameImageCandidatePreview | null>(null);
@@ -581,7 +596,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const timer = window.setTimeout(() => {
       setComposer(copy);
       setScope(uiCopy.workbench.scope.currentComicAssets);
-      setAgentOpen(true);
+      openAgentWorkspace();
       setLeftView("assets");
       setToast(uiCopy.toast.workbench.assetCreation.readyForAgent);
       const params = new URLSearchParams(window.location.search);
@@ -592,7 +607,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       router.replace(`/comics/${comicId}/chapters/${chapterId}${query ? `?${query}` : ""}`, { scroll: false });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [assetCreateDraft, assetCreateIntent, chapterId, comicId, hydrated, router, runtimeIds?.conversationId]);
+  }, [assetCreateDraft, assetCreateIntent, chapterId, comicId, hydrated, openAgentWorkspace, router, runtimeIds?.conversationId]);
 
   const resolvedExplicitReferences = () => [...new Map(explicitReferences.map(({ objectType, objectId, versionId, label }) => {
     const normalizedLabel = label.trim().slice(0, 120);
@@ -1045,7 +1060,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         })
         : [];
       const obstacleNodes = [...document.querySelectorAll<HTMLElement>(
-        ".agent-workspace.open, .reference-card, .canvas-session-drawer, .object-inspector, .balloon-editor-popover, .frame-image-picker",
+        ".agent-workspace.open, .version-workspace.open, .reference-card, .canvas-session-drawer, .object-inspector, .balloon-editor-popover, .frame-image-picker",
       )].filter((node) => node !== element && !node.contains(element));
       const obstacleRects = obstacleNodes.flatMap((node) => {
         const rect = node.getBoundingClientRect();
@@ -1126,12 +1141,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     observer.observe(stageRef.current);
     const element = stageRef.current.querySelector<HTMLElement>(`[data-element-id="${toolbarTarget.id}"]`);
     if (element) observer.observe(element);
-    document.querySelectorAll<HTMLElement>(".agent-workspace.open, .reference-card, .canvas-session-drawer, .object-inspector, .balloon-editor-popover, .frame-image-picker").forEach((node) => observer.observe(node));
+    document.querySelectorAll<HTMLElement>(".agent-workspace.open, .version-workspace.open, .reference-card, .canvas-session-drawer, .object-inspector, .balloon-editor-popover, .frame-image-picker").forEach((node) => observer.observe(node));
     return () => {
       window.removeEventListener("resize", updateToolbar);
       observer.disconnect();
     };
-  }, [agentOpen, canvasMode, canvasOffset.x, canvasOffset.y, frameImageCandidatePreview, inspectorOpen, leftOpen, objectInteractionMode, selectedBalloonTailTarget, selectedElement?.geometry, toolbarTarget.id, toolbarTarget.pageId, toolbarTarget.type]);
+  }, [agentOpen, canvasMode, canvasOffset.x, canvasOffset.y, frameImageCandidatePreview, inspectorOpen, leftOpen, objectInteractionMode, selectedBalloonTailTarget, selectedElement?.geometry, toolbarTarget.id, toolbarTarget.pageId, toolbarTarget.type, versionsOpen]);
 
   useLayoutEffect(() => {
     if (canvasMode !== "focus" || !inspectorOpen || (selection.type !== "speech_balloon" && selection.type !== "text") || !selection.id || !stageRef.current) {
@@ -2439,7 +2454,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const beat = state.fixture.storyboardBeats.find((item) => item.id === targetSelection.id);
       if (!beat) return;
       addComposerReference({ id: `storyboard:${beat.id}:${beat.versionId}`, objectType: "storyboard_beat", objectId: beat.id, versionId: beat.versionId, label: targetSelection.label, kind: "storyboard_beat" });
-      setAgentOpen(true);
+      openAgentWorkspace();
       return;
     }
     if (!targetSelection.pageId) return;
@@ -2458,7 +2473,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         dialogueText: targetElement.content.text,
       });
       setScope(uiCopy.workbench.scope.balloon);
-      setAgentOpen(true);
+      openAgentWorkspace();
       return;
     }
     const frame = targetElement.type === "comic_frame"
@@ -2478,11 +2493,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         imageUrl,
       });
       setScope(uiCopy.workbench.scope.currentFrame);
-      setAgentOpen(true);
+      openAgentWorkspace();
       return;
     }
     addComposerReference({ id: `canvas:${targetElement.id}`, objectType: "canvas_element", objectId: targetElement.id, label: targetSelection.label, kind: "canvas_element" });
-    setAgentOpen(true);
+    openAgentWorkspace();
   };
 
   const applyInspectorEdit = () => {
@@ -2808,7 +2823,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const formWidth = 248;
     const formHeight = 224;
     const drawerRight = document.querySelector<HTMLElement>(".creation-drawer:not(.closed)")?.getBoundingClientRect().right;
-    const agentLeft = document.querySelector<HTMLElement>(".agent-workspace.open")?.getBoundingClientRect().left;
+    const agentLeft = document.querySelector<HTMLElement>(".agent-workspace.open, .version-workspace.open")?.getBoundingClientRect().left;
     const leftLimit = Math.max(16, (drawerRight ?? workbenchRect.left) - workbenchRect.left + 12);
     const rightLimit = Math.max(leftLimit, Math.min(workbenchRect.width - formWidth - 16, (agentLeft ?? workbenchRect.right) - workbenchRect.left - formWidth - 12));
     const imageCenter = (anchor.left + anchor.right) / 2;
@@ -3692,7 +3707,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const reference = canvasReferences.find((item) => item.id === id);
       if (reference) addCanvasAssetReference(reference);
     });
-    setAgentOpen(true);
+    openAgentWorkspace();
   };
 
   const removeMultiCanvasElements = () => {
@@ -3828,7 +3843,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   }
 
   return (
-    <WorkbenchShell className={`route-page-transition ${entryTransition} mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
+    <WorkbenchShell className={`route-page-transition ${entryTransition} mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""} ${versionsOpen ? "version-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <header className="project-chip" data-testid="project-chip">
         <button className="project-back app-page-corner-button" type="button" aria-label={uiCopy.workbench.navigation.backToComic} onClick={() => navigate(`/comics/${comicId}`, "back")}><Icon name="collapse" /></button>
@@ -3937,7 +3952,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         const visibleInAssetSpace = isAssetVisibleInAssetSpace(activeAssetMenu);
         return <FloatingMenu className="asset-reference-menu-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }}>
           <MenuSection className="asset-menu-section">
-            <button type="button" onClick={() => { addAssetReference(activeAssetMenu); setAgentOpen(true); setAssetMenuId(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button>
+            <button type="button" onClick={() => { addAssetReference(activeAssetMenu); openAgentWorkspace(); setAssetMenuId(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button>
             <button type="button" onClick={handleActiveAssetPlacement}><span><Icon name="pointer" />{activeAssetPlacement ? uiCopy.workbench.action.locateOnCanvas : uiCopy.workbench.action.addToCanvas}</span></button>
           </MenuSection>
           <MenuDivider className="asset-menu-divider" />
@@ -3999,7 +4014,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       <CanvasStage
         ref={stageRef}
-        className={`${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""} mode-${canvasMode} ${creationMode ? `creation-${creationMode}` : ""} ${isCanvasPanning ? "is-panning" : ""} ${marquee ? "is-marquee" : ""} ${multiSelection ? "multi-selecting" : ""} ${multiSelection?.moveActive ? "multi-move-ready" : ""}`}
+        className={`${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""} ${versionsOpen ? "version-open" : ""} mode-${canvasMode} ${creationMode ? `creation-${creationMode}` : ""} ${isCanvasPanning ? "is-panning" : ""} ${marquee ? "is-marquee" : ""} ${multiSelection ? "multi-selecting" : ""} ${multiSelection?.moveActive ? "multi-move-ready" : ""}`}
         onPointerDownCapture={handleCanvasPointerDown}
         onPointerMove={handleCanvasPointerMove}
         onPointerUpCapture={finishCanvasPointer}
@@ -4035,7 +4050,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <button type="button" className="candidate-preview-cancel" onClick={cancelFrameImageCandidatePreview}><Icon name="x" />{uiCopy.common.action.cancel}</button>
         </ObjectToolbar> : null}
         {canvasMode === "focus" && !frameImageCandidatePreview && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label={uiCopy.workbench.objectEditor.toolbarAria} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" className="object-ai-reference" aria-label={uiCopy.workbench.objectEditor.referenceAria} onClick={() => { addSelectionReference(); setAgentOpen(true); }}><Icon name="ai" /></button>
+          <button type="button" className="object-ai-reference" aria-label={uiCopy.workbench.objectEditor.referenceAria} onClick={() => { addSelectionReference(); openAgentWorkspace(); }}><Icon name="ai" /></button>
           <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.toggleBalloonTransformAria : selection.type === "text" ? uiCopy.workbench.objectEditor.toggleNarrationTransformAria : selectedFrameImage ? uiCopy.workbench.objectEditor.toggleFrameMoveAria : selection.type === "image" ? uiCopy.workbench.objectEditor.togglePaperImageTransformAria : uiCopy.workbench.objectEditor.toggleFrameMoveAria} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && selectedElement?.type !== "image") || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
           <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? uiCopy.workbench.action.rotateNarration : selection.type === "speech_balloon" ? uiCopy.workbench.action.rotateBalloon : selectedElement?.type === "image" && selectedElement.location.space === "overlay" ? uiCopy.workbench.objectEditor.cropPaperImageAria : uiCopy.workbench.objectEditor.cropFrameImageAria} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selectedElement?.type !== "image"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
           <button type="button" aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.editBalloonAria : selection.type === "text" ? uiCopy.workbench.objectEditor.editNarrationAria : selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard} onClick={openSelectionEditor}><Icon name="edit" /></button>
@@ -4102,7 +4117,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />{uiCopy.workbench.object.dialogue}{String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label={uiCopy.workbench.balloonEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>{uiCopy.workbench.object.dialogue}<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>{uiCopy.workbench.balloonEditor.textStyleLabel}<CustomSelect ariaLabel={uiCopy.workbench.balloonEditor.textStyleLabel} className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>{uiCopy.workbench.balloonEditor.fontSizeLabel}<NumberStepper ariaLabel={uiCopy.workbench.balloonEditor.fontSizeAria} value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>{uiCopy.workbench.frameEditor.borderWidthLabel}<NumberStepper ariaLabel={uiCopy.workbench.balloonEditor.borderWidthAria} step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>{uiCopy.common.action.save}</button></div></aside> : null}
       {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />{uiCopy.workbench.label.narration(selectedNarrationNumber || 1)}</span><button type="button" aria-label={uiCopy.workbench.narrationEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>{uiCopy.workbench.narrationEditor.textLabel}<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>{uiCopy.workbench.balloonEditor.fontSizeLabel}<NumberStepper ariaLabel={uiCopy.workbench.narrationEditor.fontSizeAria} value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>{uiCopy.common.action.save}</button></div></aside> : null}
 
-      <div className="canvas-global-actions" aria-label={uiCopy.common.navigation.globalEntry}><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentOpen} /><button type="button" className="global-icon-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
+      <div className="canvas-global-actions" aria-label={uiCopy.common.navigation.globalEntry}><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} versionsOpen={versionsOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentWorkspaceOpen} onVersionsOpenChange={setVersionWorkspaceOpen} /><button type="button" className={`global-icon-button ${versionsOpen ? "active" : ""}`} data-tour-id="version-history" aria-label={uiCopy.workbench.versions.entryAria} aria-pressed={versionsOpen} onClick={() => setVersionWorkspaceOpen(!versionsOpen)}><Icon name="history" /></button><button type="button" className="global-icon-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
+      <VersionPanel projectId={runtimeIds?.projectId} open={versionsOpen} refreshKey={state.fixture.snapshot?.documentId} onClose={() => setVersionsOpen(false)} />
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label={uiCopy.workbench.chat.panelAria}>
         <div className="agent-head">
           <div className="agent-head-actions"><span className="agent-session-entry"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label={uiCopy.workbench.chat.sessionsAria} aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><small>{uiCopy.workbench.chat.internalAgentHint}</small></span><button type="button" aria-label={uiCopy.workbench.chat.collapseAria} onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
@@ -4143,7 +4159,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" aria-label={uiCopy.workbench.composer.addReferenceAria} onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><span className="composer-mode-label"><Icon name="ai" />{uiCopy.common.action.createContent}</span><button type="button" className="at-button" aria-label={uiCopy.workbench.composer.referenceCurrentAria} onClick={() => addSelectionReference()}><Icon name="reference" /><span>{uiCopy.workbench.chat.referenceLabel}</span></button><button type="button" className="send" aria-label={activeTask?.status === "running" ? uiCopy.workbench.composer.taskRunningAria : composerAttachments.some((attachment) => attachment.status === "uploading") ? uiCopy.workbench.composer.imageUploadingAria : uiCopy.workbench.composer.sendAria} disabled={activeTask?.status === "running" || composerAttachments.some((attachment) => attachment.status === "uploading")} onClick={sendMessage}><Icon name="send" /></button></div>
         </div>
       </AgentWorkspace>
-      {!agentOpen ? <button className="drawer-reopen right" type="button" onClick={() => setAgentOpen(true)} aria-label={uiCopy.workbench.chat.expandAria}><Icon name="ai" /></button> : null}
+      {!agentOpen && !versionsOpen ? <button className="drawer-reopen right" type="button" onClick={openAgentWorkspace} aria-label={uiCopy.workbench.chat.expandAria}><Icon name="ai" /></button> : null}
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <input ref={archiveImportRef} type="file" accept="application/zip,.zip" hidden onChange={(event) => { const file = event.target.files?.[0]; setProjectMenu(false); if (file) setArchiveImportFile(file); event.currentTarget.value = ""; }} />

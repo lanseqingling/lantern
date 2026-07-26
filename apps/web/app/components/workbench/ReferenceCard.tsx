@@ -174,7 +174,7 @@ export function ReferenceCard({
         const dockTop = document.querySelector<HTMLElement>(".creation-dock")?.getBoundingClientRect().top;
         const safeBottom = dockTop && dockTop < window.innerHeight ? dockTop - 12 : window.innerHeight - viewportPadding;
         const top = clampValue(event.clientY - 26, viewportPadding, Math.max(viewportPadding, safeBottom - menuHeight));
-        const sideBlockers = Array.from(document.querySelectorAll<HTMLElement>(".creation-drawer:not(.closed), .agent-workspace.open"));
+        const sideBlockers = Array.from(document.querySelectorAll<HTMLElement>(".creation-drawer:not(.closed), .agent-workspace.open, .version-workspace.open"));
         const placementScore = (leftEdge: number) => {
           const menuRect = { left: leftEdge, top, right: leftEdge + menuWidth, bottom: top + menuHeight };
           return sideBlockers.reduce((score, blocker) => score + overlapArea(blocker.getBoundingClientRect(), menuRect), 0);
@@ -275,7 +275,7 @@ export function ReferenceCard({
               const right = item.right + 6;
               const left = item.left - submenuWidth - 6;
               const top = clampValue(item.top, viewportPadding, Math.max(viewportPadding, window.innerHeight - submenuHeight - viewportPadding));
-              const blockers = Array.from(document.querySelectorAll<HTMLElement>(".creation-drawer:not(.closed), .agent-workspace.open"));
+              const blockers = Array.from(document.querySelectorAll<HTMLElement>(".creation-drawer:not(.closed), .agent-workspace.open, .version-workspace.open"));
               const score = (leftEdge: number) => blockers.reduce((total, blocker) => total + overlapArea(blocker.getBoundingClientRect(), { left: leftEdge, top, right: leftEdge + submenuWidth, bottom: top + submenuHeight }), 0);
               const rightLeft = clampValue(right, viewportPadding, Math.max(viewportPadding, window.innerWidth - submenuWidth - viewportPadding));
               const leftLeft = clampValue(left, viewportPadding, Math.max(viewportPadding, window.innerWidth - submenuWidth - viewportPadding));

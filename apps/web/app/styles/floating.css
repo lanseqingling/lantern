@@ -83,6 +83,7 @@
 .narration-cursor-preview { position: fixed; z-index: 110; width: 144px; min-height: 60px; box-sizing: border-box; border: 1px dashed rgba(36,127,130,.72); border-radius: 5px; background: transparent; color: #172026; padding: 0; font-size: 24px; font-weight: 750; line-height: 1.25; pointer-events: none; transform: translate(12px, 10px); -webkit-text-stroke: 2px #fff; paint-order: stroke fill; }
 .object-inspector { position: absolute; z-index: 40; right: 12px; bottom: 90px; width: 220px; max-height: 52vh; overflow: auto; padding: 11px; border: 1px solid rgba(255,255,255,.88); border-radius: 22px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); backdrop-filter: blur(20px); }
 .canvas-stage.agent-open .object-inspector { right: 414px; }
+.canvas-stage.version-open .object-inspector { right: 322px; }
 .inspector-head { display: flex; align-items: center; justify-content: space-between; }
 .inspector-head span { display: flex; align-items: center; gap: 6px; color: var(--cyan-deep); font-size: 10px; font-weight: 900; }
 .inspector-head span i { width: 8px; height: 8px; border-radius: 3px; background: var(--cyan); }

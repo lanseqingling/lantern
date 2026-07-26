@@ -1,10 +1,10 @@
 # Frames and fixed-image composition
 
-Load this reference for available frame and image composition capabilities. These operations are deterministic, revision-bound Working Revision changes; they do not invoke image generation.
+Load this reference for available frame and image composition capabilities. These operations are deterministic, revision-bound AgentDraft changes for external creation tasks; they do not invoke image generation.
 
 ## Read before targeting
 
-Use bounded page context, then inspect the current composition. Page and PageSurface handles come from context; Frame and image handles come from composition inspection. After every successful change, discard all old handles and read the new revision before selecting the next object.
+Use bounded page context, then inspect the current composition. Page and PageSurface handles come from context; Frame and image handles come from composition inspection. After the first successful change, continue from the returned AgentDraft. After every change, discard all old handles and read its new revision before selecting the next object.
 
 Use the rendered page to judge the visible result and the structure projection to choose the exact target. Never reconstruct a handle from a displayed object ID.
 

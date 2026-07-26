@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to inspect, organize, and edit a creator's comics through the domain capabilities Lantern currently exposes. Use when the user wants to read, understand, manage, review, or continue work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "1.0.0"
-  minimum_catalog_revision: "14"
+  version: "1.1.0"
+  minimum_catalog_revision: "15"
 ---
 
 # Create with Lantern
@@ -21,12 +21,14 @@ Use Lantern as the source of truth for the creator's comic and its current worki
 
 Observation and execution are separate. The presence of LCD structure, a rendered page, or object handles does not mean a matching edit capability is available. If the creator asks for a mutation, confirm that the current catalog contains that exact operation before inspecting evidence for it. When it does not, explain the current limit without turning the request into another capability.
 
-When bounded context is needed, choose its profile by intent:
+When bounded context is needed, choose its profile by intent and its version source explicitly:
 
 - `visual_observation`: inspect or discuss the visible comic page.
 - `composition_observation`: inspect the current page structure together with its final rendered composition.
 - `single_frame_generation`: prepare work focused on one comic frame.
 - `asset_generation`: prepare work involving character, scene, prop, or other asset references.
+- `source: working` reads the latest Working Revision, including changes that have not been saved.
+- `source: latest_saved` reads the latest immutable SavedSnapshot used by reading preview and export. It is observation-only.
 
 Ask the user to choose only when multiple resources or targets remain materially ambiguous after the available narrow reads.
 
@@ -39,6 +41,8 @@ When the request creates, names, duplicates, orders, deletes, merges, or splits 
 When the request creates or edits Frames, places or replaces fixed images, changes crop or transform, enables bleed or overlap, or creates a frame-anchored breakout, read [references/frames-and-images.md](references/frames-and-images.md). Refresh both context and composition after each successful direct change before targeting another object.
 
 When the request creates or edits Dialogue, balloons, narration, paper text, frame-anchored balloon breakout, or a gutter-safe cross-page balloon, read [references/dialogue-and-text.md](references/dialogue-and-text.md). Keep Dialogue semantics, visual carriers, coordinate spaces, and true-spread gutter safety distinct.
+
+When the request asks for a page-composition review, character or scene consistency check, adjacent-storyboard continuity check, creative-expression analysis, or a comparison with the latest saved version, read [references/review.md](references/review.md) together with the domain reference relevant to the finding. These are read-only Agent judgments, not Lantern validation results or automatic fixes.
 
 ## Respect Lantern's creative boundaries
 
@@ -59,15 +63,15 @@ When a capability returns a `lantern://candidates/...` reference, use `lantern_c
 
 ## Inspect images through handles
 
-Use `lantern_images_inspect` only with opaque target handles returned by `lantern_context_get`. Do not reconstruct handles or replace fixed asset-version references with guessed IDs. Keep visual questions specific to what the creator needs to decide.
+Use `lantern_images_inspect` only with opaque target handles returned by `lantern_context_get` or `lantern_composition_inspect`. It returns the selected immutable AssetVersion images directly to the host Agent; analyze those images yourself. Prefer a precise `asset_version` or placed-image handle over an asset-family handle, and do not reconstruct handles or replace fixed references with guessed IDs.
 
 If a target has no readable image, explain that limitation and continue from textual project context without fabricating visual evidence.
 
 ## Inspect the final composition before visual judgment
 
-Use `lantern_composition_inspect` with one or two `presentation_unit` handles returned by `lantern_context_get`. Treat its structure projection as the source of object identity, geometry, crop, layer, and reading order, and its image content as the source of final visible composition. Do not substitute individual Asset images for the composed page.
+Use `lantern_composition_inspect` with one or two `presentation_unit` handles returned by `lantern_context_get`. Treat its structure projection as the source of object identity, geometry, crop, layer, and reading order, and its page-preview image as the source of final visible composition. Do not substitute individual Asset images for the composed page.
 
-This tool is read-only. Do not call it merely to prepare a page, frame, crop, balloon, layer, or layout mutation that the capability catalog does not expose. Refresh context instead of reusing the result after its Working Revision changes. Read only the current visible unit or pair needed for the creator's request; do not expand a page-level question into a whole-chapter read.
+This tool is read-only. Its result identifies `working` or `saved_snapshot`; never combine structure from one source with the preview from another. Read the two sources separately when comparing unsaved work with the latest saved baseline. Saved-snapshot handles cannot be passed to mutation capabilities. Do not call the tool merely to prepare a mutation that the catalog does not expose. Refresh working context after its revision changes, and read only the current unit or adjacent pair needed for the request.
 
 ## Communicate with the creator
 

@@ -9,6 +9,7 @@ export const externalTargetHandlePayloadSchema = z.strictObject({
   ownerUserId: z.string().min(1),
   projectId: z.string().min(1),
   baseRevision: z.number().int().positive(),
+  snapshotId: z.string().min(1).optional(),
   expiresAt: z.number().int().positive(),
   nonce: z.string().min(16),
   target: z.strictObject({
@@ -70,6 +71,7 @@ export async function resolveExternalTargetHandles(input: {
   projectId?: string;
   handles: string[];
   expectedRevision?: number;
+  allowSavedSnapshot?: boolean;
   now?: number;
 }) {
   if (new Set(input.handles).size !== input.handles.length) {
@@ -83,10 +85,47 @@ export async function resolveExternalTargetHandles(input: {
   if (decoded.some(({ payload }) => payload.expiresAt <= (input.now ?? Date.now()))) {
     throw new AppError("context_handle_expired", "上下文目标已过期，请重新读取 Lantern 上下文。", 409);
   }
+  const snapshotIds = [...new Set(decoded.map(({ payload }) => payload.snapshotId ?? null))];
+  if (snapshotIds.length !== 1) {
+    throw new AppError("invalid_context_handle", "同一次调用的上下文目标必须来自同一个作品版本。", 422);
+  }
+  const snapshotId = snapshotIds[0];
+  if (snapshotId) {
+    if (!input.allowSavedSnapshot) {
+      throw new AppError("saved_snapshot_read_only", "已保存版本目标仅供观察，不能用于修改当前工作稿。", 422);
+    }
+    if (input.expectedRevision !== undefined) {
+      throw new AppError("saved_snapshot_read_only", "已保存版本目标不能携带工作稿修改版本。", 422);
+    }
+    const snapshot = await prisma.savedSnapshot.findFirst({
+      where: {
+        id: snapshotId,
+        projectId,
+        ownerUserId: input.ownerUserId,
+        project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+      },
+      select: { id: true, sourceWorkingRevision: true, createdAt: true },
+    });
+    if (!snapshot) throw new AppError("not_found", "已保存版本不存在或不属于当前创作空间。", 404);
+    if (decoded.some(({ payload }) => payload.baseRevision !== snapshot.sourceWorkingRevision)) {
+      throw new AppError("invalid_context_handle", "已保存版本目标与其来源修订不一致。", 422);
+    }
+    return {
+      projectId,
+      workingRevision: snapshot.sourceWorkingRevision,
+      source: {
+        kind: "saved_snapshot" as const,
+        snapshotId: snapshot.id,
+        sourceWorkingRevision: snapshot.sourceWorkingRevision,
+        createdAt: snapshot.createdAt.toISOString(),
+      },
+      decoded,
+    };
+  }
   const working = await prisma.workingRevision.findFirst({
     where: { projectId, project: { ownerUserId: input.ownerUserId } },
     orderBy: { revision: "desc" },
-    select: { revision: true },
+    select: { revision: true, createdAt: true },
   });
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
   if (input.expectedRevision !== undefined && input.expectedRevision !== working.revision) {
@@ -100,5 +139,14 @@ export async function resolveExternalTargetHandles(input: {
       currentRevision: working.revision,
     });
   }
-  return { projectId, workingRevision: working.revision, decoded };
+  return {
+    projectId,
+    workingRevision: working.revision,
+    source: {
+      kind: "working" as const,
+      workingRevision: working.revision,
+      createdAt: working.createdAt.toISOString(),
+    },
+    decoded,
+  };
 }

@@ -150,6 +150,7 @@ export function normalizeSelectionForCurrentView(
 export type ContextRequest = {
   ownerUserId: string;
   projectId: string;
+  workingRevision?: number;
   conversationId?: string;
   taskType: string;
   instruction: string;
@@ -218,10 +219,14 @@ export async function buildAgentContext(request: ContextRequest) {
   const availableContextAssets = comicStyleAssets.length
     ? [...regularAssets.slice(0, 23), ...comicStyleAssets]
     : regularAssets.slice(0, 24);
-  const working = await prisma.workingRevision.findFirst({
-    where: { projectId: project.id },
-    orderBy: { revision: "desc" },
-  });
+  const working = request.workingRevision
+    ? await prisma.workingRevision.findUnique({
+        where: { projectId_revision: { projectId: project.id, revision: request.workingRevision } },
+      })
+    : await prisma.workingRevision.findFirst({
+        where: { projectId: project.id },
+        orderBy: { revision: "desc" },
+      });
   if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
 
   const explicitReferences = (request.explicitReferences ?? []).map((reference) => workspaceRefSchema.parse(reference));

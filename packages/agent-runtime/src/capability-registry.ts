@@ -70,7 +70,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     id: "context.inspect_images",
     version: 1,
     execution: "synchronous",
-    description: "读取本轮上传图片，或用户唯一指明的当前页对象所关联图片的可见内容与文字，返回只读 Observation。当回答或后续规划依赖图片内容且尚无 inspect_images Observation 时调用；不创建任务或候选。",
+    description: "读取本轮上传图片、资产固定图片版本，或用户唯一指明的当前页对象所关联图片，形成至多三张只读视觉证据。内置路径可形成视觉 Observation；外置 MCP 直接返回固定 AssetVersion 原图及精确映射，由宿主 Agent 分析，不调用 Lantern 内部视觉模型。不创建任务、候选或变更。",
     inputSchema: imageObservationInputSchema,
     outputSchema: imageObservationOutputSchema,
     target: { required: true, types: ["image_attachment", "current_page_target"], min: 1, max: 3 },
@@ -89,7 +89,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     id: "context.inspect_composition",
     version: 1,
     execution: "synchronous",
-    description: "读取当前可见的一个或两个 PresentationUnit，返回绑定 WorkingRevision 的结构化场景投影和最终合成画面 Observation。仅当回答、空间判断或一个已开放 Capability 的参数判断依赖画格、图片、气泡、文字、裁切、遮挡、层级、留白或阅读关系时调用；观察不授予 LCD 编辑能力，不读取整话，不创建任务、候选或变更。",
+    description: "读取一个或两个明确 PresentationUnit，返回绑定同一 Working Revision 或 SavedSnapshot 的结构化场景投影和最终合成画面 Observation。仅当回答、空间判断或一个已开放 Capability 的参数判断依赖画格、图片、气泡、文字、裁切、遮挡、层级、留白或阅读关系时调用；保存版本只读，观察不授予 LCD 编辑能力，不读取整话，不创建任务、候选或变更。",
     inputSchema: compositionObservationInputSchema,
     outputSchema: compositionObservationSchema,
     target: { required: true, types: ["presentation_unit"], min: 1, max: 2 },
@@ -168,7 +168,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 14;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 15;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });

@@ -19,7 +19,7 @@ import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
 import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "@lantern/server/asset-library-service";
 import { duplicateComic } from "@lantern/server/comic-service";
 import { putImage } from "@lantern/server/object-storage";
-import { commitChangeSet, getWorkbench, revertCandidateApplication } from "@lantern/server/workbench-service";
+import { commitChangeSet, getWorkbench, revertCandidateApplication, saveChapterSnapshot } from "@lantern/server/workbench-service";
 import { buildAgentContext, buildAgentContextDebugSnapshot } from "@lantern/agent-runtime/context-builder";
 import { getExternalAgentContext, inspectExternalAgentComposition, inspectExternalAgentImages, invokeExternalResourceCapability, listExternalAgentProjects } from "@lantern/agent-runtime/external-agent-service";
 import { invokeExternalCandidateCapability } from "@lantern/agent-runtime/external-candidate-service";
@@ -176,6 +176,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       storyboardBeatVersionHeads: { [ids.storyboardBeat]: ids.storyboardBeatV1 },
       assetVersionHeads: { [ids.asset]: ids.assetV1 },
     } });
+    await saveChapterSnapshot(ids.user, ids.chapter, 1);
     const context = await buildAgentContext({
       ownerUserId: ids.user,
       projectId: ids.project,
@@ -368,10 +369,21 @@ test("database candidate apply and revert preserve version heads atomically", as
     const externalContext = await getExternalAgentContext(ids.user, {
       projectId: ids.project,
       profile: "visual_observation",
+      assets: [`lantern://assets/${ids.asset}`],
       pageId: document.units[0].id,
     });
     assert.equal(externalContext.baseRevision, 1);
+    assert.equal(externalContext.source.kind, "working");
     assert.equal(externalContext.currentPage?.id, document.units[0].id);
+    const savedExternalContext = await getExternalAgentContext(ids.user, {
+      projectId: ids.project,
+      source: "latest_saved",
+      profile: "visual_observation",
+      pageId: document.units[0].id,
+    });
+    assert.equal(savedExternalContext.baseRevision, 1);
+    assert.equal(savedExternalContext.source.kind, "saved_snapshot");
+    assert.equal(savedExternalContext.pageSequence[0]?.readingPosition, externalContext.pageSequence[0]?.readingPosition);
     const externalPageTarget = externalContext.targets.find((target) => target.type === "presentation_unit");
     assert.ok(externalPageTarget);
     const compositionInspection = await inspectExternalAgentComposition(ids.user, {
@@ -379,6 +391,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       pageHandles: [externalPageTarget.handle],
     });
     assert.equal(compositionInspection.output.baseRevision, 1);
+    assert.equal(compositionInspection.output.source.kind, "working");
     assert.equal(compositionInspection.output.structure.units[0]?.id, document.units[0].id);
     assert.ok(compositionInspection.output.structure.units[0]?.frames[0]?.handle);
     assert.equal(compositionInspection.output.image.mimeType, "image/png");
@@ -386,20 +399,60 @@ test("database candidate apply and revert preserve version heads atomically", as
     const externalAssetTarget = externalContext.targets.find((target) => target.type === "asset" && target.label === "视觉风格");
     assert.ok(externalAssetTarget);
     assert.deepEqual(externalAssetTarget.assetVersionIds, [ids.visualStyleV1]);
+    const externalStyleVersionTarget = externalContext.targets.find((target) =>
+      target.type === "asset_version" && target.assetVersionId === ids.visualStyleV1);
+    assert.ok(externalStyleVersionTarget);
+    assert.equal(externalStyleVersionTarget.isPrimary, true);
     await assert.rejects(() => inspectExternalAgentComposition(ids.user, {
       projectId: ids.project,
       pageHandles: [externalAssetTarget.handle],
     }), /只能使用页面或滚动段 handle/);
     const imageInspection = await inspectExternalAgentImages(ids.user, {
       projectId: ids.project,
-      targetHandles: [externalAssetTarget.handle],
-      instruction: "描述角色外观",
-    }, async (input) => {
-      assert.equal(input.ownerUserId, ids.user);
-      assert.deepEqual(input.versionIds, [ids.visualStyleV1]);
-      return "角色穿着深色雨衣。";
+      targetHandles: [externalStyleVersionTarget.handle],
     });
-    assert.equal(imageInspection.observation.content, "角色穿着深色雨衣。");
+    assert.equal(imageInspection.output.source.kind, "working");
+    assert.equal(imageInspection.output.images[0]?.assetVersionId, ids.visualStyleV1);
+    assert.equal(imageInspection.images[0]?.mimeType, "image/png");
+    assert.deepEqual([...imageInspection.images[0]!.bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    const characterVersionTargets = externalContext.targets.filter((target) =>
+      target.type === "asset_version" && target.assetId === ids.asset).slice(0, 2);
+    assert.equal(characterVersionTargets.length, 2);
+    const characterImages = await inspectExternalAgentImages(ids.user, {
+      projectId: ids.project,
+      targetHandles: characterVersionTargets.map((target) => target.handle),
+    });
+    assert.deepEqual(
+      characterImages.output.images.map((image) => image.assetVersionId),
+      characterVersionTargets.map((target) => target.assetVersionId),
+    );
+    assert.equal(characterImages.images.length, 2);
+    const savedPageTarget = savedExternalContext.targets.find((target) => target.type === "presentation_unit");
+    assert.ok(savedPageTarget);
+    const savedCompositionInspection = await inspectExternalAgentComposition(ids.user, {
+      projectId: ids.project,
+      pageHandles: [savedPageTarget.handle],
+    });
+    assert.equal(savedCompositionInspection.output.source.kind, "saved_snapshot");
+    assert.equal(savedCompositionInspection.output.baseRevision, 1);
+    const savedStyleVersionTarget = savedExternalContext.targets.find((target) =>
+      target.type === "asset_version" && target.assetVersionId === ids.visualStyleV1);
+    assert.ok(savedStyleVersionTarget);
+    const savedStyleInspection = await inspectExternalAgentImages(ids.user, {
+      projectId: ids.project,
+      targetHandles: [savedStyleVersionTarget.handle],
+    });
+    assert.equal(savedStyleInspection.output.source.kind, "saved_snapshot");
+    assert.equal(savedStyleInspection.output.images[0]?.assetVersionId, ids.visualStyleV1);
+    const savedFrameTarget = savedCompositionInspection.output.structure.units[0]?.frames[0];
+    assert.ok(savedFrameTarget?.handle);
+    await assert.rejects(() => invokeExternalCompositionCapability(ids.user, "frame.update", {
+      scope: chapterReference,
+      targetHandles: [savedFrameTarget.handle],
+      expectedRevision: 1,
+      idempotencyKey: `saved-frame-read-only-${suffix}`,
+      geometry: { x: 40, y: 40, width: 300, height: 300 },
+    }), /已保存版本目标仅供观察/);
     await assert.rejects(() => inspectExternalAgentImages(`other-${ids.user}`, {
       projectId: ids.project,
       targetHandles: [externalAssetTarget.handle],
@@ -1097,8 +1150,16 @@ test("database candidate apply and revert preserve version heads atomically", as
       allowOverlap: false,
     });
     assert.equal(createdFrame.workingRevision, ++compositionRevision);
+    const savedAfterUnsavedChanges = await inspectExternalAgentComposition(ids.user, {
+      projectId: ids.project,
+      pageHandles: [savedPageTarget.handle],
+    });
+    assert.equal(savedAfterUnsavedChanges.output.baseRevision, 1);
+    assert.equal(savedAfterUnsavedChanges.output.source.kind, "saved_snapshot");
 
     let currentComposition = await compositionPage();
+    assert.equal(currentComposition.inspection.output.source.kind, "working");
+    assert.equal(currentComposition.inspection.output.baseRevision, compositionRevision);
     let primaryFrame = currentComposition.unit.frames.find((frame) => frame.name === "雨中近景");
     assert.ok(primaryFrame?.handle);
     const shapedFrame = await invokeExternalCompositionCapability(ids.user, "frame.update", {
@@ -1493,6 +1554,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       await prisma.assetVersion.deleteMany({ where: { asset: { comicId: copiedComicId } } });
       await prisma.asset.updateMany({ where: { comicId: copiedComicId }, data: { variantOfAssetId: null } });
       await prisma.asset.deleteMany({ where: { comicId: copiedComicId } });
+      await prisma.savedSnapshot.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
       await prisma.workingRevision.deleteMany({ where: { projectId: { in: copiedProjectIds } } });
       await prisma.project.deleteMany({ where: { id: { in: copiedProjectIds } } });
       await prisma.chapter.deleteMany({ where: { comicId: copiedComicId } });
@@ -1513,6 +1575,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.assetVersion.deleteMany({ where: { asset: { comicId: ids.comic } } });
     await prisma.asset.updateMany({ where: { comicId: ids.comic }, data: { variantOfAssetId: null } });
     await prisma.asset.deleteMany({ where: { comicId: ids.comic } });
+    await prisma.savedSnapshot.deleteMany({ where: { projectId: ids.project } });
     await prisma.workingRevision.deleteMany({ where: { projectId: ids.project } });
     await prisma.project.deleteMany({ where: { id: ids.project } });
     await prisma.chapter.deleteMany({ where: { id: ids.chapter } });

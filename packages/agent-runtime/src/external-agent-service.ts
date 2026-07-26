@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@lantern/server/db";
 import { AppError } from "@lantern/server/errors";
+import { getObject } from "@lantern/server/object-storage";
 import { executeIdempotentExternalMutation } from "@lantern/server/external-operation-service";
 import { prepareExternalAssetUpload } from "@lantern/server/external-upload-service";
 import {
@@ -62,7 +63,6 @@ import { externalResourceToolResultSchema, isResourceCapabilityId } from "./reso
 import { isCandidateCapabilityId } from "./candidate-capabilities";
 import { isPageCapabilityId } from "./page-capabilities";
 import { isCompositionCapabilityId } from "./composition-capabilities";
-import { analyzeImageVersions } from "./visual-context";
 import {
   createExternalTargetHandle,
   resolveExternalTargetHandles,
@@ -89,7 +89,9 @@ const externalPageLocatorSchema = z.strictObject({
 export const externalContextGetInputSchema = z.strictObject({
   scope: z.string().trim().min(1).max(2048).optional(),
   projectId: z.string().min(1).optional(),
+  source: z.enum(["working", "latest_saved"]).default("working"),
   profile: z.enum(externalContextProfiles).default("visual_observation"),
+  assets: z.array(z.string().trim().min(1).max(2048)).max(3).optional(),
   pages: z.array(externalPageLocatorSchema).min(1).max(2).optional(),
   pageId: z.string().min(1).optional(),
   pageIds: z.array(z.string().min(1)).min(1).max(2).optional(),
@@ -107,7 +109,6 @@ export const externalCapabilitiesListInputSchema = z.strictObject({});
 export const externalImagesInspectInputSchema = z.strictObject({
   projectId: z.string().min(1).optional(),
   targetHandles: z.array(z.string().min(1).max(4096)).min(1).max(3),
-  instruction: z.string().trim().min(1).max(2000).optional(),
 });
 
 export const externalCompositionInspectInputSchema = z.strictObject({
@@ -141,6 +142,10 @@ const externalContextTargetSchema = z.object({
   pageId: z.string().optional(),
   pageLabel: z.string().optional(),
   surfaceRole: z.string().optional(),
+  assetId: z.string().optional(),
+  assetVersionId: z.string().optional(),
+  assetKind: z.string().optional(),
+  isPrimary: z.boolean().optional(),
   assetVersionIds: z.array(z.string()),
 });
 
@@ -177,6 +182,20 @@ const externalPageStructureSchema = externalPageSequenceItemSchema.extend({
   nextReadingPosition: z.number().int().positive().optional(),
 });
 
+const externalObservationSourceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("working"),
+    workingRevision: z.number().int().positive(),
+    createdAt: z.string(),
+  }),
+  z.strictObject({
+    kind: z.literal("saved_snapshot"),
+    snapshotId: z.string().min(1),
+    sourceWorkingRevision: z.number().int().positive(),
+    createdAt: z.string(),
+  }),
+]);
+
 export const externalContextGetOutputSchema = z.object({
   projectId: z.string(),
   scope: z.strictObject({
@@ -185,6 +204,7 @@ export const externalContextGetOutputSchema = z.object({
     project: z.string(),
   }),
   baseRevision: z.number().int().positive(),
+  source: externalObservationSourceSchema,
   profile: z.enum(externalContextProfiles),
   expiresAt: z.string(),
   comic: z.object({
@@ -219,8 +239,15 @@ export const externalContextGetOutputSchema = z.object({
 export const externalImagesInspectOutputSchema = z.object({
   projectId: z.string(),
   baseRevision: z.number().int().positive(),
-  observation: z.object({ type: z.literal("visual_evidence"), content: z.string() }),
-  evidence: z.array(z.object({ handle: z.string(), assetVersionIds: z.array(z.string()) })),
+  source: externalObservationSourceSchema,
+  images: z.array(z.strictObject({
+    handle: z.string().min(1),
+    assetId: z.string().min(1),
+    assetVersionId: z.string().min(1),
+    mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+  })).min(1).max(3),
 });
 
 export const externalCompositionInspectOutputSchema = compositionObservationSchema;
@@ -679,17 +706,9 @@ async function resolveContextRequestScope(
 }
 
 async function resolvePageLocators(
-  ownerUserId: string,
-  projectId: string,
+  document: ComicDocument,
   locators: z.infer<typeof externalPageLocatorSchema>[],
 ) {
-  const working = await prisma.workingRevision.findFirst({
-    where: { projectId, project: { ownerUserId } },
-    orderBy: { revision: "desc" },
-    select: { document: true },
-  });
-  if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
-  const document = validateComicDocument(working.document);
   const pages = createComicPageViews(document);
   const unitById = new Map(document.units.map((unit) => [unit.id, unit]));
   return locators.map((locator) => {
@@ -736,6 +755,57 @@ async function resolvePageLocators(
   });
 }
 
+async function loadExternalContextSource(
+  ownerUserId: string,
+  projectId: string,
+  source: "working" | "latest_saved",
+) {
+  if (source === "latest_saved") {
+    const snapshot = await prisma.savedSnapshot.findFirst({
+      where: {
+        projectId,
+        ownerUserId,
+        project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!snapshot) throw new AppError("not_found", "当前一话还没有已保存版本。", 404);
+    const sourceWorking = await prisma.workingRevision.findUnique({
+      where: { projectId_revision: { projectId, revision: snapshot.sourceWorkingRevision } },
+      select: { id: true },
+    });
+    if (!sourceWorking) throw new AppError("not_found", "已保存版本的来源修订不存在。", 404);
+    return {
+      document: validateComicDocument(snapshot.document),
+      revision: snapshot.sourceWorkingRevision,
+      snapshotId: snapshot.id,
+      source: {
+        kind: "saved_snapshot" as const,
+        snapshotId: snapshot.id,
+        sourceWorkingRevision: snapshot.sourceWorkingRevision,
+        createdAt: snapshot.createdAt.toISOString(),
+      },
+    };
+  }
+  const working = await prisma.workingRevision.findFirst({
+    where: {
+      projectId,
+      project: { ownerUserId, chapter: { archivedAt: null, comic: { archivedAt: null } } },
+    },
+    orderBy: { revision: "desc" },
+  });
+  if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
+  return {
+    document: validateComicDocument(working.document),
+    revision: working.revision,
+    source: {
+      kind: "working" as const,
+      workingRevision: working.revision,
+      createdAt: working.createdAt.toISOString(),
+    },
+  };
+}
+
 export async function getExternalAgentContext(
   ownerUserId: string,
   input: z.input<typeof externalContextGetInputSchema>,
@@ -743,35 +813,50 @@ export async function getExternalAgentContext(
 ) {
   const parsed = externalContextGetInputSchema.parse(input);
   const resolvedScope = await resolveContextRequestScope(ownerUserId, parsed);
+  const observationSource = await loadExternalContextSource(ownerUserId, resolvedScope.projectId, parsed.source);
+  const explicitAssetReferences = await Promise.all((parsed.assets ?? []).map(async (reference) => {
+    const resolved = await resolveResourceReference(ownerUserId, reference, "asset");
+    const asset = await prisma.asset.findFirst({
+      where: {
+        id: resolved.id,
+        ownerUserId,
+        archivedAt: null,
+        comic: { chapters: { some: { project: { id: resolvedScope.projectId } } } },
+      },
+      include: {
+        images: {
+          orderBy: [{ sortIndex: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+          take: 1,
+        },
+        versions: { orderBy: { version: "desc" }, take: 1 },
+      },
+    });
+    const versionId = asset?.images[0]?.assetVersionId ?? asset?.versions[0]?.id;
+    if (!asset || !versionId) {
+      throw new AppError("invalid_image_context", "指定资产没有可读取的固定图片版本。", 422);
+    }
+    return { objectType: "asset" as const, objectId: asset.id, versionId, label: asset.name };
+  }));
   const requestedPageIds = parsed.pages
-    ? await resolvePageLocators(ownerUserId, resolvedScope.projectId, parsed.pages)
+    ? await resolvePageLocators(observationSource.document, parsed.pages)
     : parsed.pageIds ?? (parsed.pageId ? [parsed.pageId] : resolvedScope.focusPageId ? [resolvedScope.focusPageId] : []);
   const contextRequest = contextRequestForProfile(parsed.profile);
   const context = await buildAgentContext({
     ownerUserId,
     projectId: resolvedScope.projectId,
+    workingRevision: observationSource.revision,
     taskType: contextRequest.taskType,
     instruction: "Read bounded context for an external Agent.",
     scope: contextRequest.scope,
     currentPageId: requestedPageIds[0],
     visiblePageIds: requestedPageIds.length ? requestedPageIds : undefined,
     selection: { type: "none", ...(requestedPageIds[0] ? { pageId: requestedPageIds[0] } : {}) },
+    explicitReferences: explicitAssetReferences,
   });
   if (requestedPageIds.length && requestedPageIds.some((pageId) => !context.currentView?.unitIds.includes(pageId))) {
     throw new AppError("not_found", "目标页面不存在或不属于当前创作空间。", 404);
   }
-  const structureWorking = await prisma.workingRevision.findFirst({
-    where: {
-      projectId: resolvedScope.projectId,
-      revision: context.workingRevision,
-      project: { ownerUserId },
-    },
-    select: { document: true },
-  });
-  if (!structureWorking) {
-    throw new AppError("revision_conflict", "页面结构已经变化，请重新读取 Lantern 上下文。", 409);
-  }
-  const document = validateComicDocument(structureWorking.document);
+  const document = observationSource.document;
   const orderedUnits = orderedDocumentUnits(document);
   const pageSequence = pageSequenceFor(document);
   const unitPosition = new Map(orderedUnits.map((unit, index) => [unit.id, index + 1]));
@@ -782,6 +867,7 @@ export async function getExternalAgentContext(
     ownerUserId,
     projectId: resolvedScope.projectId,
     baseRevision: context.workingRevision,
+    ...(observationSource.snapshotId ? { snapshotId: observationSource.snapshotId } : {}),
     expiresAt,
     target,
   });
@@ -868,18 +954,38 @@ export async function getExternalAgentContext(
   const targets = [
     ...pageTargets,
     ...surfaceTargets,
-    ...context.assets.filter((asset) => asset.images.length > 0).map((asset) => ({
-      handle: createHandle({
+    ...context.assets.filter((asset) => asset.images.length > 0).flatMap((asset) => [
+      {
+        handle: createHandle({
+          type: "asset",
+          assetVersionIds: asset.images.map((image) => image.versionId),
+          dialogueIds: [],
+        }),
         type: "asset",
+        label: asset.name,
+        aliases: [asset.name],
+        summary: asset.description,
+        assetId: asset.id,
+        assetKind: asset.kind,
         assetVersionIds: asset.images.map((image) => image.versionId),
-        dialogueIds: [],
-      }),
-      type: "asset",
-      label: asset.name,
-      aliases: [asset.name],
-      summary: asset.description,
-      assetVersionIds: asset.images.map((image) => image.versionId),
-    })),
+      },
+      ...asset.images.map((image, index) => ({
+        handle: createHandle({
+          type: "asset_version",
+          assetVersionIds: [image.versionId],
+          dialogueIds: [],
+        }),
+        type: "asset_version",
+        label: `${asset.name} · ${image.isPrimary ? "主图" : `图片 ${index + 1}`}`,
+        aliases: image.isPrimary ? [`${asset.name}主图`] : [`${asset.name}图片${index + 1}`],
+        summary: `${asset.kind} 资产“${asset.name}”的固定图片版本。`,
+        assetId: asset.id,
+        assetVersionId: image.versionId,
+        assetKind: asset.kind,
+        isPrimary: image.isPrimary,
+        assetVersionIds: [image.versionId],
+      })),
+    ]),
   ];
   const selectedPages = visibleUnitIds.flatMap((unitId) => {
     const unit = unitById.get(unitId);
@@ -910,6 +1016,7 @@ export async function getExternalAgentContext(
       project: resourceReference("project", context.projectId).uri,
     },
     baseRevision: context.workingRevision,
+    source: observationSource.source,
     profile: parsed.profile,
     expiresAt: new Date(expiresAt).toISOString(),
     comic: context.comic,
@@ -933,37 +1040,64 @@ async function resolveContextTargetHandles(
   ownerUserId: string,
   projectId: string | undefined,
   handles: string[],
+  allowSavedSnapshot = false,
   now = Date.now(),
 ) {
-  return resolveExternalTargetHandles({ ownerUserId, projectId, handles, now });
+  return resolveExternalTargetHandles({ ownerUserId, projectId, handles, allowSavedSnapshot, now });
 }
 
 export async function inspectExternalAgentImages(
   ownerUserId: string,
   input: z.input<typeof externalImagesInspectInputSchema>,
-  analyze: typeof analyzeImageVersions = analyzeImageVersions,
 ) {
   const parsed = externalImagesInspectInputSchema.parse(input);
-  const resolved = await resolveContextTargetHandles(ownerUserId, parsed.projectId, parsed.targetHandles);
-  const evidence = resolved.decoded.map(({ handle, payload }) => ({
-    handle,
-    assetVersionIds: payload.target.assetVersionIds,
-  }));
-  const versionIds = [...new Set(evidence.flatMap((item) => item.assetVersionIds))].slice(0, 3);
-  if (!versionIds.length) throw new AppError("invalid_image_context", "这些上下文目标没有可读取的图片。", 422);
-  const content = await analyze({
-    ownerUserId,
-    projectId: resolved.projectId,
-    message: parsed.instruction ?? "准确描述这些图片中可见的内容和文字。",
-    versionIds,
+  const resolved = await resolveContextTargetHandles(ownerUserId, parsed.projectId, parsed.targetHandles, true);
+  const requested = resolved.decoded.flatMap(({ handle, payload }) =>
+    payload.target.assetVersionIds.map((assetVersionId) => ({ handle, assetVersionId })));
+  const uniqueRequested = [...new Map(requested.map((item) => [item.assetVersionId, item])).values()].slice(0, 3);
+  if (!uniqueRequested.length) throw new AppError("invalid_image_context", "这些上下文目标没有可读取的图片。", 422);
+  const versions = await prisma.assetVersion.findMany({
+    where: {
+      id: { in: uniqueRequested.map((item) => item.assetVersionId) },
+      objectKey: { not: null },
+      contentType: { in: ["image/png", "image/jpeg", "image/webp"] },
+      asset: {
+        ownerUserId,
+        comic: { chapters: { some: { project: { id: resolved.projectId } } } },
+      },
+    },
+    select: {
+      id: true,
+      assetId: true,
+      objectKey: true,
+      contentType: true,
+      width: true,
+      height: true,
+    },
   });
-  if (!content) throw new AppError("invalid_image_context", "没有找到可读取的图片版本。", 422);
-  return externalImagesInspectOutputSchema.parse({
+  const versionById = new Map(versions.map((version) => [version.id, version]));
+  const images = await Promise.all(uniqueRequested.map(async ({ handle, assetVersionId }) => {
+    const version = versionById.get(assetVersionId);
+    if (!version?.objectKey || !version.contentType) {
+      throw new AppError("invalid_image_context", "没有找到可读取的固定图片版本。", 422, { assetVersionId });
+    }
+    return {
+      handle,
+      assetId: version.assetId,
+      assetVersionId: version.id,
+      mimeType: version.contentType as "image/png" | "image/jpeg" | "image/webp",
+      ...(version.width ? { width: version.width } : {}),
+      ...(version.height ? { height: version.height } : {}),
+      bytes: await getObject(version.objectKey),
+    };
+  }));
+  const output = externalImagesInspectOutputSchema.parse({
     projectId: resolved.projectId,
     baseRevision: resolved.workingRevision,
-    observation: { type: "visual_evidence", content },
-    evidence,
+    source: resolved.source,
+    images: images.map(({ bytes: _bytes, ...image }) => image),
   });
+  return { output, images };
 }
 
 export async function inspectExternalAgentComposition(
@@ -971,7 +1105,7 @@ export async function inspectExternalAgentComposition(
   input: z.input<typeof externalCompositionInspectInputSchema>,
 ) {
   const parsed = externalCompositionInspectInputSchema.parse(input);
-  const resolved = await resolveContextTargetHandles(ownerUserId, parsed.projectId, parsed.pageHandles);
+  const resolved = await resolveContextTargetHandles(ownerUserId, parsed.projectId, parsed.pageHandles, true);
   if (resolved.decoded.some(({ payload }) => payload.target.type !== "presentation_unit" || !payload.target.pageId)) {
     throw new AppError("invalid_composition_context", "最终画面 Observation 只能使用页面或滚动段 handle。", 422);
   }
@@ -981,6 +1115,7 @@ export async function inspectExternalAgentComposition(
     projectId: resolved.projectId,
     unitIds,
     expectedRevision: resolved.workingRevision,
+    ...(resolved.source.kind === "saved_snapshot" ? { snapshotId: resolved.source.snapshotId } : {}),
   });
   const pageHandleById = new Map(resolved.decoded.map(({ handle, payload }) => [payload.target.pageId!, handle]));
   const expiresAt = Math.min(...resolved.decoded.map(({ payload }) => payload.expiresAt));
@@ -988,6 +1123,7 @@ export async function inspectExternalAgentComposition(
     ownerUserId,
     projectId: resolved.projectId,
     baseRevision: resolved.workingRevision,
+    ...(resolved.source.kind === "saved_snapshot" ? { snapshotId: resolved.source.snapshotId } : {}),
     expiresAt,
     target,
   });
@@ -1028,6 +1164,7 @@ export async function inspectExternalAgentComposition(
       type: "composition_evidence",
       projectId: composition.projectId,
       baseRevision: composition.baseRevision,
+      source: composition.source,
       unitIds: composition.structure.units.map((unit) => unit.id),
       image: {
         mimeType: composition.image.mimeType,

@@ -102,6 +102,19 @@ export const compositionObservationSchema = z.strictObject({
   type: z.literal("composition_evidence"),
   projectId: z.string().min(1),
   baseRevision: z.number().int().positive(),
+  source: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("working"),
+      workingRevision: z.number().int().positive(),
+      createdAt: z.string(),
+    }),
+    z.strictObject({
+      kind: z.literal("saved_snapshot"),
+      snapshotId: z.string().min(1),
+      sourceWorkingRevision: z.number().int().positive(),
+      createdAt: z.string(),
+    }),
+  ]),
   unitIds: z.array(z.string().min(1)).min(1).max(2),
   content: z.string().min(1).optional(),
   image: z.strictObject({
@@ -149,24 +162,36 @@ export async function loadWorkingCompositionObservation(input: {
   projectId: string;
   unitIds: string[];
   expectedRevision?: number;
+  snapshotId?: string;
 }) {
   const requestedUnitIds = [...new Set(input.unitIds)];
   if (!requestedUnitIds.length || requestedUnitIds.length > 2) {
     throw new AppError("validation", "一次只能观察一个或两个展示单元。", 400);
   }
-  const working = await prisma.workingRevision.findFirst({
-    where: {
-      projectId: input.projectId,
-      project: { ownerUserId: input.ownerUserId, chapter: { archivedAt: null, comic: { archivedAt: null } } },
-    },
-    orderBy: { revision: "desc" },
-    select: { revision: true, document: true },
-  });
-  if (!working) throw new AppError("not_found", "工作稿不存在。", 404);
-  if (input.expectedRevision !== undefined && working.revision !== input.expectedRevision) {
-    throw new AppError("context_stale", "工作稿已经变化，请重新读取 Lantern 上下文。", 409, { currentRevision: working.revision });
+  const source = input.snapshotId
+    ? await prisma.savedSnapshot.findFirst({
+        where: {
+          id: input.snapshotId,
+          projectId: input.projectId,
+          ownerUserId: input.ownerUserId,
+          project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+        },
+        select: { id: true, sourceWorkingRevision: true, document: true, createdAt: true },
+      })
+    : await prisma.workingRevision.findFirst({
+        where: {
+          projectId: input.projectId,
+          project: { ownerUserId: input.ownerUserId, chapter: { archivedAt: null, comic: { archivedAt: null } } },
+        },
+        orderBy: { revision: "desc" },
+        select: { revision: true, document: true, createdAt: true },
+      });
+  if (!source) throw new AppError("not_found", input.snapshotId ? "已保存版本不存在。" : "工作稿不存在。", 404);
+  const revision = "sourceWorkingRevision" in source ? source.sourceWorkingRevision : source.revision;
+  if (input.expectedRevision !== undefined && revision !== input.expectedRevision) {
+    throw new AppError("context_stale", "作品版本已经变化，请重新读取 Lantern 上下文。", 409, { currentRevision: revision });
   }
-  const document = validateComicDocument(working.document);
+  const document = validateComicDocument(source.document);
   const unitById = new Map(document.units.map((unit) => [unit.id, unit]));
   const units = requestedUnitIds
     .map((unitId) => unitById.get(unitId))
@@ -239,7 +264,19 @@ export async function loadWorkingCompositionObservation(input: {
   const metadata = await sharp(imageBytes).metadata();
   return {
     projectId: input.projectId,
-    baseRevision: working.revision,
+    baseRevision: revision,
+    source: "sourceWorkingRevision" in source
+      ? {
+          kind: "saved_snapshot" as const,
+          snapshotId: source.id,
+          sourceWorkingRevision: source.sourceWorkingRevision,
+          createdAt: source.createdAt.toISOString(),
+        }
+      : {
+          kind: "working" as const,
+          workingRevision: source.revision,
+          createdAt: source.createdAt.toISOString(),
+        },
     structure,
     image: {
       bytes: imageBytes,

@@ -43,3 +43,7 @@ Changing ownership invalidates the old handle. Perform it as a separate operatio
 A cross-page balloon may cross the binding, but its writing center and tail endpoint must not sit in the gutter safety band. Bias the balloon's center toward the intended reading-side page, keep the tail clearly on one side, and inspect the rendered spread after conversion. Lantern rejects geometry that does not cross both pages, leaves the spread canvas, or places the center or tail in the protected band.
 
 This support is intentionally limited to one explicit balloon in an existing true spread. Do not infer arbitrary cross-unit text, multi-balloon restructuring, automatic avoidance, nested groups, or professional freeform typography. A true-spread restructuring or multi-object creative arrangement remains a Candidate when such a capability is available.
+
+## Review balloons as part of the page
+
+For a read-only review, judge balloons from the final composition together with Dialogue order and object geometry. Check that tails identify the intended speaker, balloons do not hide faces or essential action, adjacent balloons retain a clear reading path, and text remains comfortably legible. Treat dialogue density as a relationship among text amount, balloon area, panel area, and dramatic intent—not as a universal character-count threshold.

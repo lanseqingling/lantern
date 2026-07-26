@@ -49,3 +49,5 @@ For visual analysis, first identify the exact unit, frame, or element from struc
 For an available mutation, preserve every property outside the creator's stated intent. Target only returned opaque handles, use the observation's Working Revision as required by the capability, and inspect the new revision again before claiming the visual result is correct. Structural, multi-object, generated, or otherwise high-risk changes remain Candidates when the catalog says so.
 
 Before proposing a visual change, identify the exact unit and element handle, describe the relevant visible evidence, and preserve any creator decision that is not part of the requested change.
+
+For a read-only craft review, use geometry to explain visible relationships rather than grading a page from coordinates alone. Bleed should serve an intentional edge connection, a breakout should keep a clear anchor to its Frame, visual z-order should not be confused with reading order, and important text or subjects should remain legible in the final composition. These are review principles unless the LCD or Capability contract declares a hard invariant.

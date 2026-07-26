@@ -94,7 +94,7 @@ cd lantern
 npm start
 ```
 
-首次启动会准备锁定依赖并初始化本地数据。工作台默认打开 [http://localhost:18788](http://localhost:18788)。
+首次启动会准备锁定依赖、初始化本地数据并生成生产界面。之后源码或共享包发生变化时，`start` 会在启动前自动更新过期的生产构建。工作台默认打开 [http://localhost:18788](http://localhost:18788)。
 
 <details>
 <summary>校验下载的 Release 包</summary>

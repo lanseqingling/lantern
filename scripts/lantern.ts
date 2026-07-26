@@ -19,6 +19,7 @@ import {
 import { getRuntimePaths } from "@lantern/server/runtime-paths";
 import commandCatalog from "./lantern-commands.json";
 import { initializeRuntime, repositoryRoot, runCommand, runPrismaCommand } from "./runtime-init";
+import { webBuildIsCurrent } from "./web-build-state";
 
 type Command = keyof typeof commandCatalog.runtimeCommands;
 const command = (process.argv[2] ?? "start") as Command;
@@ -233,9 +234,9 @@ async function runServices(mode: "start" | "dev") {
     resetConfigForTests();
     const config = getConfig();
     const webRoot = path.join(repositoryRoot, "apps", "web");
-    if (mode === "start") {
-      const productionEntry = path.join(webRoot, "dist", "server", "index.js");
-      if (!await access(productionEntry).then(() => true).catch(() => false)) await runCommand(["build"]);
+    if (mode === "start" && !await webBuildIsCurrent(repositoryRoot)) {
+      console.log("Lantern web source changed; rebuilding the production interface...");
+      await runCommand(["build"]);
     }
 
     await assertPortAvailable("127.0.0.1", config.API_PORT, "Lantern API");

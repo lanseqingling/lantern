@@ -17,7 +17,7 @@
   "scripts": {
     "lantern": "node scripts/run-tsx.mjs scripts/lantern.ts",
     "dev": "node scripts/run-tsx.mjs scripts/lantern.ts dev",
-    "build": "pnpm --filter @lantern/web build",
+    "build": "node scripts/run-tsx.mjs scripts/build-web.ts",
     "start": "node scripts/lantern-bootstrap.mjs start",
     "package:source": "node scripts/package-source.mjs",
     "package:release": "node scripts/package-source.mjs && node scripts/release-checksums.mjs",
@@ -34,7 +34,7 @@
     "test:capacity": "node scripts/run-tsx.mjs scripts/run-tests.ts capacity",
     "test:runtime": "node scripts/run-tsx.mjs scripts/run-tests.ts runtime",
     "test:integration": "node scripts/run-tsx.mjs scripts/run-tests.ts integration",
-    "test:render": "pnpm --filter @lantern/web build && node --test tests/rendered-html.test.mjs",
+    "test:render": "pnpm build && node --test tests/rendered-html.test.mjs",
     "typecheck": "tsc --noEmit && pnpm -r --if-present typecheck",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern release",
     "db:generate": "node scripts/run-tsx.mjs scripts/prisma.ts generate",

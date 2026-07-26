@@ -82,6 +82,17 @@ const workbenchTourSteps: TourStep[] = [
         placement: "tools",
       },
       {
+        id: "history-and-save",
+        title: uiCopy.tour.workbench.stepTitle.historyAndSave,
+        items: [
+          { icon: "undo", text: uiCopy.tour.workbench.stepContent.undo },
+          { icon: "redo", text: uiCopy.tour.workbench.stepContent.redo },
+          { icon: "save", text: uiCopy.tour.workbench.stepContent.saveVersion },
+        ],
+        targets: ["tool-history"],
+        placement: "tools",
+      },
+      {
         id: "creation-preview",
         title: uiCopy.tour.workbench.stepTitle.creationAndPreview,
         items: [

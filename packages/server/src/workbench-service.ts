@@ -348,8 +348,8 @@ export async function getWorkbench(ownerUserId: string, chapterId: string, reque
           id: version.id,
           version: version.version,
           contentUrl: version.objectKey ? createSignedAssetPath(version.id) : undefined,
-          width: version.width,
-          height: version.height,
+          width: version.width ?? undefined,
+          height: version.height ?? undefined,
           createdAt: version.createdAt.toISOString(),
         })),
         images: item.asset.images.filter((image) => Boolean(image.assetVersion.objectKey)).map((image, index) => ({

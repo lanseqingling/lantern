@@ -118,7 +118,7 @@ ChangeProposal ──用户应用并保存──> 新 WorkingRevision + SavedSna
                └─丢弃方案
 ```
 
-ChangeProposal 固定 `baseWorkingRevision` 和冻结的草稿 revision。当前正式工作稿仍等于基线时才能应用；若用户已继续编辑，方案标记为过期，仍可查看和丢弃，但不能自动覆盖或合并。正式 SavedSnapshot 历史保持线性，不向用户展示 Git 式分支树。
+ChangeProposal 固定 `baseWorkingRevision` 和冻结的草稿 revision。若用户已继续编辑，方案标记为过期且不能自动覆盖或合并；用户在对比界面确认当前版本变化和覆盖风险后，仍可显式应用冻结的方案内容。应用始终基于用户刚刚查看的当前 revision，并原子创建新的 WorkingRevision 与 SavedSnapshot；冻结方案标记为已应用并继续保留在历史中。正式 SavedSnapshot 历史保持线性，不向用户展示 Git 式分支树。
 
 ## 5. 协作编排模型
 

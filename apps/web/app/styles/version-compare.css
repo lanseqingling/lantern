@@ -31,7 +31,7 @@
 .version-compare-toolbar > i { width: 1px; height: 23px; margin: 0 3px; background: rgba(36,127,130,.13); }
 .version-compare-toolbar button.primary { background: var(--cyan); color: #fff; }
 .version-compare-toolbar button.secondary { background: var(--cyan-soft); color: var(--cyan-deep); }
-.version-compare-toolbar button.danger { background: rgba(192,91,76,.09); color: #a5574c; }
+.version-compare-toolbar button.danger { background: var(--cyan-soft); color: var(--cyan-deep); }
 .version-compare-notice { position: fixed; right: 24px; bottom: 22px; max-width: 290px; margin: 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,248,232,.92); color: #8b641c; box-shadow: 0 10px 30px rgba(23,32,38,.08); font-size: 9px; }
 .version-compare-notice.error { background: rgba(255,238,235,.94); color: #a5574c; }
 .version-vertical-scroll { box-sizing: border-box; width: 100%; height: 100%; overflow-x: hidden; overflow-y: auto; padding: 8px 8% 72px; overscroll-behavior: contain; scrollbar-width: none; }

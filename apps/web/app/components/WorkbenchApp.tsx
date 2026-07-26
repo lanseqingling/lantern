@@ -386,7 +386,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     if (open) setAgentOpen(false);
     setVersionsOpen(open);
   }, []);
+  const handleNewProposalDetected = useCallback(() => {
+    setVersionWorkspaceOpen(true);
+  }, [setVersionWorkspaceOpen]);
   const [projectMenu, setProjectMenu] = useState(false);
+  const [saveChapterConfirmOpen, setSaveChapterConfirmOpen] = useState(false);
+  const [savingChapter, setSavingChapter] = useState(false);
+  const [versionTimelineRefreshKey, setVersionTimelineRefreshKey] = useState(0);
   const [importingArchive, setImportingArchive] = useState(false);
   const [archiveImportFile, setArchiveImportFile] = useState<File | null>(null);
   const [restoringSnapshot, setRestoringSnapshot] = useState(false);
@@ -433,6 +439,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const creationListRef = useRef<HTMLDivElement>(null);
   const dockUploadRef = useRef<HTMLInputElement>(null);
+  const frameImageUploadRef = useRef<HTMLInputElement>(null);
   const archiveImportRef = useRef<HTMLInputElement>(null);
   const agentMessagesRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLElement>(null);
@@ -1499,7 +1506,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const placeFrameImage = (choice: FrameImageChoice, target = frameImageTarget?.selection) => {
-    if (!target?.pageId) return;
+    if (!target?.pageId) return false;
     const { frame, image } = frameAndImageForSelection(target);
     try {
       const resource = { assetId: choice.assetId, assetVersionId: choice.assetVersionId, mediaType: choice.mediaType, width: choice.width, height: choice.height };
@@ -1519,7 +1526,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const elementId = added && (added.type === "add_layer_element" || added.type === "add_overlay_element") ? added.element.id : image?.id;
       setFrameImageTarget(null);
       const label = frameImageTarget?.placement === "cross_page" ? uiCopy.workbench.imagePicker.placeCrossPage : frameImageTarget?.placement === "cross_segment" ? uiCopy.workbench.imagePicker.placeCrossSegment : image ? uiCopy.asset.action.changeImage : frame ? uiCopy.workbench.action.placeFrameImage : uiCopy.workbench.imagePicker.placePaper;
-      commitOperations(plan.commands, label, "manual", undefined, undefined, () => {
+      return commitOperations(plan.commands, label, "manual", undefined, undefined, () => {
         if (choice.url && runtimeAdapter !== "server") {
           setState((current) => ({ ...current, fixture: { ...current.fixture, working: { ...current.fixture.working, resolvedResources: { ...current.fixture.working.resolvedResources, [choice.assetVersionId]: { url: choice.url! } } } } }));
         }
@@ -1527,6 +1534,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       });
     } catch (error) {
       setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.editing.placeImageFailed);
+      return false;
     }
   };
 
@@ -2264,7 +2272,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setState((current) => ({ ...current, candidates: current.candidates.map((item) => item.id === candidateId ? { ...item, status: "discarded" } : item) }));
   };
 
+  const requestSaveChapter = () => {
+    if (savingChapter) return;
+    setProjectMenu(false);
+    setSaveChapterConfirmOpen(true);
+  };
+
   const saveChapter = () => {
+    if (savingChapter) return;
+    setSaveChapterConfirmOpen(false);
+    setSavingChapter(true);
     if (runtimeAdapter === "server" && runtimeIds) {
       void serverCommitQueueRef.current
         .then(() => {
@@ -2272,8 +2289,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           return apiSaveSnapshot(runtimeIds.chapterId, revision).then(() => revision);
         })
         .then((revision) => refreshServerWorkbench().then(() => revision))
-        .then((revision) => setToast(uiCopy.toast.workbench.snapshot.saved(revision)))
-        .catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.common.saveFailed));
+        .then((revision) => {
+          setVersionTimelineRefreshKey((key) => key + 1);
+          setToast(uiCopy.toast.workbench.snapshot.saved(revision));
+        })
+        .catch((error) => setToast(error instanceof Error ? error.message : uiCopy.toast.common.saveFailed))
+        .finally(() => setSavingChapter(false));
       setProjectMenu(false);
       return;
     }
@@ -2283,10 +2304,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const next = { ...current, fixture: { ...current.fixture, snapshot } };
       stateRef.current = next;
       setState(next);
+      setVersionTimelineRefreshKey((key) => key + 1);
       setProjectMenu(false);
       setToast(uiCopy.toast.workbench.snapshot.saved(snapshot.sourceWorkingRevision));
     } catch {
       setToast(uiCopy.toast.workbench.snapshot.draftChanged);
+    } finally {
+      setSavingChapter(false);
     }
   };
 
@@ -2764,6 +2788,66 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       }));
       setSelection({ type: "reference_card", id: reference.id, label: reference.name });
       setToast(uiCopy.toast.workbench.asset.imageAddedToCanvasAndList);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.asset.imageSaveFailed);
+    }
+  };
+
+  const handleFrameImageUpload = async (file?: File) => {
+    const target = frameImageTarget?.selection;
+    if (!file || !target?.pageId) return;
+    try {
+      if (runtimeAdapter === "server" && runtimeIds) {
+        const uploaded = await apiUploadAsset(runtimeIds.projectId, file);
+        const uploadedVersion = uploaded.versions[0];
+        if (!uploadedVersion) throw new Error(uiCopy.toast.workbench.asset.imageSaveFailed);
+        await apiImportAssetToCanvasList(runtimeIds.projectId, uploaded.id);
+        const loaded = await refreshServerWorkbench();
+        const asset = loaded.state.assets?.find((candidate) => candidate.id === uploaded.id);
+        const version = asset?.versions?.find((candidate) => candidate.id === uploadedVersion.id) ?? uploadedVersion;
+        placeFrameImage({
+          id: `asset:${uploaded.id}:${uploadedVersion.id}`,
+          assetId: uploaded.id,
+          assetVersionId: uploadedVersion.id,
+          label: uploaded.name,
+          url: asset?.contentUrl ?? asset?.versions?.find((candidate) => candidate.id === uploadedVersion.id)?.contentUrl,
+          mediaType: uploadedVersion.contentType ?? "image/png",
+          width: typeof version.width === "number" ? version.width : undefined,
+          height: typeof version.height === "number" ? version.height : undefined,
+          source: { kind: "asset" },
+        }, target);
+        return;
+      }
+
+      const uploaded = await saveUploadedImage(file);
+      const assetId = `asset-${uploaded.id}`;
+      const name = file.name.replace(/\.[^.]+$/, "") || uiCopy.workbench.operation.uploadImage;
+      const summary: AssetSummary = {
+        id: assetId,
+        kind: "reference_image",
+        name,
+        description: uiCopy.workbench.defaultDescription.uploadedImage,
+        versionId: uploaded.id,
+        contentUrl: uploaded.url,
+        versions: [{ id: uploaded.id, version: 1, contentUrl: uploaded.url, createdAt: uploaded.createdAt }],
+        libraryStatus: "library",
+      };
+      const currentState = stateRef.current;
+      const nextState = {
+        ...currentState,
+        assets: [...(currentState.assets ?? []).filter((item) => item.id !== summary.id), summary],
+      };
+      stateRef.current = nextState;
+      setState(nextState);
+      placeFrameImage({
+        id: `asset:${assetId}:${uploaded.id}`,
+        assetId,
+        assetVersionId: uploaded.id,
+        label: name,
+        url: uploaded.url,
+        mediaType: uploaded.contentType,
+        source: { kind: "asset" },
+      }, target);
     } catch (error) {
       setToast(error instanceof Error ? error.message : uiCopy.toast.workbench.asset.imageSaveFailed);
     }
@@ -3862,7 +3946,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
               navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`);
             }}><span className="menu-action-label"><Icon name="folder" />{uiCopy.asset.navigation.space}</span></button>
             <i className="project-menu-divider" />
-            <button type="button" onClick={saveChapter}><span className="menu-action-label"><Icon name="save" />{uiCopy.common.action.save}</span></button>
+            <button type="button" onClick={requestSaveChapter} disabled={savingChapter}><span className="menu-action-label"><Icon name="save" />{savingChapter ? uiCopy.common.progress.savingPlain : uiCopy.common.action.save}</span></button>
             <button type="button" onClick={restoreLastSaved} disabled={!state.fixture.snapshot || state.fixture.snapshot.sourceWorkingRevision === state.fixture.working.revision || restoringSnapshot}><span className="menu-action-label"><Icon name="undo" />{uiCopy.workbench.action.returnToSaved}</span></button>
             <button type="button" onClick={goToPreview} disabled={previewDisabled} title={previewTitle}><span className="menu-action-label"><Icon name="preview" />{uiCopy.comic.action.readingPreview}</span></button>
             <i className="project-menu-divider" />
@@ -4105,11 +4189,13 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         <header><div><strong>{frameImageTarget.placement === "cross_page" ? uiCopy.workbench.imagePicker.placeCrossPage : frameImageTarget.placement === "cross_segment" ? uiCopy.workbench.imagePicker.placeCrossSegment : (() => { const image = frameAndImageForSelection(frameImageTarget.selection).image; return image ? image.location.space === "frame" ? uiCopy.workbench.action.replaceFrameImage : image.location.purpose === "cross_page" ? uiCopy.workbench.imagePicker.replaceCrossPage : image.location.purpose === "cross_segment" ? uiCopy.workbench.imagePicker.replaceCrossSegment : image.location.anchor.type === "unit" ? uiCopy.workbench.imagePicker.replacePaper : uiCopy.workbench.imagePicker.replaceBreakout : frameImageTarget.selection.type === "presentation_unit" ? uiCopy.workbench.imagePicker.placePaper : uiCopy.workbench.action.placeFrameImage; })()}</strong><small>{frameImagePickerSelection?.frame ? uiCopy.workbench.imagePicker.sourceHint : uiCopy.workbench.imagePicker.assetSourceHint}</small></div><button type="button" aria-label={uiCopy.workbench.imagePicker.closeAria} onClick={() => setFrameImageTarget(null)}><Icon name="x" /></button></header>
         <div className="frame-image-grid">{frameImageChoices.map((choice) => <button type="button" key={choice.id} onClick={() => placeFrameImage(choice)}>{choice.url ? <img src={choice.url} alt="" /> : <span className="frame-image-placeholder"><Icon name="asset" /></span>}<strong>{choice.label}</strong></button>)}</div>
         {!frameImageChoices.length ? <p>{uiCopy.workbench.imagePicker.empty}</p> : null}
+        {frameImagePickerSelection?.frame ? <div className="frame-image-picker-actions"><button type="button" aria-label={uiCopy.workbench.imagePicker.uploadToFrameAria} onClick={() => frameImageUploadRef.current?.click()}><Icon name="asset" /></button></div> : null}
       </FloatingMenu> : null}
 
       {comicDeleteTarget && comicDeleteSelection ? <DeleteConfirmDialog dialogId="comic-delete" title={comicDeleteTitle} description={comicDeleteDescription} confirmLabel={comicDeleteTarget.kind === "image" ? uiCopy.common.action.confirmRemove : uiCopy.common.action.confirmDelete} onCancel={() => setComicDeleteTarget(null)} onConfirm={confirmComicDelete} /> : null}
       {archiveImportFile ? <DeleteConfirmDialog dialogId="chapter-archive-import" title={uiCopy.workbench.dialog.overwriteChapterTitle} description={uiCopy.workbench.dialog.importArchiveDescription(archiveImportFile.name)} confirmLabel={uiCopy.common.action.confirmImport} onCancel={() => setArchiveImportFile(null)} onConfirm={() => { const file = archiveImportFile; setArchiveImportFile(null); void importChapterArchive(file); }} /> : null}
       {modelSettingsPromptOpen ? <DeleteConfirmDialog dialogId="model-settings-required" tone="neutral" icon="settings" title={uiCopy.workbench.dialog.configureModelTitle} description={uiCopy.workbench.dialog.configureModelDescription} confirmLabel={uiCopy.common.action.goToSettings} onCancel={() => setModelSettingsPromptOpen(false)} onConfirm={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)} /> : null}
+      {saveChapterConfirmOpen ? <DeleteConfirmDialog dialogId="save-chapter-confirm" tone="neutral" icon="save" title={uiCopy.workbench.dialog.saveVersionTitle} description={uiCopy.workbench.dialog.saveVersionDescription} confirmLabel={uiCopy.workbench.action.saveVersion} disabled={savingChapter} onCancel={() => setSaveChapterConfirmOpen(false)} onConfirm={saveChapter} /> : null}
 
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
       {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>{uiCopy.workbench.narrationEditor.placementPreview}</div> : null}
@@ -4118,7 +4204,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />{uiCopy.workbench.label.narration(selectedNarrationNumber || 1)}</span><button type="button" aria-label={uiCopy.workbench.narrationEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="x" /></button></div><label>{uiCopy.workbench.narrationEditor.textLabel}<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>{uiCopy.workbench.balloonEditor.fontSizeLabel}<NumberStepper ariaLabel={uiCopy.workbench.narrationEditor.fontSizeAria} value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>{uiCopy.common.action.save}</button></div></aside> : null}
 
       <div className="canvas-global-actions" aria-label={uiCopy.common.navigation.globalEntry}><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} versionsOpen={versionsOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentWorkspaceOpen} onVersionsOpenChange={setVersionWorkspaceOpen} /><button type="button" className={`global-icon-button ${versionsOpen ? "active" : ""}`} data-tour-id="version-history" aria-label={uiCopy.workbench.versions.entryAria} aria-pressed={versionsOpen} onClick={() => setVersionWorkspaceOpen(!versionsOpen)}><Icon name="history" /></button><button type="button" className="global-icon-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
-      <VersionPanel projectId={runtimeIds?.projectId} open={versionsOpen} refreshKey={state.fixture.snapshot?.documentId} onClose={() => setVersionsOpen(false)} />
+      <VersionPanel projectId={runtimeIds?.projectId} open={versionsOpen} refreshKey={`${state.fixture.snapshot?.documentId ?? "draft"}:${versionTimelineRefreshKey}`} onClose={() => setVersionsOpen(false)} onNewProposalDetected={handleNewProposalDetected} />
       <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label={uiCopy.workbench.chat.panelAria}>
         <div className="agent-head">
           <div className="agent-head-actions"><span className="agent-session-entry"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label={uiCopy.workbench.chat.sessionsAria} aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button><small>{uiCopy.workbench.chat.internalAgentHint}</small></span><button type="button" aria-label={uiCopy.workbench.chat.collapseAria} onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
@@ -4162,9 +4248,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {!agentOpen && !versionsOpen ? <button className="drawer-reopen right" type="button" onClick={openAgentWorkspace} aria-label={uiCopy.workbench.chat.expandAria}><Icon name="ai" /></button> : null}
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+      <input ref={frameImageUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleFrameImageUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <input ref={archiveImportRef} type="file" accept="application/zip,.zip" hidden onChange={(event) => { const file = event.target.files?.[0]; setProjectMenu(false); if (file) setArchiveImportFile(file); event.currentTarget.value = ""; }} />
       <CreationDock className={[multiSelection ? "multi-hidden" : "", dockEntering ? "mode-entering" : "", modeSwitching ? "mode-exiting" : ""].filter(Boolean).join(" ")} aria-label={uiCopy.workbench.toolbar.creationAria}>
-        <div><span className="dock-canvas-mode-pair" data-tour-id="tool-canvas-modes"><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label={uiCopy.workbench.toolbar.focusModeAria} onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label={uiCopy.workbench.toolbar.freeModeAria} onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button></span><i/>{!isVerticalWorkbench ? <button type="button" data-tour-id="tool-display" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? uiCopy.viewer.action.spread : uiCopy.viewer.action.singlePage} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" data-tour-id="tool-display" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={uiCopy.workbench.aria.switchViewport(verticalViewportLabel)} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label={uiCopy.workbench.toolbar.uploadCanvasImageAria} onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? uiCopy.workbench.toolbar.cancelNarrationAria : uiCopy.workbench.toolbar.placeNarrationAria} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history"><button type="button" aria-label={uiCopy.workbench.toolbar.undoAria} disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label={uiCopy.workbench.toolbar.redoAria} disabled={!future.length} onClick={redo}><Icon name="redo" /></button></div><div className="ai-tools mode-toggle creative-active" data-tour-id="tool-mode"><button type="button" className="mode-star mode-active" aria-label={uiCopy.workbench.toolbar.aiEditStoryboardAria} onClick={() => { setComposer(uiCopy.workbench.chat.editStoryboardPrompt); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label={uiCopy.workbench.toolbar.previewAria} title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
+        <div><span className="dock-canvas-mode-pair" data-tour-id="tool-canvas-modes"><button type="button" className={canvasMode === "focus" ? "active" : ""} aria-label={uiCopy.workbench.toolbar.focusModeAria} onClick={() => switchCanvasMode("focus")}><Icon name="select" /></button><button type="button" className={canvasMode === "free" ? "active" : ""} aria-label={uiCopy.workbench.toolbar.freeModeAria} onClick={() => switchCanvasMode("free")}><Icon name="pan" /></button></span><i/>{!isVerticalWorkbench ? <button type="button" data-tour-id="tool-display" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? uiCopy.viewer.action.spread : uiCopy.viewer.action.singlePage} onClick={togglePageDisplayMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : <button type="button" data-tour-id="tool-display" className={`device-viewport-toggle ${verticalViewportMode !== "off" ? "active" : ""}`} aria-label={uiCopy.workbench.aria.switchViewport(verticalViewportLabel)} title={verticalViewportLabel} onClick={cycleVerticalViewportMode}><DeviceViewportGlyph mode={verticalViewportMode} /></button>}<button type="button" aria-label={uiCopy.workbench.toolbar.uploadCanvasImageAria} onClick={() => dockUploadRef.current?.click()}><Icon name="asset" /></button><button type="button" className={creationMode === "narration" ? "active" : ""} aria-label={creationMode === "narration" ? uiCopy.workbench.toolbar.cancelNarrationAria : uiCopy.workbench.toolbar.placeNarrationAria} aria-pressed={creationMode === "narration"} onClick={() => { if (canvasMode !== "focus") switchCanvasMode("focus"); setInspectorOpen(false); setObjectInteractionMode("select"); setCreationMode((mode) => mode === "narration" ? null : "narration"); setCreationPointer(null); }}><Icon name="text" /></button></div><div className="dock-history" data-tour-id="tool-history"><button type="button" aria-label={uiCopy.workbench.toolbar.undoAria} disabled={!history.length} onClick={undo}><Icon name="undo" /></button><button type="button" aria-label={uiCopy.workbench.toolbar.redoAria} disabled={!future.length} onClick={redo}><Icon name="redo" /></button><button type="button" aria-label={uiCopy.workbench.toolbar.saveVersionAria} disabled={savingChapter} onClick={requestSaveChapter}><Icon name="save" /></button></div><div className="ai-tools mode-toggle creative-active" data-tour-id="tool-mode"><button type="button" className="mode-star mode-active" aria-label={uiCopy.workbench.toolbar.aiEditStoryboardAria} onClick={() => { setComposer(uiCopy.workbench.chat.editStoryboardPrompt); }}><Icon name="ai" /></button><button type="button" className="mode-preview mode-idle" aria-label={uiCopy.workbench.toolbar.previewAria} title={previewTitle} disabled={previewDisabled} onClick={goToPreview}><Icon name="preview" /></button></div>
       </CreationDock>
       <nav className={`multi-selection-dock ${multiSelection ? "active" : ""}`} aria-label={uiCopy.workbench.multiSelect.toolbarAria}>
         <button type="button" aria-label={uiCopy.workbench.multiSelect.referenceAria} disabled={!multiComicActive && !multiCanvasActive} onClick={addMultiSelectionToDialogue}><Icon name="ai" /></button>

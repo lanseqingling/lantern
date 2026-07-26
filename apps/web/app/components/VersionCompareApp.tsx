@@ -119,7 +119,7 @@ export function VersionCompareApp({ targetKind, targetId }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [acting, setActing] = useState(false);
-  const [confirmation, setConfirmation] = useState<"discard" | "restore" | "delete" | null>(null);
+  const [confirmation, setConfirmation] = useState<"apply_stale" | "discard" | "restore" | "delete" | null>(null);
   const syncingScroll = useRef(false);
   const currentScrollRef = useRef<HTMLDivElement>(null);
   const targetScrollRef = useRef<HTMLDivElement>(null);
@@ -292,7 +292,7 @@ export function VersionCompareApp({ targetKind, targetId }: {
   const proposalStatus = comparison.target.kind === "change_proposal" ? comparison.target.status : undefined;
   const stale = proposalStatus === "stale";
   const canApplyProposal = comparison.target.kind === "change_proposal"
-    && ["available", "retained"].includes(proposalStatus ?? "");
+    && ["available", "retained", "stale"].includes(proposalStatus ?? "");
   const canDiscardProposal = comparison.target.kind === "change_proposal"
     && ["available", "retained", "stale"].includes(proposalStatus ?? "");
   const previousDifferenceIndex = [...differencePositions].reverse().find((index) => index < differenceIndex);
@@ -419,13 +419,27 @@ export function VersionCompareApp({ targetKind, targetId }: {
         {comparison.target.kind === "change_proposal" ? <>
           <button type="button" className="secondary" disabled={acting || comparison.target.status !== "available"} onClick={() => void act(() => apiRetainChangeProposal(comparison.target.id))}>{uiCopy.workbench.versions.retain}</button>
           <button type="button" className="danger" disabled={acting || !canDiscardProposal} onClick={() => setConfirmation("discard")}>{uiCopy.workbench.versions.discard}</button>
-          <button type="button" className="primary" disabled={acting || !canApplyProposal} title={stale ? uiCopy.workbench.versions.stale : undefined} onClick={() => void act(() => apiApplyChangeProposal(comparison.target.id))}>{uiCopy.workbench.versions.applyAndSave}</button>
+          <button type="button" className="primary" disabled={acting || !canApplyProposal} title={stale ? uiCopy.workbench.versions.stale : undefined} onClick={() => { if (stale) setConfirmation("apply_stale"); else void act(() => apiApplyChangeProposal(comparison.target.id, comparison.current.revision)); }}>{uiCopy.workbench.versions.applyAndSave}</button>
         </> : <>
           <button type="button" className="primary" disabled={acting} onClick={() => setConfirmation("restore")}>{uiCopy.workbench.versions.restore}</button>
           <button type="button" className="secondary" disabled={acting} onClick={() => setConfirmation("delete")}>{uiCopy.workbench.versions.deleteVersion}</button>
         </>}
       </nav>
       {stale ? <p className="version-compare-notice">{uiCopy.workbench.versions.stale}</p> : error ? <p className="version-compare-notice error">{error}</p> : null}
+      {confirmation === "apply_stale" && comparison.target.kind === "change_proposal" ? <DeleteConfirmDialog
+        dialogId="stale-change-proposal-apply"
+        tone="neutral"
+        icon="history"
+        title={uiCopy.workbench.versions.staleApplyConfirmTitle}
+        description={uiCopy.workbench.versions.confirmStaleApply}
+        confirmLabel={uiCopy.workbench.versions.applyAndSave}
+        disabled={acting}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => {
+          setConfirmation(null);
+          void act(() => apiApplyChangeProposal(comparison.target.id, comparison.current.revision));
+        }}
+      /> : null}
       {confirmation === "discard" && comparison.target.kind === "change_proposal" ? <DeleteConfirmDialog
         dialogId="change-proposal-discard"
         title={uiCopy.workbench.versions.discardConfirmTitle}

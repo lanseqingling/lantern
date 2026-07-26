@@ -166,7 +166,7 @@ LCD 只保存稳定的素材与版本标识、媒体类型和必要尺寸，不�
 
 SavedSnapshot 是用户显式保存后不可变的阅读和导出基线，后续编辑不能原地改写。回到历史版本通过复制其内容创建新的 WorkingRevision 与 SavedSnapshot，历史只向前增长；用户确认删除某个 SavedSnapshot 时，仅可回收已证明不再被任何作品版本、草稿、画布、资产或封面引用的固定图片版本。
 
-外部 Agent 对一话的连续编辑属于独立 AgentDraft，不直接推进正式 WorkingRevision。AgentDraft 固定一个正式基线，并以不可变草稿 revision 保存每次 ChangeSet；任务完成后冻结为 ChangeProposal。ChangeProposal 不是 LCD 对象，也不是正式版本，只固定审查所需的草稿 revision、基线和资源引用。用户接受方案时，Lantern 在一个事务中创建新的正式 WorkingRevision 与 SavedSnapshot；当前工作稿已偏离基线时拒绝接受，不自动合并。正式 SavedSnapshot 只形成线性历史。
+外部 Agent 对一话的连续编辑属于独立 AgentDraft，不直接推进正式 WorkingRevision。AgentDraft 固定一个正式基线，并以不可变草稿 revision 保存每次 ChangeSet；任务完成后冻结为 ChangeProposal。ChangeProposal 不是 LCD 对象，也不是正式版本，只固定审查所需的草稿 revision、基线和资源引用。用户接受方案时，Lantern 在一个事务中创建新的正式 WorkingRevision 与 SavedSnapshot，并把冻结方案标记为已应用后继续保留，不能因生成正式版本而删除。当前工作稿已偏离基线时，方案标记为过期且不得静默合并；用户查看差异并确认覆盖风险后，仍可显式应用冻结的方案内容。正式 SavedSnapshot 只形成线性历史。
 
 ## 10. 校验不变量
 

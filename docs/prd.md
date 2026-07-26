@@ -73,7 +73,7 @@ LCD 中的 Frame、Layer 和 Element 是作品协议对象，不要求普通用�
 - 候选应用前不属于作品；应用时校验基准 revision，并作为一次原子变更进入工作稿。
 - 一次直接编辑或候选应用全部成功后才生成新 revision，任一部分失败都不改变工作稿。
 - 外部 Agent 的一话内容编辑先推进 AgentDraft；任务完成后形成 ChangeProposal，未经用户在 Lantern 中明确应用，不改变正式工作稿或保存版本。
-- 接受 ChangeProposal 必须原子创建一个正式 WorkingRevision 和 SavedSnapshot；正式版本保持线性，过期方案不得自动覆盖当前稿。
+- 接受 ChangeProposal 必须原子创建一个正式 WorkingRevision 和 SavedSnapshot；原冻结方案标记为已应用并继续保留，正式版本保持线性。过期方案不得自动覆盖当前稿，但用户查看差异并确认覆盖风险后可以显式应用。
 - Undo / Redo 生成新的有效 revision，不删除历史 revision。
 - 用户保存一话时从工作稿生成新的不可变快照。旧快照不原地覆盖。
 - 阅读预览只读取最近保存快照；没有快照时必须先保存，不能用当前工作稿替代。
@@ -221,7 +221,7 @@ LCD 中的 Frame、Layer 和 Element 是作品协议对象，不要求普通用�
 - 删除图片卡只移除摆放关系，不删除来源资产。
 - 格式切换、整页重排和整话操作必须先产生候选。
 - 外部 Agent 连接中断、重复请求或返回无效结果时，不创建半完成作品状态，也不改变已确认内容。
-- AgentDraft 的幂等重试、过期 handle 或 revision 冲突不能推进错误草稿；ChangeProposal 基线落后于当前工作稿时保持可查看但不可应用。
+- AgentDraft 的幂等重试、过期 handle 或 revision 冲突不能推进错误草稿；ChangeProposal 基线落后于当前工作稿时保持可查看，并且只有用户确认覆盖风险后才能应用到刚刚对比的当前 revision。
 
 ## 9. 权限、安全与内容边界
 

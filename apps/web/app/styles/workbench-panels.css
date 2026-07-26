@@ -44,9 +44,11 @@
 .version-row.current { cursor: default; opacity: 1; }
 .version-row strong { min-width: 0; overflow: hidden; font-size: 8px; font-weight: 820; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .version-row i { padding: 4px 6px; border-radius: 8px; font-size: 7px; font-style: normal; font-weight: 850; white-space: nowrap; }
+.version-row-tags { display: flex; align-items: center; gap: 4px; }
 .version-row.current i { background: var(--cyan); color: #fff; }
-.version-row.saved_snapshot i { background: rgba(100,200,200,.16); color: var(--cyan-deep); }
-.version-row.change_proposal i { background: rgba(242,184,75,.2); color: #8b641c; }
+.version-row.saved_snapshot .version-type-tag { background: rgba(100,200,200,.16); color: var(--cyan-deep); }
+.version-row.change_proposal .version-type-tag { background: rgba(242,184,75,.2); color: #8b641c; }
+.version-row.change_proposal .version-new-tag { background: var(--cyan); color: #fff; }
 .version-row.stale { opacity: .62; }
 .version-panel-state { margin: 18px 8px; color: var(--muted); font-size: 10px; line-height: 1.6; text-align: center; }
 .version-panel-state.error { color: #a65b50; }
@@ -227,7 +229,7 @@
   --lantern-logo-radius: clamp(20px, 1.85vw, 32px);
   --lantern-logo-glow: clamp(9px, .86vw, 15px);
 }
-.landing-brand strong { color: var(--cyan-deep); }
+.landing-brand strong { flex: none; color: var(--cyan-deep); white-space: nowrap; }
 .landing-brand em { color: var(--amber); font-style: normal; }
 .landing-intro h1 { margin: 0; font-size: clamp(34px, 3.2vw, 54px); line-height: 1.1; letter-spacing: -.085em; white-space: nowrap; }
 .landing-intro p { max-width: 384px; margin: 17px 0 0; color: #647278; font-size: 14.4px; line-height: 1.75; }
@@ -297,14 +299,21 @@ html[data-lantern-content-route-transition] .route-page-transition.route-page-tr
 @keyframes contentRouteFadeExit { to { opacity: 0; } }
 @keyframes contentRouteFadeEnter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .route-page-transition, .route-page-transition.route-page-enter-forward, .route-page-transition.route-page-enter-back { animation: none; }
+  .landing-intro, .landing-composition, .landing-scroll-cue, .library-page { transition: opacity 140ms ease !important; }
+  .landing-page.is-leaving .landing-intro, .landing-page.is-leaving .landing-composition, .library-page.is-leaving { filter: none; transform: none; }
+  .landing-page.is-leaving .landing-scroll-cue { filter: none; transform: translateX(-50%); }
+  html[data-lantern-route-transition="landing"] .landing-route-transition,
+  html[data-lantern-route-transition="workspace"] .workspace-route-transition { animation: contentRouteFadeEnter 140ms ease both !important; }
+  html[data-lantern-content-route-transition] .route-page-transition { animation: contentRouteFadeExit 140ms ease both !important; }
+  .route-page-transition.route-page-enter-forward,
+  .route-page-transition.route-page-enter-back { animation: contentRouteFadeEnter 140ms ease both !important; }
 }
 .library-header, .chapter-page > header { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; }
 .library-header, .chapter-page > header { position: fixed; z-index: 90; top: var(--app-page-corner-top); left: var(--app-page-corner-inset); right: var(--app-page-corner-inset); }
 .library-brand { display: flex; align-items: center; gap: 8px; }
 .library-header .library-brand { min-height: 42px; }
 .library-brand strong, .library-brand small { display: block; }
-.library-brand strong { color: var(--cyan-deep); font-size: 15px; }
+.library-brand strong { color: var(--cyan-deep); font-size: 15px; white-space: nowrap; }
 .library-brand small { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .chapter-back-icon { padding: 10px 14px; border: 1px solid rgba(255,255,255,.85); border-radius: 999px; background: rgba(255,255,255,.7); box-shadow: var(--shadow-soft); color: #405058; font-size: 11px; font-weight: 800; }
 .chapter-top-left { display: flex; align-items: center; gap: 12px; }

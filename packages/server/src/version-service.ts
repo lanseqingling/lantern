@@ -202,7 +202,7 @@ export async function getVersionTimeline(ownerUserId: string, projectId: string)
     getLatestWorking(projectId),
     prisma.savedSnapshot.findMany({ where: { ownerUserId, projectId }, orderBy: { createdAt: "asc" } }),
     prisma.changeProposal.findMany({
-      where: { ownerUserId, projectId, status: { in: ["AVAILABLE", "RETAINED", "STALE"] } },
+      where: { ownerUserId, projectId, status: { in: ["AVAILABLE", "RETAINED", "APPLIED", "STALE"] } },
       orderBy: { createdAt: "asc" },
     }),
   ]);
@@ -220,7 +220,13 @@ export async function getVersionTimeline(ownerUserId: string, projectId: string)
       id: proposal.id,
       kind: "change_proposal" as const,
       label: proposal.title,
-      typeLabel: proposal.status === "RETAINED" ? "已保留方案" : proposal.status === "STALE" ? "过期方案" : "Agent 方案",
+      typeLabel: proposal.status === "RETAINED"
+        ? "已保留方案"
+        : proposal.status === "APPLIED"
+          ? "已应用方案"
+          : proposal.status === "STALE"
+            ? "过期方案"
+            : "Agent 方案",
       baseWorkingRevision: proposal.baseWorkingRevision,
       status: proposal.status.toLowerCase(),
       summary: proposal.summary,
@@ -355,7 +361,7 @@ export async function updateChangeProposalStatus(ownerUserId: string, proposalId
   return prisma.changeProposal.update({ where: { id: proposal.id }, data: { status: "DISCARDED" } });
 }
 
-export async function applyChangeProposal(ownerUserId: string, proposalId: string) {
+export async function applyChangeProposal(ownerUserId: string, proposalId: string, expectedWorkingRevision: number) {
   const proposal = await prisma.changeProposal.findFirst({
     where: { id: proposalId, ownerUserId },
     include: { draftRevision: true, project: true },
@@ -364,12 +370,11 @@ export async function applyChangeProposal(ownerUserId: string, proposalId: strin
   if (proposal.status === "APPLIED" && proposal.acceptedWorkingRevision && proposal.acceptedSnapshotId) {
     return { workingRevision: proposal.acceptedWorkingRevision, snapshotId: proposal.acceptedSnapshotId };
   }
-  if (!["AVAILABLE", "RETAINED"].includes(proposal.status)) throw new AppError("conflict", "该方案当前不可应用。", 409);
+  if (!["AVAILABLE", "RETAINED", "STALE"].includes(proposal.status)) throw new AppError("conflict", "该方案当前不可应用。", 409);
   const current = await getLatestWorking(proposal.projectId);
-  if (current.revision !== proposal.baseWorkingRevision) {
-    await prisma.changeProposal.update({ where: { id: proposal.id }, data: { status: "STALE" } });
-    throw new AppError("proposal_stale", "当前稿已经变化；该方案仍可查看，但需要基于最新版本重新生成后才能应用。", 409, {
-      baseWorkingRevision: proposal.baseWorkingRevision,
+  if (current.revision !== expectedWorkingRevision) {
+    throw new AppError("conflict", "当前版本已再次变化，请重新打开版本对比。", 409, {
+      expectedWorkingRevision,
       currentWorkingRevision: current.revision,
     });
   }

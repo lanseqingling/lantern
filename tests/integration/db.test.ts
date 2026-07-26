@@ -838,7 +838,7 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(comparison.firstDifferenceIndex, 0);
     assert.equal(comparison.target.kind, "change_proposal");
     await updateChangeProposalStatus(ids.user, proposalId, "retain");
-    const appliedProposal = await applyChangeProposal(ids.user, proposalId);
+    const appliedProposal = await applyChangeProposal(ids.user, proposalId, 3);
     assert.equal(appliedProposal.workingRevision, 4);
     assert.ok(appliedProposal.snapshotId);
     const appliedDocument = validateComicDocument((await prisma.workingRevision.findFirstOrThrow({
@@ -851,6 +851,8 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(timelineAfterApply.current.workingRevision, 4);
     assert.equal(timelineAfterApply.items.some((item) =>
       item.kind === "saved_snapshot" && item.sourceWorkingRevision === 4), false);
+    assert.equal(timelineAfterApply.items.some((item) =>
+      item.kind === "change_proposal" && item.id === proposalId && item.status === "applied"), true);
 
     const nextOfficialContext = await getExternalAgentContext(ids.user, {
       scope: resolvedScope.chapter!.uri,
@@ -902,13 +904,19 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(staleComparison.target.kind, "change_proposal");
     assert.equal(staleComparison.target.kind === "change_proposal" ? staleComparison.target.status : undefined, "stale");
     await assert.rejects(
-      () => applyChangeProposal(ids.user, staleProposalId),
+      () => applyChangeProposal(ids.user, staleProposalId, 4),
       (error: unknown) => error instanceof Error && "code" in error && error.code === "conflict",
     );
-    const restored = await restoreSavedSnapshot(ids.user, appliedProposal.snapshotId, 5);
-    assert.equal(restored.workingRevision, 6);
+    const appliedStaleProposal = await applyChangeProposal(ids.user, staleProposalId, 5);
+    assert.equal(appliedStaleProposal.workingRevision, 6);
+    assert.equal(validateComicDocument((await prisma.workingRevision.findFirstOrThrow({
+      where: { projectId: ids.project },
+      orderBy: { revision: "desc" },
+    })).document).units[0]?.name, "准备过期的方案");
+    const restored = await restoreSavedSnapshot(ids.user, appliedProposal.snapshotId, 6);
+    assert.equal(restored.workingRevision, 7);
     assert.ok(restored.snapshotId);
-    assert.equal((await prisma.savedSnapshot.findUniqueOrThrow({ where: { id: restored.snapshotId } })).sourceWorkingRevision, 6);
+    assert.equal((await prisma.savedSnapshot.findUniqueOrThrow({ where: { id: restored.snapshotId } })).sourceWorkingRevision, 7);
     assert.equal(validateComicDocument((await prisma.workingRevision.findFirstOrThrow({
       where: { projectId: ids.project },
       orderBy: { revision: "desc" },

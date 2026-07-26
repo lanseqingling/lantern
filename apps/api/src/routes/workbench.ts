@@ -134,9 +134,10 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
     return ok(request, await updateChangeProposalStatus(user.id, request.params.proposalId, "discard"));
   });
 
-  app.post<{ Params: { proposalId: string } }>("/v1/change-proposals/:proposalId/apply", async (request) => {
+  app.post<{ Params: { proposalId: string }; Body: { expectedWorkingRevision: number } }>("/v1/change-proposals/:proposalId/apply", async (request) => {
     const user = await currentUser(request);
-    return ok(request, await applyChangeProposal(user.id, request.params.proposalId));
+    const body = z.object({ expectedWorkingRevision: z.number().int().positive() }).parse(request.body);
+    return ok(request, await applyChangeProposal(user.id, request.params.proposalId, body.expectedWorkingRevision));
   });
 
   app.post<{ Params: { snapshotId: string }; Body: { expectedWorkingRevision: number } }>("/v1/saved-snapshots/:snapshotId/restore", async (request) => {

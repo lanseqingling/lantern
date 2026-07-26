@@ -1,5 +1,6 @@
 import type { Candidate, ReferencePlacement, WorkbenchFixture, WorkspaceChangeSet } from "@lantern/shared";
 import type { ActiveTaskLike, AgentMessage, PersistedWorkbench } from "@/app/lib/workbench-state";
+import { normalizeAssetVersionDimensions, type AssetVersionWithNullableDimensions } from "@/app/lib/asset-version-normalization";
 import { normalizeResolvedResourceUrls } from "@/app/lib/document-asset-urls";
 import { uiCopy } from "./ui-copy";
 
@@ -433,7 +434,7 @@ type WorkbenchResponse = {
     name: string;
     description: string;
     currentVersion?: { id: string; contentUrl?: string };
-    versions?: Array<{ id: string; version: number; contentUrl?: string; width?: number; height?: number; createdAt?: string }>;
+    versions?: AssetVersionWithNullableDimensions[];
     images?: Array<{ id: string; versionId: string; label: string; contentUrl?: string; isPrimary: boolean }>;
     canvasListItemId?: string;
     libraryStatus?: "canvas_only" | "library";
@@ -569,7 +570,13 @@ function mapWorkbench(data: WorkbenchResponse): WorkbenchLoad {
         libraryStatus: asset.libraryStatus,
         pinned: asset.pinned,
         sortIndex: asset.sortIndex,
-        versions: asset.versions?.map((version) => ({ ...version, contentUrl: version.contentUrl ? absoluteAssetUrl(version.contentUrl) : undefined })),
+        versions: asset.versions?.map((version) => {
+          const normalized = normalizeAssetVersionDimensions(version);
+          return {
+            ...normalized,
+            contentUrl: normalized.contentUrl ? absoluteAssetUrl(normalized.contentUrl) : undefined,
+          };
+        }),
         images: asset.images?.map((image) => ({ ...image, contentUrl: image.contentUrl ? absoluteAssetUrl(image.contentUrl) : undefined })),
       })),
       conversations: data.conversations,
@@ -799,8 +806,11 @@ export function apiDiscardChangeProposal(proposalId: string) {
   return api(`/v1/change-proposals/${encodeURIComponent(proposalId)}/discard`, { method: "POST", body: "{}" });
 }
 
-export function apiApplyChangeProposal(proposalId: string) {
-  return api<{ workingRevision: number; snapshotId: string }>(`/v1/change-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", body: "{}" });
+export function apiApplyChangeProposal(proposalId: string, expectedWorkingRevision: number) {
+  return api<{ workingRevision: number; snapshotId: string }>(`/v1/change-proposals/${encodeURIComponent(proposalId)}/apply`, {
+    method: "POST",
+    body: JSON.stringify({ expectedWorkingRevision }),
+  });
 }
 
 export function apiRestoreSavedSnapshot(snapshotId: string, expectedWorkingRevision: number) {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@lantern/ui";
 import { uiCopy } from "@/app/lib/ui-copy";
+import { routeMotionDelay } from "@/app/lib/ui-motion";
 
 export function LandingClient() {
   const router = useRouter();
@@ -15,14 +16,9 @@ export function LandingClient() {
     if (leaving || transitionStarted.current) return;
     transitionStarted.current = true;
 
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      router.push("/workspace");
-      return;
-    }
-
     document.documentElement.dataset.lanternRouteTransition = "workspace";
     setLeaving(true);
-    window.setTimeout(() => router.push("/workspace"), 340);
+    window.setTimeout(() => router.push("/workspace"), routeMotionDelay(340));
   }, [leaving, router]);
 
   useEffect(() => {

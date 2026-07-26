@@ -3,6 +3,7 @@
 import { type PropsWithChildren, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { navigateWithContentTransition, useContentRouteEntryTransition } from "@/app/lib/content-route-transition";
+import { routeMotionDelay } from "@/app/lib/ui-motion";
 
 const RETURN_SCROLL_THRESHOLD = 180;
 const RETURN_TOUCH_DISTANCE = 112;
@@ -20,14 +21,9 @@ export function WorkspaceRouteTransition({ children }: PropsWithChildren) {
     if (leaving || transitionStarted.current) return;
     transitionStarted.current = true;
 
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      router.push("/");
-      return;
-    }
-
     document.documentElement.dataset.lanternRouteTransition = "landing";
     setLeaving(true);
-    window.setTimeout(() => router.push("/"), 340);
+    window.setTimeout(() => router.push("/"), routeMotionDelay(340));
   }, [leaving, router]);
 
   useEffect(() => {

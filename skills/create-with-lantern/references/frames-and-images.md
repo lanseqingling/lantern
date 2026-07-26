@@ -42,10 +42,11 @@ The same fixed image may be placed more than once with different crop values. Th
 
 Lantern MCP does not expose image generation or an internal image Provider. If the creator needs new pixels, use the host Agent's own image capability or a user-provided PNG, JPEG, or WebP, then:
 
-1. create or choose the correct Asset card;
-2. prepare and complete the external upload;
-3. attach it as an immutable AssetVersion;
-4. place that fixed version through the image composition capability.
+1. decide whether the image is a reusable Asset-space baseline or a one-off composition source;
+2. use the narrow upload and immutable-version registration capability exposed for that resource kind;
+3. place that fixed version through the image composition capability.
+
+Do not create a reusable Asset card for each ordinary Frame image merely to transport generated pixels. Save it to Asset Space only when the creator asks, when it establishes a reusable identity or baseline, or when future reuse is part of the task. If the current catalog exposes only an Asset-card upload for new pixels, report that capability limit instead of silently claiming an Asset-space-free placement.
 
 Do not put local paths, image bytes, base64, provider credentials, or object-storage keys into composition tool arguments.
 

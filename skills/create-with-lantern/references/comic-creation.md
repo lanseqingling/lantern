@@ -39,7 +39,7 @@ For each intended Frame image, establish the target aspect ratio, subject, actio
 
 Translate the creator's visual direction into observable style traits and the Comic's visual-style baseline. Use character, scene, prop, and other Assets for reusable identity, and pin the exact AssetVersion used for any placed image or visual comparison.
 
-Before producing dependent shots, create or choose a baseline for a recurring character, scene, prop, or other identity whose consistency matters. A one-off detail does not require an Asset, and exploratory art may precede asset confirmation when exploration is the creator's intent.
+Before producing dependent shots, create or choose a baseline for a recurring character, scene, prop, or other identity whose consistency matters. A one-off detail or finished Frame source is not a reusable Asset-space identity by default. Do not create a structured Asset card for every generated shot unless the creator asks to preserve those shots as reusable assets. Exploratory art may precede asset confirmation when exploration is the creator's intent.
 
 For a new shot, inspect only the relevant baseline images and nearby composed pages or Frames. Preserve character identity, costume, spatial anchors, time and weather, movement direction, and other facts that matter to the requested continuity. Do not rely on text descriptions alone when image handles are available.
 

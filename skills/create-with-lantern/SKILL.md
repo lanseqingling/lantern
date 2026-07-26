@@ -2,7 +2,7 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to create, draw, compose, revise, organize, inspect, or review a creator's comics through the domain capabilities Lantern currently exposes. Use for comic work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
   minimum_catalog_revision: "16"
 ---
 
@@ -59,7 +59,7 @@ When the request asks for a page-composition review, character or scene consiste
 - Generated layout proposals, multi-object creative results, and other effects declared as `candidate` remain Candidates until Lantern reports that they were merged into a draft or otherwise applied.
 - A host Agent may merge an available Candidate into an AgentDraft in the same user request. This does not authorize the host to accept or save the finished ChangeProposal.
 - Never treat a Candidate, task result, or conversation as already applied unless Lantern reports that state.
-- After the first chapter-content mutation, keep the returned `draft`, read fresh `source: agent_draft` context, and discard every older handle. When the requested task is complete, call `lantern_agent_draft_finish` once and return its `reviewUrl` to the creator.
+- After the first chapter-content mutation, keep the returned `draft`, read fresh `source: agent_draft` context, and discard every older handle. When the requested task is complete, call `lantern_agent_draft_finish` once and keep its `reviewUrl` for the final review action.
 - Never call an acceptance or save action for a ChangeProposal unless Lantern provides a verifiable user authorization path. The default trusted action is the creator clicking in Lantern's comparison view.
 - Refresh context after a stale or expired handle, draft revision conflict, or meaningful project change.
 - Destructive comic, chapter, or shared-resource capabilities must confirm the exact resource reference. Destructive edits isolated inside one AgentDraft do not require per-object interruption; the creator reviews their complete effect before acceptance.
@@ -83,3 +83,7 @@ This tool is read-only. Its result identifies `working`, `agent_draft`, or `save
 ## Communicate with the creator
 
 Lead with the creative finding or next decision, not protocol details. Distinguish facts read from Lantern from your interpretation. Keep unresolved creative choices visible and let the creator make decisions that materially affect story, character identity, composition, or final application.
+
+When a ChangeProposal was finished, state plainly that the official working version has not changed. End the response with one standalone review action containing the returned `reviewUrl`, after any summaries or local artifact links. Do not bury this action inside the completion summary or put other content after it. Use a direct form such as:
+
+`当前仍是未应用方案。请点击 [在 Lantern 中审阅并决定是否应用](reviewUrl)。`

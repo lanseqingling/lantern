@@ -28,6 +28,16 @@ export type ParallelCornerGuide = {
   activeEdge: { start: Point; end: Point };
 };
 
+export const contentSafeArea = (surface: Geometry): Geometry => {
+  const inset = Math.min(surface.width, surface.height) * .05;
+  return {
+    x: surface.x + inset,
+    y: surface.y + inset,
+    width: Math.max(0, surface.width - inset * 2),
+    height: Math.max(0, surface.height - inset * 2),
+  };
+};
+
 /** Snaps the edited edge back to a horizontal or vertical axis. */
 export function snapFrameCornerToOrthogonal(
   frame: SnapFrame,
@@ -74,12 +84,14 @@ export function snapGeometryToFrameEdgeExtensions(
   targets: ReadonlyArray<Pick<SnapFrame, "geometry">>,
   threshold: { x: number; y: number },
   movementAxis?: "x" | "y",
+  extraEdgeTargets: ReadonlyArray<Pick<SnapFrame, "geometry">> = [],
 ): { geometry: Geometry; guides: MoveSnapGuide[] } {
-  const xCandidates: MoveSnapCandidate[] = targets.flatMap((target) => [
+  const edgeTargets = [...targets, ...extraEdgeTargets];
+  const xCandidates: MoveSnapCandidate[] = edgeTargets.flatMap((target) => [
     { axis: "x" as const, delta: target.geometry.x - geometry.x, guide: { kind: "edge_extension" as const, axis: "x" as const, position: target.geometry.x } },
     { axis: "x" as const, delta: target.geometry.x + target.geometry.width - geometry.x - geometry.width, guide: { kind: "edge_extension" as const, axis: "x" as const, position: target.geometry.x + target.geometry.width } },
   ]).filter((candidate) => Math.abs(candidate.delta) <= threshold.x);
-  const yCandidates: MoveSnapCandidate[] = targets.flatMap((target) => [
+  const yCandidates: MoveSnapCandidate[] = edgeTargets.flatMap((target) => [
     { axis: "y" as const, delta: target.geometry.y - geometry.y, guide: { kind: "edge_extension" as const, axis: "y" as const, position: target.geometry.y } },
     { axis: "y" as const, delta: target.geometry.y + target.geometry.height - geometry.y - geometry.height, guide: { kind: "edge_extension" as const, axis: "y" as const, position: target.geometry.y + target.geometry.height } },
   ]).filter((candidate) => Math.abs(candidate.delta) <= threshold.y);
@@ -142,24 +154,35 @@ const horizontalEqualGapCandidates = (geometry: Geometry, targets: ReadonlyArray
   return candidates;
 };
 
-/** Snaps the right and bottom edges of a bottom-right resize gesture. */
+/** Snaps the two moving edges of a corner resize gesture to matching edges. */
 export function snapGeometrySizeToFrameEdgeExtensions(
   geometry: Geometry,
   targets: ReadonlyArray<Pick<SnapFrame, "geometry">>,
   threshold: { x: number; y: number },
+  corner: "top_left" | "top_right" | "bottom_right" | "bottom_left" = "bottom_right",
 ): { geometry: Geometry; guides: EdgeExtensionGuide[] } {
-  const right = geometry.x + geometry.width;
-  const bottom = geometry.y + geometry.height;
+  const movesLeft = corner === "top_left" || corner === "bottom_left";
+  const movesTop = corner === "top_left" || corner === "top_right";
+  const activeX = movesLeft ? geometry.x : geometry.x + geometry.width;
+  const activeY = movesTop ? geometry.y : geometry.y + geometry.height;
   const xSnap = targets.map((target) => {
-    const position = target.geometry.x + target.geometry.width;
-    return { delta: position - right, position };
+    const position = movesLeft ? target.geometry.x : target.geometry.x + target.geometry.width;
+    return { delta: position - activeX, position };
   }).filter((candidate) => Math.abs(candidate.delta) <= threshold.x).sort((left, rightCandidate) => Math.abs(left.delta) - Math.abs(rightCandidate.delta))[0];
   const ySnap = targets.map((target) => {
-    const position = target.geometry.y + target.geometry.height;
-    return { delta: position - bottom, position };
+    const position = movesTop ? target.geometry.y : target.geometry.y + target.geometry.height;
+    return { delta: position - activeY, position };
   }).filter((candidate) => Math.abs(candidate.delta) <= threshold.y).sort((top, bottomCandidate) => Math.abs(top.delta) - Math.abs(bottomCandidate.delta))[0];
+  const xDelta = xSnap?.delta ?? 0;
+  const yDelta = ySnap?.delta ?? 0;
   return {
-    geometry: { ...geometry, width: geometry.width + (xSnap?.delta ?? 0), height: geometry.height + (ySnap?.delta ?? 0) },
+    geometry: {
+      ...geometry,
+      x: geometry.x + (movesLeft ? xDelta : 0),
+      y: geometry.y + (movesTop ? yDelta : 0),
+      width: geometry.width + (movesLeft ? -xDelta : xDelta),
+      height: geometry.height + (movesTop ? -yDelta : yDelta),
+    },
     guides: [
       ...(xSnap ? [{ kind: "edge_extension" as const, axis: "x" as const, position: xSnap.position }] : []),
       ...(ySnap ? [{ kind: "edge_extension" as const, axis: "y" as const, position: ySnap.position }] : []),

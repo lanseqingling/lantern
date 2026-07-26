@@ -71,7 +71,7 @@ function assertCapabilityContract(
   try {
     assertAgentCapabilityAccess(capability, "external");
   } catch {
-    throw new AppError("capability_not_available", "该编辑能力没有向外置 Agent 开放。", 403);
+    throw new AppError("capability_not_available", "该编辑能力没有向外部 Agent 开放。", 403);
   }
   if (targets.length < capability.target.min || targets.length > capability.target.max) {
     throw new AppError("invalid_target_scope", "目标数量不符合该编辑能力的范围。", 422, {

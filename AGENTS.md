@@ -14,7 +14,7 @@ Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台，串联�
 | 启动本地产品 | `./lantern start` |
 | 启动开发进程 | `./lantern dev` |
 | 运行时诊断 | `./lantern doctor` |
-| 安装外置 Agent 应用接入 | `./lantern agent:install` |
+| 安装外部 Agent 应用接入 | `./lantern agent:install` |
 | 创建一致备份 | `./lantern backup:create` |
 | 恢复一致备份 | `./lantern backup:restore <backup-file>` |
 | 类型检查 | `./lantern typecheck` |

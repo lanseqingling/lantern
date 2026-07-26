@@ -70,7 +70,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
     id: "context.inspect_images",
     version: 1,
     execution: "synchronous",
-    description: "读取本轮上传图片、资产固定图片版本，或用户唯一指明的当前页对象所关联图片，形成至多三张只读视觉证据。内置路径可形成视觉 Observation；外置 MCP 直接返回固定 AssetVersion 原图及精确映射，由宿主 Agent 分析，不调用 Lantern 内部视觉模型。不创建任务、候选或变更。",
+    description: "读取本轮上传图片、资产固定图片版本，或用户唯一指明的当前页对象所关联图片，形成至多三张只读视觉证据。内置路径可形成视觉 Observation；外部 Agent 通过 MCP 直接获得固定 AssetVersion 原图及精确映射，由宿主 Agent 分析，不调用 Lantern 内部视觉模型。不创建任务、候选或变更。",
     inputSchema: imageObservationInputSchema,
     outputSchema: imageObservationOutputSchema,
     target: { required: true, types: ["image_attachment", "current_page_target"], min: 1, max: 3 },

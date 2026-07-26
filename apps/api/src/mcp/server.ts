@@ -187,7 +187,7 @@ export function createLanternMcpServer(ownerUserId: string) {
 
   server.registerTool("lantern_capabilities_list", {
     title: "List Lantern capabilities",
-    description: "从 Lantern 唯一语义 Capability 目录读取当前允许外置 Agent 使用的观察与写入能力契约。",
+    description: "从 Lantern 唯一语义 Capability 目录读取当前允许外部 Agent 使用的观察与写入能力契约。",
     inputSchema: externalCapabilitiesListInputSchema,
     outputSchema: externalCapabilitiesListOutputSchema,
     annotations: readOnlyAnnotations,

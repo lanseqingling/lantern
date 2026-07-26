@@ -5,7 +5,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@lantern/shared";
 import { balloonCutCornerPoints, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@lantern/shared";
 import type { Selection } from "@/app/lib/workbench-state";
-import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type MoveSnapGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
+import { contentSafeArea, snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type MoveSnapGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 import { uiCopy } from "@/app/lib/ui-copy";
 
 type ElementPatch = Record<string, unknown>;
@@ -168,6 +168,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const [drafts, setDrafts] = useState<Record<string, ElementPatch>>({});
   const draftsRef = useRef<Record<string, ElementPatch>>({});
   const [snapGuides, setSnapGuides] = useState<SnapGuideState>(null);
+  const [safeAreaVisible, setSafeAreaVisible] = useState(false);
   useEffect(() => () => {
     if (cropWheelRef.current) window.clearTimeout(cropWheelRef.current.timer);
   }, []);
@@ -277,7 +278,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     if (!editable) return;
     event.preventDefault(); event.stopPropagation(); onSelect?.(next);
     dragRef.current = { ...state, startX: event.clientX, startY: event.clientY };
-    draftsRef.current = {}; setDrafts({}); setSnapGuides(null); event.currentTarget.setPointerCapture(event.pointerId);
+    draftsRef.current = {}; setDrafts({}); setSnapGuides(null);
+    setSafeAreaVisible(state.mode === "frame_move" || state.mode === "frame_resize");
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
   const surfaceForGeometry = (geometry: Geometry) => unit.surfaces.find((surface) => containsGeometry(surface.geometry, geometry));
   const editableBoundsForFrame = (frame: Frame) => frame.surfaceScope === "unit"
@@ -491,7 +494,10 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     } else if (drag.mode === "frame_move" && drag.startGeometry && drag.frameId) {
       const start = drag.startGeometry;
       const rawGeometry = { ...start, x: clamp(start.x + dx, 0, unit.canvas.width - start.width), y: clamp(start.y + dy, 0, unit.canvas.height - start.height) };
-      const snapped = snapGeometryToFrameEdgeExtensions(rawGeometry, movingSnapFrames(drag.frameId), moveSnapThreshold, Math.abs(dx) >= Math.abs(dy) ? "x" : "y");
+      const currentFrame = unit.frames.find((frame) => frame.id === drag.frameId);
+      const surface = currentFrame?.surfaceScope === "unit" ? undefined : surfaceForGeometry(start);
+      const safeTarget = surface ? [{ geometry: contentSafeArea(surface.geometry) }] : [];
+      const snapped = snapGeometryToFrameEdgeExtensions(rawGeometry, movingSnapFrames(drag.frameId), moveSnapThreshold, Math.abs(dx) >= Math.abs(dy) ? "x" : "y", safeTarget);
       const snappedAllowed = frameGeometryAllowed(drag.frameId, snapped.geometry);
       const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
       if (!frameGeometryAllowed(drag.frameId, geometry)) return;
@@ -516,9 +522,10 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         ? bottom - y
         : clamp(start.height + dy, minimumFrameHeight, bounds.y + bounds.height - start.y);
       const rawGeometry = { ...start, x, y, width, height };
-      const snapped = corner === "bottom_right"
-        ? snapGeometrySizeToFrameEdgeExtensions(rawGeometry, unit.frames.filter((frame) => frame.id !== drag.frameId), moveSnapThreshold)
-        : { geometry: rawGeometry, guides: [] };
+      const currentFrame = unit.frames.find((frame) => frame.id === drag.frameId);
+      const surface = currentFrame?.surfaceScope === "unit" ? undefined : surfaceForGeometry(start);
+      const safeTarget = surface ? [{ geometry: contentSafeArea(surface.geometry) }] : [];
+      const snapped = snapGeometrySizeToFrameEdgeExtensions(rawGeometry, [...unit.frames.filter((frame) => frame.id !== drag.frameId), ...safeTarget], moveSnapThreshold, corner);
       const snappedAllowed = snapped.geometry.width >= minimumFrameWidth && snapped.geometry.height >= minimumFrameHeight && frameGeometryAllowed(drag.frameId, snapped.geometry);
       const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
       if (!frameGeometryAllowed(drag.frameId, geometry)) return;
@@ -537,7 +544,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       if (drag.mode === "frame_move" || drag.mode === "frame_resize" || drag.mode === "frame_corner") onCommitElements?.(unit.id, [{ elementId: drag.elementId, patch }], label);
       else onCommitElement?.(unit.id, drag.elementId, patch, label);
     }
-    draftsRef.current = {}; setDrafts({}); setSnapGuides(null); dragRef.current = null;
+    draftsRef.current = {}; setDrafts({}); setSnapGuides(null); setSafeAreaVisible(false); dragRef.current = null;
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   };
   const badgeEntries = [
@@ -557,14 +564,18 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     onClick={(event) => { const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue" && point) { const frame = frameAtPoint(point); if (!frame) onPlacePageDialogue?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (interactionMode !== "select") return; const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); onPageClick?.(pageIndex); }}
     onContextMenu={(event) => { const point = eventPoint(event); if (!point) return; const frame = frameAtPoint(point); contextFor(event, frame ? { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) } : { type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); }}>
     <div className="paper-grain" aria-hidden="true" />
-    {snapGuides ? <svg className="snap-guide-layer" viewBox={`0 0 ${unit.canvas.width} ${unit.canvas.height}`} preserveAspectRatio="none" aria-hidden="true">
-      {"edgeGuides" in snapGuides ? snapGuides.edgeGuides.filter((guide): guide is EdgeExtensionGuide => guide.kind === "edge_extension").map((guide) => guide.axis === "x"
+    {safeAreaVisible || snapGuides ? <svg className="snap-guide-layer" viewBox={`0 0 ${unit.canvas.width} ${unit.canvas.height}`} preserveAspectRatio="none" aria-hidden="true">
+      {safeAreaVisible ? unit.surfaces.map((surface) => {
+        const safeArea = contentSafeArea(surface.geometry);
+        return <rect className="content-safe-area" key={`safe-${surface.id}`} x={safeArea.x} y={safeArea.y} width={safeArea.width} height={safeArea.height} />;
+      }) : null}
+      {snapGuides && "edgeGuides" in snapGuides ? snapGuides.edgeGuides.filter((guide): guide is EdgeExtensionGuide => guide.kind === "edge_extension").map((guide) => guide.axis === "x"
         ? <line className="edge-extension" key={`x-${guide.position}`} x1={guide.position} x2={guide.position} y1={0} y2={unit.canvas.height} />
-        : <line className="edge-extension" key={`y-${guide.position}`} x1={-unit.canvas.width} x2={unit.canvas.width * 2} y1={guide.position} y2={guide.position} />) : null}
-      {"edgeGuides" in snapGuides ? snapGuides.edgeGuides.filter((guide) => guide.kind === "equal_gap").map((guide) => guide.axis === "x"
+        : <line className="edge-extension" key={`y-${guide.position}`} x1={0} x2={unit.canvas.width} y1={guide.position} y2={guide.position} />) : null}
+      {snapGuides && "edgeGuides" in snapGuides ? snapGuides.edgeGuides.filter((guide) => guide.kind === "equal_gap").map((guide) => guide.axis === "x"
         ? <g className="distance-guide" key={`gap-x-${guide.reference.start}-${guide.active.start}`}><line x1={guide.reference.start} x2={guide.reference.end} y1={guide.reference.position} y2={guide.reference.position} /><line x1={guide.reference.start} x2={guide.reference.start} y1={guide.reference.position - 7} y2={guide.reference.position + 7} /><line x1={guide.reference.end} x2={guide.reference.end} y1={guide.reference.position - 7} y2={guide.reference.position + 7} /><line x1={guide.active.start} x2={guide.active.end} y1={guide.active.position} y2={guide.active.position} /><line x1={guide.active.start} x2={guide.active.start} y1={guide.active.position - 7} y2={guide.active.position + 7} /><line x1={guide.active.end} x2={guide.active.end} y1={guide.active.position - 7} y2={guide.active.position + 7} /></g>
         : <g className="distance-guide" key={`gap-y-${guide.reference.start}-${guide.active.start}`}><line x1={guide.reference.position} x2={guide.reference.position} y1={guide.reference.start} y2={guide.reference.end} /><line x1={guide.reference.position - 7} x2={guide.reference.position + 7} y1={guide.reference.start} y2={guide.reference.start} /><line x1={guide.reference.position - 7} x2={guide.reference.position + 7} y1={guide.reference.end} y2={guide.reference.end} /><line x1={guide.active.position} x2={guide.active.position} y1={guide.active.start} y2={guide.active.end} /><line x1={guide.active.position - 7} x2={guide.active.position + 7} y1={guide.active.start} y2={guide.active.start} /><line x1={guide.active.position - 7} x2={guide.active.position + 7} y1={guide.active.end} y2={guide.active.end} /></g>) : null}
-      {"parallelGuide" in snapGuides ? <>
+      {snapGuides && "parallelGuide" in snapGuides ? <>
         <line className="parallel-reference-edge" x1={snapGuides.parallelGuide.referenceEdge.start.x} y1={snapGuides.parallelGuide.referenceEdge.start.y} x2={snapGuides.parallelGuide.referenceEdge.end.x} y2={snapGuides.parallelGuide.referenceEdge.end.y} />
         <line className="parallel-active-edge" x1={snapGuides.parallelGuide.activeEdge.start.x} y1={snapGuides.parallelGuide.activeEdge.start.y} x2={snapGuides.parallelGuide.activeEdge.end.x} y2={snapGuides.parallelGuide.activeEdge.end.y} />
       </> : null}

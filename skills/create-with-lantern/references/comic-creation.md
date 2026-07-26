@@ -7,7 +7,7 @@ Load this reference when creating, redrawing, replacing, or recomposing comic co
 First distinguish the requested creative scope and preserve everything outside it.
 
 - For one image or Frame, understand that target and only the adjacent context needed for continuity.
-- For an existing-page recomposition, inspect its current structure and rendered composition before moving or replacing anything. Prefer reusing its fixed AssetVersions unless the creator asks for new art.
+- For an existing-page recomposition, inspect its current structure and rendered composition before moving or replacing anything. Treat a requested prominence or size change as a constraint on the smallest affected Frame group, not automatically as an isolated resize. Prefer reusing its fixed AssetVersions unless the creator asks for new art.
 - For one page, identify its narrative focus, reading flow, and relationships among its Frames before producing art that depends on those Frames.
 - For several pages, add a lightweight page-beat and continuity plan. Do not require a persisted Storyboard Beat when the current catalog cannot create one.
 - For a Chapter, deepen the page-level plan only as the story needs; do not force every page through one rigid template.
@@ -45,7 +45,7 @@ For a new shot, inspect only the relevant baseline images and nearby composed pa
 
 ## Load craft guidance only when it helps
 
-When the task requires a creative choice about reading path, visual grouping, page rhythm, whitespace, page turns, spreads, bleed, breakout, dialogue space, sound effects, or motion cues, use [composition-craft.md](composition-craft.md). Do not load or apply those techniques merely because the task involves a comic. They are optional means for serving the creator's intent, not a style template or a mandatory quality checklist.
+Creating or recomposing a multi-Frame page requires reading-path and grouping decisions, so use [composition-craft.md](composition-craft.md). For narrower work, load it only when the task needs a creative choice about page rhythm, whitespace, page turns, spreads, bleed, breakout, dialogue space, sound effects, or motion cues. These techniques are optional means for serving the creator's intent, not a style template or a mandatory quality checklist.
 
 ## Enter and leave at the requested point
 

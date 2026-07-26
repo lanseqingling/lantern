@@ -14,7 +14,7 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#当前能力状态">当前能力</a> ·
   <a href="./docs/README.md">文档</a> ·
-  <a href="#通过-mcp-与-skill-接入外置-agent">MCP + Skill</a>
+  <a href="#通过-mcp-与-skill-接入外部-agent">MCP + Skill</a>
 </p>
 
 Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台。它把故事、角色、场景、分镜、页面编排、单格精修、预览与导出放在一个持续可编辑的创作空间中，并通过 MCP 与 Skill 让产品内外的 Agent 复用同一套创作能力与作品边界。
@@ -30,7 +30,7 @@ Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑�
 - 受控编辑：UI 与产品内外的 Agent 共用语义能力和作品边界；普通编辑可撤销，生成、结构和多对象结果先形成 Candidate，由创作者决定是否应用。
 
 ```text
-qu工作台 / 内置 Agent / 外置 Agent（MCP + Skill）
+qu工作台 / 内置 Agent / 外部 Agent（MCP + Skill）
                 ↓
           受控语义能力
                 ↓
@@ -116,9 +116,9 @@ $actual -eq $expected
 
 </details>
 
-## 通过 MCP 与 Skill 接入外置 Agent（推荐）
+## 通过 MCP 与 Skill 接入外部 Agent（推荐）
 
-> 内置 Agent 暂不迭代，推荐通过 MCP + Skill 使用外置 Agent。
+> 内置 Agent 暂不迭代，推荐通过 MCP + Skill 使用外部 Agent。
 
 需要从兼容的本地 Agent 使用 Lantern 时，先启动 Lantern，再让该 Agent 在 Lantern 目录中运行：
 
@@ -128,9 +128,19 @@ $actual -eq $expected
 
 Windows 使用 `lantern.cmd agent:install`。命令会识别当前 Agent，安装 Lantern 应用级 Skill 并登记本地 MCP。Agent 只能使用 Lantern 当前显式开放的受控能力；Lantern 升级、端口或凭证变化后，重复运行同一命令即可同步。详细边界见 [Agent](./docs/agent.md)。
 
+如果希望在任意目录直接使用 `lantern`，先在 Lantern 目录运行一次：
+
+```bash
+npm link
+```
+
+之后可以在任意目录执行 `lantern start`、`lantern agent:install` 等命令。
+
+第一次使用可以从 [外部 Agent 创作快速上手](./docs/agent-quickstart.md) 开始，直接复制几个简单 Prompt，体验创建作品、编排页面、继续修改和视觉检查。
+
 ## 运行与数据
 
-在源码或发行目录中，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`。如需在任意目录直接执行 `lantern`，可在 Lantern 目录中额外运行一次 `npm link`。
+在源码或发行目录中，macOS 使用 `./lantern <command>`，Windows 使用 `lantern.cmd <command>`；完成上方的命令链接后，也可以使用 `lantern <command>`。
 
 | 命令 | 用途 |
 |---|---|
@@ -243,7 +253,7 @@ Web (React / Vinext)
 
 - `packages/shared` 提供 LCD、工作区命令和共享契约，`packages/editor-core` 与 `packages/layout-engine` 提供确定性编辑和页面布局能力。
 
-- `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 负责 Agent 上下文、任务和模型适配。Web UI、内置 Agent 和外置 Agent 共享领域服务、Editor Capability 和作品写入规则。
+- `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 负责 Agent 上下文、任务和模型适配。Web UI、内置 Agent 和外部 Agent 共享领域服务、Editor Capability 和作品写入规则。
 
 | 文档 | 内容 |
 |---|---|

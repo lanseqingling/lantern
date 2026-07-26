@@ -191,7 +191,7 @@ export async function invokeExternalPageCapability(
 ) {
   const capability = getAgentCapability(capabilityId);
   if (!capability || capability.execution !== "synchronous" || !isPageCapabilityId(capability.id)) {
-    throw new AppError("capability_not_available", "该 Lantern 页面能力当前未向外置 Agent 开放。", 404);
+    throw new AppError("capability_not_available", "该 Lantern 页面能力当前未向外部 Agent 开放。", 404);
   }
   assertAgentCapabilityAccess(capability, "external");
   const parsed = capability.inputSchema.parse(input) as ParsedPageInput;

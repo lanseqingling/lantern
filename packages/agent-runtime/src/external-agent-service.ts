@@ -629,7 +629,7 @@ export async function invokeExternalResourceCapability(
 ) {
   const capability = getAgentCapability(capabilityId);
   if (!capability || capability.execution !== "synchronous" || !isResourceCapabilityId(capability.id)) {
-    throw new AppError("capability_not_available", "该 Lantern 能力当前未向外置 Agent 开放。", 404);
+    throw new AppError("capability_not_available", "该 Lantern 能力当前未向外部 Agent 开放。", 404);
   }
   assertAgentCapabilityAccess(capability, "external");
   const parsed = capability.inputSchema.parse(input) as Record<string, unknown>;

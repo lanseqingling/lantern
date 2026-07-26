@@ -1,8 +1,8 @@
 # Agent
 
-Lantern 同时支持产品内的内置 Agent，以及通过 MCP 与 Skill 接入的外置 Agent。两者复用同一套语义 Capability、作品协议和安全边界，但不共享运行时：内置 Agent 由 Lantern 负责上下文、规划和结果交互；外置 Agent 由宿主负责理解、规划、记忆与协作，Lantern 只提供领域知识、作品上下文和可执行能力。
+Lantern 同时支持产品内的内置 Agent，以及通过 MCP 与 Skill 接入的外部 Agent。两者复用同一套语义 Capability、作品协议和安全边界，但不共享运行时：内置 Agent 由 Lantern 负责上下文、规划和结果交互；外部 Agent 由宿主负责理解、规划、记忆与协作，Lantern 只提供领域知识、作品上下文和可执行能力。
 
-Agent 的目标不是复制工作台按钮，而是用自然语言完成可审计、可撤销的漫画创作操作。当前两种入口仍只覆盖基础能力；外置 Agent 已具备页漫页面结构、画格、固定图片、对白气泡和纸面旁白的基础编排闭环。
+Agent 的目标不是复制工作台按钮，而是用自然语言完成可审计、可撤销的漫画创作操作。当前两种入口仍只覆盖基础能力；外部 Agent 已具备页漫页面结构、画格、固定图片、对白气泡和纸面旁白的基础编排闭环。
 
 本文只定义 Agent 架构与能力边界；各入口的当前事实见[漫画能力矩阵](./capabilities.md)，作品结构见 [LCD](./lcd.md)，工作台中的对话与候选呈现见[编辑器体验](./editor.md)。
 
@@ -15,7 +15,7 @@ Agent 的目标不是复制工作台按钮，而是用自然语言完成可审�
 - ❌ 未接入：尚不能通过该 Agent 入口完成。
 - ⚪ 不涉及：按该入口的产品职责不承担，不表示仍需在该入口补齐。
 
-| Agent 能力 | 内置 Agent | 外置 Agent（MCP + Skill） |
+| Agent 能力 | 内置 Agent | 外部 Agent（MCP + Skill） |
 |---|---:|---:|
 | 读取作品、章节、页面及角色/场景/风格资产 | 🟡 | ✅ |
 | 获取当前及最近保存页面的结构与最终渲染画面 | 🟡；仅当前工作稿 | ✅ |
@@ -35,7 +35,7 @@ Agent 的目标不是复制工作台按钮，而是用自然语言完成可审�
 | 跨页漫画解析与可复用模板制作 | ❌ | 🟡 |
 | 多 Agent / Workflow / Skill Workflow 协作 | ❌ | 🟡 |
 
-其中，外置 Agent 已可管理页漫页面与真正双页，编排画格、固定图片、对白、气泡和旁白，并处理裁切、层级、出血、frame-anchored 破格及中缝安全的单气泡跨页。它还可以分别读取未保存 Working Revision 与最近 SavedSnapshot 的 LCD、整页预览和固定资源原图，通过 Skill 完成单页构图与人物/场景/风格一致性检查，以及相邻分镜连续性与创作表达检查。两类检查均为只读；任意跨展示单元、多对象重排、自动修复与高级精修仍未闭环，漫画解析尚未形成稳定模板对象。
+其中，外部 Agent 已可管理页漫页面与真正双页，编排画格、固定图片、对白、气泡和旁白，并处理裁切、层级、出血、frame-anchored 破格及中缝安全的单气泡跨页。它还可以分别读取未保存 Working Revision 与最近 SavedSnapshot 的 LCD、整页预览和固定资源原图，通过 Skill 完成单页构图与人物/场景/风格一致性检查，以及相邻分镜连续性与创作表达检查。两类检查均为只读；任意跨展示单元、多对象重排、自动修复与高级精修仍未闭环，漫画解析尚未形成稳定模板对象。
 
 ## 2. 双入口架构
 
@@ -43,7 +43,7 @@ Agent 的目标不是复制工作台按钮，而是用自然语言完成可审�
 flowchart LR
   UI["工作台"]
   IA["内置 Agent"]
-  EA["外置 Agent 宿主"]
+  EA["外部 Agent 宿主"]
   SK["Lantern Skill"]
   MCP["Lantern MCP"]
   CAP["Semantic Capability Registry"]
@@ -60,7 +60,7 @@ flowchart LR
   DOM --> LCD
 ```
 
-| 设计维度 | 内置 Agent | 外置 Agent |
+| 设计维度 | 内置 Agent | 外部 Agent |
 |---|---|---|
 | 理解与规划 | Lantern 管理主 Agent、后续子 Agent 和 Workflow | Codex 等宿主 Agent 管理，可自由组合其他 Agent |
 | 上下文 | 可天然获得当前作品、页面、选择和任务上下文 | 通过 MCP 读取有边界、带版本的上下文 |
@@ -77,7 +77,7 @@ UI、内置 Agent 和 MCP 只调用已登记的语义 Capability。每项 Capabi
 
 - 稳定 ID、版本、输入输出 schema 和适用对象；
 - 所需上下文、执行方式、作用范围和幂等规则；
-- 对内置 Agent、外置 Agent 的可见性；
+- 对内置 Agent、外部 Agent 的可见性；
 - 风险等级、确认要求、撤销能力和版本前置条件。
 
 Agent 不得直接写 LCD、数据库、底层 WorkspaceCommand，也不能提交任意 ChangeSet。领域层根据操作语义产生以下结果：
@@ -89,7 +89,7 @@ Agent 不得直接写 LCD、数据库、底层 WorkspaceCommand，也不能提�
 | `direct_change` | 确定、有界且可撤销的页面、画格和图片编排 | ChangeSet |
 | `candidate` | 生成式结构方案、多对象创作或其他需要预览的高风险结果 | Candidate |
 
-外置 Agent 可以在同一轮请求中继续 Apply，不要求用户回到工作台；这不取消内部的 Candidate、版本校验和 Apply 机制。删除整页、整话、整部作品等大范围破坏性操作必须获得明确确认。直接修改进入普通撤销历史，外置 Agent 不控制工作台的撤销游标。
+外部 Agent 可以在同一轮请求中继续 Apply，不要求用户回到工作台；这不取消内部的 Candidate、版本校验和 Apply 机制。删除整页、整话、整部作品等大范围破坏性操作必须获得明确确认。直接修改进入普通撤销历史，外部 Agent 不控制工作台的撤销游标。
 
 ## 4. 上下文与结果生命周期
 
@@ -102,13 +102,13 @@ Agent 不得直接写 LCD、数据库、底层 WorkspaceCommand，也不能提�
 - 绑定修订版本的对象 handle，防止基于过期观察写入；
 - Capability 返回的 ChangeSet、Candidate、AssetVersion 或 Observation。
 
-内置 Agent 的对话、任务和候选由 Lantern 管理；外置 Agent 的对话、规划和记忆属于宿主，Lantern 只保存与作品相关的任务、候选、变更和资源事实。会话取消、失败或删除不能破坏已经确认的作品内容。
+内置 Agent 的对话、任务和候选由 Lantern 管理；外部 Agent 的对话、规划和记忆属于宿主，Lantern 只保存与作品相关的任务、候选、变更和资源事实。会话取消、失败或删除不能破坏已经确认的作品内容。
 
 ## 5. 协作编排模型
 
-多 Agent 与 Workflow 是对单一 Capability 层的上层编排，不是新的作品写入通道。内置与外置的对应关系如下：
+多 Agent 与 Workflow 是对单一 Capability 层的上层编排，不是新的作品写入通道。内置与外部 Agent 的对应关系如下：
 
-| 创作职责 | 内置 Agent 的扩展方式 | 外置 Agent 的对应方式 | 主要产物 |
+| 创作职责 | 内置 Agent 的扩展方式 | 外部 Agent 的对应方式 | 主要产物 |
 |---|---|---|---|
 | 页面编排与作画 | 主 Agent 委派编排或作画子 Agent | 宿主 Agent 调用编排 Skill 与 MCP | ChangeSet、Candidate、AssetVersion |
 | 视觉连续性检查 | 只读检查子 Agent | 一致性检查 Skill 或专门 Agent | Observation、修改建议 |
@@ -128,7 +128,7 @@ Agent 不得直接写 LCD、数据库、底层 WorkspaceCommand，也不能提�
 
 ## 6. MCP 与 Skill
 
-MCP 是外置 Agent 的能力传输层，负责：
+MCP 是外部 Agent 的能力传输层，负责：
 
 - 建立本地身份与访问边界；
 - 解析自然语言、链接和稳定引用；
@@ -137,9 +137,9 @@ MCP 是外置 Agent 的能力传输层，负责：
 - 登记外部生成或用户上传的图片；
 - 返回结构化结果、错误、版本冲突和确认要求。
 
-外置图片生成完全由宿主 Agent 或用户负责。Lantern MCP 不代理内部生图 Provider，只接收结果、写入不可变 AssetVersion，再通过 Capability 放置、替换或裁切。
+外部 Agent 的图片生成完全由宿主 Agent 或用户负责。Lantern MCP 不代理内部生图 Provider，只接收结果、写入不可变 AssetVersion，再通过 Capability 放置、替换或裁切。
 
-Lantern 分发一个应用级入口 Skill，内部按领域参考和 Skill Workflow 组织知识，避免多个 Lantern Skill 竞争触发。宿主仍可以把它与自己的其他 Skill 或专门 Agent 组合。入口 Skill 用于帮助外置 Agent：
+Lantern 分发一个应用级入口 Skill，内部按领域参考和 Skill Workflow 组织知识，避免多个 Lantern Skill 竞争触发。宿主仍可以把它与自己的其他 Skill 或专门 Agent 组合。入口 Skill 用于帮助外部 Agent：
 
 - 理解 LCD、页面结构、坐标、画格、图片、气泡和 Candidate；
 - 组合结构观察、最终渲染、角色/场景/风格资产来维持一致性；
@@ -149,11 +149,11 @@ Lantern 分发一个应用级入口 Skill，内部按领域参考和 Skill Workf
 
 Skill 只定义知识和操作方法，不复制 MCP schema、完整工具目录或 UI 步骤，也不承担服务端权限校验。服务端不能相信 Skill 一定被读取或正确执行。
 
-## 7. 外置 Agent 的基础创作范围
+## 7. 外部 Agent 的基础创作范围
 
 ### 7.1 定位与能力范围
 
-基础范围只包含通用能力和页漫专属能力，不包含条漫的滚动节奏、视口切分和跨段连续性。目标是让 Codex 等外置 Agent 仅凭自然语言、Lantern 链接、MCP、Skill、自身生图能力或用户图片，完成接近示例漫画复杂度的页面；示例漫画只是能力水平参考，不是固定任务、模板或 Workflow。
+基础范围只包含通用能力和页漫专属能力，不包含条漫的滚动节奏、视口切分和跨段连续性。目标是让 Codex 等外部 Agent 仅凭自然语言、Lantern 链接、MCP、Skill、自身生图能力或用户图片，完成接近示例漫画复杂度的页面；示例漫画只是能力水平参考，不是固定任务、模板或 Workflow。
 
 基础闭环包括：
 

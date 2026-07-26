@@ -907,7 +907,7 @@ test("database candidate apply and revert preserve version heads atomically", as
         projectId: ids.project,
         taskId: ids.task,
         kind: CandidateKind.STORYBOARD,
-        title: "外置应用候选",
+        title: "外部应用候选",
         changeSummary: "修改目标分镜对白",
         targetLabel: "雨夜候车",
         target: { type: "storyboard_beat", id: ids.storyboardBeat },
@@ -916,7 +916,7 @@ test("database candidate apply and revert preserve version heads atomically", as
         operations: [{
           type: "update_dialogue",
           dialogueId: ids.dialogue,
-          content: "外置 Agent 已应用的对白",
+          content: "外部 Agent 已应用的对白",
         }],
       },
     });
@@ -941,7 +941,7 @@ test("database candidate apply and revert preserve version heads atomically", as
       ((await prisma.workingRevision.findUniqueOrThrow({
         where: { projectId_revision: { projectId: ids.project, revision: 6 } },
       })).document as unknown as { dialogues: Array<{ id: string; content: string }> }).dialogues.find((dialogue) => dialogue.id === ids.dialogue)?.content,
-      "外置 Agent 已应用的对白",
+      "外部 Agent 已应用的对白",
     );
     await assert.rejects(
       () => invokeExternalCandidateCapability(`foreign-${ids.user}`, "candidate.get", { candidate: candidateUri }),

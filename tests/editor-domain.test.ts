@@ -6,7 +6,7 @@ import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEd
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "@lantern/demo-runtime";
 import { compileChapterLayoutPlan } from "@lantern/layout-engine";
 import { isAssetVisibleInAssetSpace } from "../apps/web/app/lib/asset-kind";
-import { snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../apps/web/app/lib/editor-snapping";
+import { contentSafeArea, snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions } from "../apps/web/app/lib/editor-snapping";
 
 test("generated frame images stay saveable until converted into an asset-space type", () => {
   assert.equal(isAssetVisibleInAssetSpace({ kind: "generated_image", libraryStatus: "library" }), false);
@@ -214,6 +214,45 @@ test("resizing objects snaps their right and bottom edges to matching frame exte
   );
   assert.deepEqual(outsideThreshold.geometry, { x: 30, y: 40, width: 54, height: 64 });
   assert.deepEqual(outsideThreshold.guides, []);
+});
+
+test("page surfaces derive one five-percent content-safe rectangle", () => {
+  assert.deepEqual(contentSafeArea({ x: 0, y: 0, width: 600, height: 900 }), {
+    x: 30,
+    y: 30,
+    width: 540,
+    height: 840,
+  });
+  assert.deepEqual(contentSafeArea({ x: 600, y: 0, width: 600, height: 900 }), {
+    x: 630,
+    y: 30,
+    width: 540,
+    height: 840,
+  });
+});
+
+test("moving and resizing frames snap to matching content-safe edges", () => {
+  const safeArea = { geometry: contentSafeArea({ x: 0, y: 0, width: 600, height: 900 }) };
+  const moved = snapGeometryToFrameEdgeExtensions(
+    { x: 27, y: 32, width: 200, height: 180 },
+    [],
+    { x: 5, y: 5 },
+    "x",
+    [safeArea],
+  );
+  assert.deepEqual(moved.geometry, { x: 30, y: 30, width: 200, height: 180 });
+
+  const resized = snapGeometrySizeToFrameEdgeExtensions(
+    { x: 27, y: 31, width: 303, height: 299 },
+    [safeArea],
+    { x: 5, y: 5 },
+    "top_left",
+  );
+  assert.deepEqual(resized.geometry, { x: 30, y: 30, width: 300, height: 300 });
+  assert.deepEqual(resized.guides, [
+    { kind: "edge_extension", axis: "x", position: 30 },
+    { kind: "edge_extension", axis: "y", position: 30 },
+  ]);
 });
 
 test("corner editing snaps the active facing edge parallel to the nearest neighboring frame edge", () => {

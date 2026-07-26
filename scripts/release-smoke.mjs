@@ -97,6 +97,33 @@ async function waitForWorkbench(url, child, timeoutMs = 10 * 60 * 1000) {
   throw new Error(`Lantern did not become ready within ${timeoutMs}ms.`);
 }
 
+async function verifyWebAssets(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  if (!response.ok) throw new Error(`Lantern web page returned ${response.status}.`);
+  const html = await response.text();
+  const assetPaths = [...html.matchAll(/(?:href|src)=["']([^"']+)["']/g)]
+    .map((match) => match[1])
+    .filter((assetPath) => /^\/assets\/.+\.(?:css|m?js)(?:\?.*)?$/.test(assetPath));
+  const uniqueAssetPaths = [...new Set(assetPaths)];
+  if (!uniqueAssetPaths.some((assetPath) => /\.css(?:\?|$)/.test(assetPath))) {
+    throw new Error("Lantern web page did not reference a built stylesheet.");
+  }
+  if (!uniqueAssetPaths.some((assetPath) => /\.m?js(?:\?|$)/.test(assetPath))) {
+    throw new Error("Lantern web page did not reference a built client script.");
+  }
+  for (const assetPath of uniqueAssetPaths) {
+    const assetResponse = await fetch(new URL(assetPath, url), { signal: AbortSignal.timeout(5000) });
+    if (!assetResponse.ok) throw new Error(`Lantern asset ${assetPath} returned ${assetResponse.status}.`);
+    const contentType = assetResponse.headers.get("content-type") ?? "";
+    const expectedType = /\.css(?:\?|$)/.test(assetPath) ? "text/css" : "javascript";
+    if (!contentType.toLowerCase().includes(expectedType)) {
+      throw new Error(`Lantern asset ${assetPath} returned unexpected content type ${contentType || "(missing)"}.`);
+    }
+    await assetResponse.arrayBuffer();
+  }
+  return uniqueAssetPaths.length;
+}
+
 async function stopLantern(env, child) {
   const stopper = runBootstrap(["stop"], env, "inherit");
   await new Promise((resolve, reject) => {
@@ -120,7 +147,8 @@ async function runOnce(env, webUrl) {
   child.stderr?.on("data", (chunk) => { output += chunk.toString(); process.stderr.write(chunk); });
   try {
     const titles = await waitForWorkbench(webUrl, child);
-    console.log(`Workbench ready with ${titles.length} comics; stopping...`);
+    const assetCount = await verifyWebAssets(webUrl);
+    console.log(`Workbench ready with ${titles.length} comics and ${assetCount} web assets; stopping...`);
     await stopLantern(env, child);
     return { titles, output };
   } catch (error) {

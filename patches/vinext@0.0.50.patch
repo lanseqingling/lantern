@@ -1,0 +1,24 @@
+diff --git a/dist/server/static-file-cache.js b/dist/server/static-file-cache.js
+index a97266c2296a9906bf76f9669d336ec11fdb50bb..25f6bad8aaf69778bd5749f88509ad1ee1c1cddb 100644
+--- a/dist/server/static-file-cache.js
++++ b/dist/server/static-file-cache.js
+@@ -51,11 +51,14 @@ var StaticFileCache = class StaticFileCache {
+ 	static async create(clientDir) {
+ 		const entries = /* @__PURE__ */ new Map();
+ 		const allFiles = /* @__PURE__ */ new Map();
+-		for await (const { relativePath, fullPath, stat } of walkFilesWithStats(clientDir)) allFiles.set(relativePath, {
+-			fullPath,
+-			size: stat.size,
+-			mtimeMs: stat.mtimeMs
+-		});
++		for await (const { relativePath, fullPath, stat } of walkFilesWithStats(clientDir)) {
++			const urlRelativePath = relativePath.split(path.sep).join("/");
++			allFiles.set(urlRelativePath, {
++				fullPath,
++				size: stat.size,
++				mtimeMs: stat.mtimeMs
++			});
++		}
+ 		for (const [relativePath, fileInfo] of allFiles) {
+ 			if (relativePath.endsWith(".br") || relativePath.endsWith(".gz") || relativePath.endsWith(".zst")) continue;
+ 			if (relativePath.startsWith(".vite/") || relativePath === ".vite") continue;

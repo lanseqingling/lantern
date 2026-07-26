@@ -4,6 +4,8 @@ packages:
 confirmModulesPurge: false
 overrides:
   next>postcss: 8.5.10
+patchedDependencies:
+  vinext@0.0.50: patches/vinext@0.0.50.patch
 onlyBuiltDependencies:
   - "@prisma/client"
   - "@prisma/engines"

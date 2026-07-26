@@ -251,7 +251,7 @@ export function buildCampusLetterDocument(stored: ReadonlyMap<CampusImageFile, S
     overlayLayers: [{
       id: "campus-spread-cross-page", name: "跨页对白", zIndex: 5, visible: true, anchor: { type: "unit" }, purpose: "cross_page",
       elements: [
-        { id: "campus-cross-page-balloon-call", kind: "balloon", dialogueId: spreadCallId, transform: { x: 568, y: 196, width: 126.7303779069767, height: 66.14970930232558 }, shape: "thought", style: balloonStyle(17), name: "夏葵的呼喊" },
+        { id: "campus-cross-page-balloon-call", kind: "balloon", dialogueId: spreadCallId, transform: { x: 568, y: 196, width: 126.7303779069767, height: 66.14970930232558 }, tailTarget: { x: 555, y: 284 }, shape: "thought", style: balloonStyle(17), name: "夏葵的呼喊" },
       ],
     }],
     readingSequence: spreadFrames.map((frame) => ({ frameId: frame.id })),

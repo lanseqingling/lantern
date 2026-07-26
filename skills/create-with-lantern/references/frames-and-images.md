@@ -49,4 +49,6 @@ Lantern MCP does not expose image generation or an internal image Provider. If t
 
 Do not put local paths, image bytes, base64, provider credentials, or object-storage keys into composition tool arguments.
 
+Follow the generation-unit contract in [comic-creation.md](comic-creation.md). An image intended for one Frame is one independent visual source by default, without baked-in panel grids, borders, balloons, text, or page layout. Batch generation is acceptable when it returns separate files for separate placements. Covers, intentional full-page or true-spread art, paper backgrounds, creator-supplied flattened pages, and explicitly requested flattened compositions are valid exceptions.
+
 For consistency review, inspect the placed image's exact AssetVersion handle and the relevant character, scene, prop, or visual-style version handles. The page preview is evidence of the final crop and composition; the returned AssetVersion image is evidence of its fixed source. Do not compare against whichever asset image is currently primary when the placed element pins another version.

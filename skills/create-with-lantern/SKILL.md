@@ -1,8 +1,8 @@
 ---
 name: create-with-lantern
-description: Use Lantern's application MCP to inspect, organize, and edit a creator's comics through the domain capabilities Lantern currently exposes. Use when the user wants to read, understand, manage, review, or continue work in Lantern; do not use for developing the Lantern source repository.
+description: Use Lantern's application MCP to create, draw, compose, revise, organize, inspect, or review a creator's comics through the domain capabilities Lantern currently exposes. Use for comic work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "1.1.0"
+  version: "1.2.1"
   minimum_catalog_revision: "15"
 ---
 
@@ -32,9 +32,13 @@ When bounded context is needed, choose its profile by intent and its version sou
 
 Ask the user to choose only when multiple resources or targets remain materially ambiguous after the available narrow reads.
 
+When the request creates, redraws, replaces, or recomposes comic content at any scale, read [references/comic-creation.md](references/comic-creation.md). Apply only the contracts relevant to the requested scope: one Frame, one page, several pages, a Chapter, a cover, or an existing-page recomposition. This reference guides creative decisions without imposing a fixed Chapter-production workflow.
+
 When the request manages a Comic, Chapter, Project relationship, or structured Asset, read [references/resources.md](references/resources.md). When it uploads an asset image, fixes an Asset Version, chooses a primary image, or manages a derived form, also read [references/assets.md](references/assets.md). Reuse a returned `lantern://` reference for follow-up changes instead of searching by title again.
 
 When the request asks to inspect or discuss page layout, cropping, overlap, balloons, layers, whitespace, or reading flow, read [references/composition.md](references/composition.md). Also read it before an available LCD edit whose parameter choice depends on those facts. Structure and final rendered evidence must refer to the same Working Revision.
+
+When a creative layout decision depends on reading path, visual grouping, pacing, whitespace, page turns, spreads, bleed, breakout, dialogue space, sound effects, or motion cues, also read [references/composition-craft.md](references/composition-craft.md). Use it as optional craft guidance, not as a template or as evidence that Lantern exposes a matching edit capability.
 
 When the request creates, names, duplicates, orders, deletes, merges, or splits pages, read [references/pages.md](references/pages.md). Use page roles, physical page numbers, reading positions, and true-spread surfaces as distinct facts; never turn a workbench display pairing into a true spread.
 

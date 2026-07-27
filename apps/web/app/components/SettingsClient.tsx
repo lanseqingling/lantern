@@ -250,7 +250,7 @@ export function SettingsClient() {
             </div>
             <div className="settings-agent-access-card" role="note">
               <header>
-                <span><Icon name="ai" /></span>
+                <span><Icon name="connection" /></span>
                 <div><strong>{uiCopy.agentAccess.externalDescription}</strong><a href={uiCopy.agentAccess.guideUrl} target="_blank" rel="noreferrer">{uiCopy.agentAccess.guideAction}</a></div>
               </header>
               <div className="settings-agent-commands">

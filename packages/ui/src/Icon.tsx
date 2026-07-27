@@ -31,6 +31,7 @@ import {
   MoreVertical,
   Move,
   MousePointer2,
+  Network,
   PanelRightClose,
   PanelsTopLeft,
   Package,
@@ -73,6 +74,13 @@ function PageSpreadIcon({ size = 16, ...props }: IconProps): ReactElement {
   </svg>;
 }
 
+function WorkbenchIcon({ size = 16, ...props }: IconProps): ReactElement {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M7 2.5H4a1.5 1.5 0 0 0-1.5 1.5v3M17 2.5h3A1.5 1.5 0 0 1 21.5 4v3M21.5 17v3a1.5 1.5 0 0 1-1.5 1.5h-3M7 21.5H4A1.5 1.5 0 0 1 2.5 20v-3" />
+    <path d="M12 5c.55 3.8 3.2 6.45 7 7-3.8.55-6.45 3.2-7 7-.55-3.8-3.2-6.45-7-7 3.8-.55 6.45-3.2 7-7Z" />
+  </svg>;
+}
+
 const glyphs = {
   select: MousePointer2,
   pan: Hand,
@@ -84,6 +92,8 @@ const glyphs = {
   home: Home,
   folder: Folder,
   comic: BookOpen,
+  workbench: WorkbenchIcon,
+  connection: Network,
   layout: LayoutGrid,
   layers: Layers3,
   text: Type,

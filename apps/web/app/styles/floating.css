@@ -54,8 +54,6 @@
 .object-toolbar.mode-active button.active { background: #f2b84b; color: #fff; }
 .object-toolbar button:disabled { cursor: default; opacity: .34; }
 .object-toolbar button:disabled:hover { background: transparent; color: #52616a; }
-.object-toolbar .object-ai-reference { background: var(--cyan); color: #fff; box-shadow: 0 6px 16px rgba(36,127,130,.22); }
-.object-toolbar .object-ai-reference:hover { background: var(--cyan-deep); color: #fff; }
 .object-toolbar.candidate-preview-toolbar { z-index: 2147483647; flex-direction: row; align-items: center; gap: 4px; }
 .object-toolbar.candidate-preview-toolbar button { display: inline-flex; width: 64px; align-items: center; justify-content: center; gap: 5px; color: var(--cyan-deep); font-size: 10px; font-weight: 900; }
 .object-toolbar.candidate-preview-toolbar button svg { width: 13px; height: 13px; stroke-width: 2.3; }

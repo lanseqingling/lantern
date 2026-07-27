@@ -245,7 +245,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
 
       <nav className={`preview-dock ${dockEntering ? "mode-entering" : ""} ${modeSwitching ? "mode-exiting" : ""}`} aria-label={uiCopy.preview.toolbar.previewAria}>
         <div className="preview-mode-toggle" aria-label={uiCopy.preview.toolbar.modeSwitchAria}>
-          <button type="button" aria-label={uiCopy.preview.toolbar.creationModeAria} disabled={modeSwitching} onClick={returnToCanvas}><Icon name="ai" /></button>
+          <button type="button" aria-label={uiCopy.preview.toolbar.creationModeAria} disabled={modeSwitching} onClick={returnToCanvas}><Icon name="workbench" /></button>
           <button type="button" className="active" aria-label={uiCopy.preview.toolbar.currentModeAria}><Icon name="preview" /></button>
         </div>
         {!isVertical ? <button type="button" className={`page-display-toggle ${pageDisplayMode === "spread" ? "active" : ""}`} aria-label={pageDisplayMode === "single" ? uiCopy.viewer.action.spread : uiCopy.viewer.action.singlePage} onClick={switchPageMode}><Icon name={pageDisplayMode === "single" ? "pageSingle" : "pageSpread"} /></button> : null}

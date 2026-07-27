@@ -99,23 +99,15 @@
   background: rgba(255,255,255,.42);
   color: rgba(36,127,130,.54);
 }
-.creation-dock .mode-toggle .mode-star,
-.preview-dock .mode-toggle .mode-star {
-  position: relative;
-  pointer-events: none;
-}
-.creation-dock .mode-toggle .mode-star::after,
-.preview-dock .mode-toggle .mode-star::after {
+.creation-dock .mode-toggle .mode-workbench { position: relative; pointer-events: none; }
+.creation-dock .mode-toggle .mode-workbench.mode-active::after {
   content: "";
   position: absolute;
-  right: 7px;
-  top: 7px;
-  width: 5px;
-  height: 5px;
+  right: 6px;
+  top: 6px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--amber);
-  box-shadow: 0 0 10px var(--amber);
-  opacity: .95;
+  box-shadow: 0 0 11px var(--amber);
 }
-.creation-dock .mode-toggle .mode-idle.mode-star::after,
-.preview-dock .mode-toggle .mode-idle.mode-star::after { opacity: .38; box-shadow: none; }

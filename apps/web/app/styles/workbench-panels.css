@@ -266,8 +266,8 @@
 .landing-tool-rail .mode-toggle button { position: relative; z-index: 1; display: grid; flex: 0 0 36px; place-items: center; width: 36px; height: 36px; border: 1px solid transparent; border-radius: 14px; background: transparent; color: rgba(36,127,130,.54); padding: 0; }
 .landing-tool-rail .mode-toggle .mode-active { color: #fff; }
 .landing-tool-rail .mode-toggle .mode-idle { border-color: rgba(100,200,200,.18); background: rgba(255,255,255,.42); }
-.landing-tool-rail .mode-toggle .mode-star { position: relative; }
-.landing-tool-rail .mode-toggle .mode-star::after { content: ""; position: absolute; right: 7px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+.landing-tool-rail .mode-toggle .mode-workbench { position: relative; }
+.landing-tool-rail .mode-toggle .mode-workbench.mode-active::after { content: ""; position: absolute; right: 6px; top: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 11px var(--amber); }
 .landing-tool-rail .mode-toggle svg { width: 17px; height: 17px; stroke-width: 2.1; }
 .landing-start { position: relative; z-index: 3; display: inline-flex; align-items: center; margin-top: 35px; border: 1px solid rgba(255,255,255,.7); border-radius: 999px; background: var(--cyan); padding: 17px 27px; box-shadow: 0 13px 30px rgba(36,127,130,.24), 0 0 0 6px rgba(100,200,200,.13); color: #fff; font-size: 16px; font-weight: 850; cursor: pointer; transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease; }
 .landing-start:hover { background: #2e9294; box-shadow: 0 17px 36px rgba(36,127,130,.28), 0 0 0 7px rgba(100,200,200,.14); transform: translateY(-2px); }

@@ -17,7 +17,7 @@
   <a href="#通过-mcp-与-skill-接入外部-agent">MCP + Skill</a>
 </p>
 
-Lantern AI 是面向个人漫画创作者的 AI 漫画创作工作台。它把故事、角色、场景、分镜、页面编排、单格精修、预览与导出放在一个持续可编辑的创作空间中，并通过 MCP 与 Skill 让产品内外的 Agent 复用同一套创作能力与作品边界。
+Lantern AI 是面向个人漫画创作者的开源漫画工作台。它把故事与资产管理、页面与画格编排、单格精修、预览与导出放在一个持续可编辑的创作空间中，并通过 MCP + Skill 接入外部 AI Agent，让创作者始终掌握关键创作决定。
 
 ## 产品设计
 
@@ -27,18 +27,18 @@ Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑�
 
 - 漫画画布：页面或滚动段位于工作台中央，资产、分镜、参考图片和 Agent 对话围绕作品展开；参考图片只有明确放入画格或纸面后才进入成稿。
 
-- 受控编辑：UI 与产品内外的 Agent 共用语义能力和作品边界；工作台编辑进入可撤销工作稿，外部 Agent 的一话任务进入隔离草稿并在完成后形成可整体审查的方案。
+- 受控编辑：工作台与通过 MCP 接入的外部 Agent 共用语义能力和作品边界；工作台编辑进入可撤销工作稿，Agent 的一话任务进入隔离草稿并在完成后形成可整体审查的方案。
 
 ```text
-工作台 / 内置 Agent / 外部 Agent（MCP + Skill）
-                ↓
-          受控语义能力
-                ↓
- 工作稿 / Candidate / 隔离 Agent 草稿
-                ↓
-       用户审查并保存正式版本
-                ↓
-         LCD 预览与导出
+工作台 / 外部 Agent（MCP + Skill）/ 内置 Agent（尚未完善）
+                         ↓
+                   受控语义能力
+                         ↓
+工作稿 / Candidate / 隔离 Agent 草稿
+                         ↓
+                用户审查并保存正式版本
+                         ↓
+                  LCD 预览与导出
 ```
 
 <p align="center">
@@ -75,7 +75,7 @@ Lantern 以 LCD 作品协议为基础，在统一的漫画画布和受控编辑�
 | 页面布局、多页与多对象生成 | ❌ | ❌ | ❌ |
 | 漫画解析与可复用模板制作 | ❌ | ❌ | ❌ |
 
-表格只展示当前入口覆盖情况；`⚪` 表示该入口按职责不承担，不应计入待补齐能力。具体拆分、范围和三端差异见[漫画能力矩阵](./docs/capabilities.md)。
+具体拆分和差异见[漫画能力矩阵](./docs/capabilities.md)。
 
 ## 快速开始
 
@@ -120,7 +120,7 @@ $actual -eq $expected
 
 ## 通过 MCP 与 Skill 接入外部 Agent（推荐）
 
-> 内置 Agent 暂不迭代，推荐通过 MCP + Skill 使用外部 Agent。
+> 内置 Agent 尚未完善。Lantern 现阶段以工作台和 MCP + Skill 为主要创作方式。
 
 需要从兼容的本地 Agent 使用 Lantern 时，先启动 Lantern，再让该 Agent 在 Lantern 目录中运行：
 
@@ -255,7 +255,7 @@ Web (React / Vinext)
 
 - `packages/shared` 提供 LCD、工作区命令和共享契约，`packages/editor-core` 与 `packages/layout-engine` 提供确定性编辑和页面布局能力。
 
-- `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 负责 Agent 上下文、任务和模型适配。Web UI、内置 Agent 和外部 Agent 共享领域服务、Editor Capability 和作品写入规则。
+- `packages/server` 负责本地持久化与对象存储，`packages/agent-runtime` 保留 Agent 上下文、任务和模型适配基础。当前工作台与通过 MCP 接入的外部 Agent 共享领域服务、Editor Capability 和作品写入规则；内置 Agent 尚未完善。
 
 | 文档 | 内容 |
 |---|---|

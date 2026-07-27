@@ -245,9 +245,21 @@ export function SettingsClient() {
 
         {settings ? <>
           <section className="settings-section">
-            <div className="settings-section-heading settings-model-api-heading">
+            <div className="settings-section-heading">
+              <h2>{uiCopy.settings.section.mcp}</h2>
+            </div>
+            <div className="settings-agent-access-card" role="note">
+              <header>
+                <span><Icon name="ai" /></span>
+                <div><strong>{uiCopy.agentAccess.externalDescription}</strong><a href={uiCopy.agentAccess.guideUrl} target="_blank" rel="noreferrer">{uiCopy.agentAccess.guideAction}</a></div>
+              </header>
+              <div className="settings-agent-commands">
+                <div><span>{uiCopy.agentAccess.macosLabel}</span><code>{uiCopy.agentAccess.macosCommand}</code><button type="button" title={uiCopy.agentAccess.copyCommandAria(uiCopy.agentAccess.macosLabel)} aria-label={uiCopy.agentAccess.copyCommandAria(uiCopy.agentAccess.macosLabel)} onClick={() => void navigator.clipboard.writeText(uiCopy.agentAccess.macosCommand)}><Icon name="copy" /></button></div>
+                <div><span>{uiCopy.agentAccess.windowsLabel}</span><code>{uiCopy.agentAccess.windowsCommand}</code><button type="button" title={uiCopy.agentAccess.copyCommandAria(uiCopy.agentAccess.windowsLabel)} aria-label={uiCopy.agentAccess.copyCommandAria(uiCopy.agentAccess.windowsLabel)} onClick={() => void navigator.clipboard.writeText(uiCopy.agentAccess.windowsCommand)}><Icon name="copy" /></button></div>
+              </div>
+            </div>
+            <div className="settings-section-heading settings-api-heading">
               <h2>{uiCopy.settings.section.modelApi}</h2>
-              <a href={uiCopy.settings.section.externalAgentGuideUrl} target="_blank" rel="noreferrer">{uiCopy.workbench.chat.internalAgentHint}</a>
             </div>
             <div className="settings-model-list">
               {drafts.map((draft) => {

@@ -5,9 +5,22 @@
 .settings-section { margin-top: 38px; }
 .settings-section-heading { margin-bottom: 14px; }
 .settings-section-heading h2 { margin: 0; font-size: 18px; letter-spacing: -.03em; }
-.settings-model-api-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.settings-model-api-heading a { color: rgba(55,88,91,.72); font-size: 10px; font-weight: 780; letter-spacing: .01em; text-decoration: none; white-space: nowrap; }
-.settings-model-api-heading a:hover { color: var(--cyan-deep); text-decoration: underline; text-underline-offset: 3px; }
+.settings-agent-access-card { display: grid; gap: 12px; margin-bottom: 14px; border: 1px solid rgba(100,200,200,.2); border-radius: 18px; background: rgba(228,247,246,.68); padding: 16px; color: #34555a; }
+.settings-agent-access-card header { display: grid; grid-template-columns: 38px minmax(0,1fr); align-items: center; gap: 11px; }
+.settings-agent-access-card header > span { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 13px; background: rgba(255,255,255,.8); color: var(--cyan-deep); }
+.settings-agent-access-card header > span svg { width: 18px; height: 18px; }
+.settings-agent-access-card header div { display: grid; gap: 4px; }
+.settings-agent-access-card header strong { font-size: 12px; }
+.settings-agent-access-card header a { width: max-content; color: var(--cyan-deep); font-size: 9px; font-weight: 850; text-decoration: none; }
+.settings-agent-access-card header a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.settings-agent-commands { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.settings-agent-commands > div { display: grid; min-width: 0; grid-template-columns: auto minmax(0,1fr) 28px; align-items: center; gap: 8px; border: 1px solid rgba(100,200,200,.13); border-radius: 12px; background: rgba(255,255,255,.72); padding: 8px 8px 8px 10px; }
+.settings-agent-commands span { color: rgba(55,88,91,.62); font-size: 9px; font-weight: 850; }
+.settings-agent-commands code { overflow: hidden; color: #315c60; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 760; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.settings-agent-commands button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 9px; background: rgba(100,200,200,.13); color: var(--cyan-deep); padding: 0; cursor: pointer; }
+.settings-agent-commands button:hover { background: rgba(100,200,200,.24); }
+.settings-agent-commands button svg { width: 14px; height: 14px; }
+.settings-api-heading { margin-top: 30px; }
 .settings-model-list { display: grid; gap: 10px; }
 .settings-model-card { overflow: visible; border: 1px solid rgba(255,255,255,.9); border-radius: 18px; background: rgba(255,255,255,.76); box-shadow: 0 10px 28px rgba(23,32,38,.05); backdrop-filter: blur(16px); }
 .settings-model-summary { display: grid; width: 100%; min-height: 68px; grid-template-columns: 38px minmax(0,1fr) auto 22px; align-items: center; gap: 11px; border: 0; border-radius: inherit; background: transparent; color: inherit; padding: 14px 16px; text-align: left; cursor: pointer; }
@@ -66,7 +79,7 @@
   .settings-shell { padding-top: 68px; }
   .settings-title { min-height: 0; align-items: center; }
   .settings-model-summary { grid-template-columns: 38px minmax(0,1fr) 18px; }
-  .settings-model-api-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .settings-agent-commands { grid-template-columns: 1fr; }
   .settings-model-summary > .settings-secret-mask, .settings-model-summary > .settings-secret-empty { display: none; }
   .settings-fields, .settings-model-values { grid-template-columns: 1fr; }
   .settings-field-wide { grid-column: auto; }

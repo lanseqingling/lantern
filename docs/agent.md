@@ -8,7 +8,7 @@ Agent 的目标不是远程操作工作台按钮，而是基于稳定作品语�
 
 ## 1. Agent 能力总览
 
-MCP + Skill 列表示外部 Agent 当前能否独立完成对应能力；内置 Agent 列记录现有实验原型的覆盖情况：
+MCP + Skill 列表示外部 Agent 能否通过宿主、MCP、Skill 与 Lantern 审查界面形成对应协作结果；内置 Agent 列记录现有实验原型的覆盖情况：
 
 - ✅ 已接入：可以形成可用结果并进入完整生命周期。
 - 🟡 部分接入：已有基础链路，但范围或结果闭环尚不完整。
@@ -27,7 +27,7 @@ MCP + Skill 列表示外部 Agent 当前能否独立完成对应能力；内置 
 | 放置、替换、移动、缩放、裁切和移除图片 | ✅ | ❌ |
 | 创建和编排对白、气泡、旁白与纸面文字 | ✅ | ❌ |
 | 破格、纸面叠加和有限跨页对象编排 | 🟡 | ❌ |
-| AgentDraft 连续编辑、ChangeProposal 冻结与整体审查 | ✅ | ⚪ |
+| AgentDraft 连续编辑、ChangeProposal 冻结与整体审查入口 | ✅ | ⚪ |
 | 单页构图与人物、场景、风格一致性检查 | ✅；只读 | ❌ |
 | 相邻分镜连续性与创作表达检查 | ✅；只读 | ❌ |
 | 漫画解析与可复用模板制作 | ❌ | ❌ |
@@ -52,6 +52,7 @@ flowchart LR
   REV["WorkingRevision"]
   DRAFT["AgentDraft"]
   PROPOSAL["ChangeProposal"]
+  APPLY["用户应用并保存<br/>原子事务"]
   SNAPSHOT["SavedSnapshot"]
 
   USER --> UI
@@ -67,8 +68,9 @@ flowchart LR
   DOMAIN -->|Agent 编辑| DRAFT
   REV -.作为基线.-> DRAFT
   DRAFT -->|冻结| PROPOSAL
-  PROPOSAL -->|用户应用| REV
-  PROPOSAL -->|同时保存| SNAPSHOT
+  PROPOSAL --> APPLY
+  APPLY --> REV
+  APPLY --> SNAPSHOT
   REV -->|用户保存| SNAPSHOT
 ```
 

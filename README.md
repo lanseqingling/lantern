@@ -91,8 +91,10 @@ cd lantern
 在解压或克隆后的目录中启动：
 
 ```bash
-npm start
+./lantern start
 ```
+
+Windows 使用 `lantern.cmd start`。
 
 首次启动会准备锁定依赖、初始化本地数据并生成生产界面。之后源码或共享包发生变化时，`start` 会在启动前自动更新过期的生产构建。工作台默认打开 [http://localhost:18788](http://localhost:18788)。
 
@@ -118,7 +120,7 @@ $actual -eq $expected
 
 </details>
 
-## 通过 MCP 与 Skill 接入外部 Agent（推荐）
+## 通过 MCP 与 Skill 接入外部 Agent
 
 > 内置 Agent 尚未完善。Lantern 现阶段以工作台和 MCP + Skill 为主要创作方式。
 

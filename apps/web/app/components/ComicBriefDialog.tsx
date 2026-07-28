@@ -154,7 +154,7 @@ export function ComicBriefDialog({ title, eyebrow, description, value, placehold
 
   return <div className="comic-brief-backdrop" role="presentation" onMouseDown={() => { if (!busy) onClose(); }}>
     <section className={`comic-brief-dialog ${referenceImages ? "with-references" : ""}`} role="dialog" aria-modal="true" aria-labelledby="comic-brief-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
-      <button type="button" className="comic-brief-dialog-close" aria-label={uiCopy.common.action.close} disabled={busy} onClick={onClose}><Icon name="x" /></button>
+      <button type="button" className="comic-brief-dialog-close" aria-label={uiCopy.common.action.close} disabled={busy} onClick={onClose}><Icon name="close" /></button>
       <header>
         <small>{eyebrow}</small>
         <h2 id="comic-brief-dialog-title">{title}</h2>
@@ -176,7 +176,7 @@ export function ComicBriefDialog({ title, eyebrow, description, value, placehold
         {referenceImages ? <AssetImageViewer name={title} images={referenceImages} activeIndex={activeImageIndex} onActiveIndexChange={(index) => { setActiveImageIndex(index); setImageMenu(null); }} showPrimary={false} emptyTitle={uploading ? uiCopy.common.progress.uploading : uiCopy.asset.action.addImage} emptyDescription={uiCopy.asset.image.supportedFormats} onEmptyAction={triggerUpload} emptyActionDisabled={busy || !onUploadReference} hideControlsWhenEmpty onStagePointerDown={() => setImageMenu(null)} onImageContextMenu={(event, image) => { event.preventDefault(); event.stopPropagation(); const stage = event.currentTarget.parentElement?.getBoundingClientRect(); const rawX = event.clientX - (stage?.left ?? 0); const rawY = event.clientY - (stage?.top ?? 0); setImageMenu({ x: Math.max(12, Math.min(rawX, (stage?.width ?? rawX + 166) - 166)), y: Math.max(12, Math.min(rawY, (stage?.height ?? rawY + 122) - 122)), imageId: image.id }); }} stageOverlay={imageMenu && activeImage?.id === imageMenu.imageId ? <div className="asset-image-menu" role="menu" style={{ left: imageMenu.x, top: imageMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
           <button type="button" role="menuitem" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingRenameImageId(activeImage.id); setImageNameDraft(activeImage.label); setImageNameError(""); }}><Icon name="edit" />{uiCopy.common.action.editName}</button>
           <button type="button" role="menuitem" disabled title={uiCopy.asset.image.editUnavailable}><Icon name="ai" />{uiCopy.common.action.createContent}</button>
-          <button type="button" role="menuitem" className="danger" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingDeleteImageId(activeImage.id); }}><Icon name="trash" />{uiCopy.common.action.delete}</button>
+          <button type="button" role="menuitem" className="danger" disabled={imageMutating} onClick={() => { setImageMenu(null); setPendingDeleteImageId(activeImage.id); }}><Icon name="delete" />{uiCopy.common.action.delete}</button>
         </div> : null} /> : null}
         {onUploadReference ? <input ref={uploadInputRef} className="asset-image-upload-input" type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void uploadReferences(event.target.files)} /> : null}
       </div>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Icon } from "@lantern/ui";
+import { Icon, LanternBrand } from "@lantern/ui";
 import { uiCopy } from "@/app/lib/ui-copy";
 import { routeMotionDelay } from "@/app/lib/ui-motion";
 
@@ -61,7 +61,7 @@ export function LandingClient() {
 
   return <main className={`landing-page landing-route-transition app-surface app-surface--hero${leaving ? " is-leaving" : ""}`} aria-busy={leaving}>
     <section className="landing-intro" aria-label={uiCopy.landing.hero.aria}>
-      <div className="landing-brand"><span className="lantern-logo"><i /></span><strong>{uiCopy.brand.wordmark.primary} <em>{uiCopy.brand.wordmark.accent}</em></strong></div>
+      <LanternBrand className="landing-brand" variant="hero" primary={uiCopy.brand.wordmark.primary} accent={uiCopy.brand.wordmark.accent} />
       <h1>{uiCopy.landing.hero.tagline}</h1>
       <p>{uiCopy.landing.hero.subtitle}</p>
       <button type="button" className="landing-start" onClick={enterWorkspace}>{uiCopy.landing.hero.start}</button>

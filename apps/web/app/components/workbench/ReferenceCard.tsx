@@ -285,7 +285,7 @@ export function ReferenceCard({
             <MenuDivider className="reference-menu-divider" />
             <MenuSection className="reference-menu-section reference-menu-zoom"><button type="button" onClick={() => updateZoom(zoom + 0.15)}><span><Icon name="zoomIn" />{uiCopy.workbench.action.zoomIn}</span></button><button type="button" onClick={() => updateZoom(zoom - 0.15)}><span><Icon name="zoomOut" />{uiCopy.workbench.action.zoomOut}</span></button><button type="button" onClick={() => updateZoom(1)}><span><Icon name="replace" />{uiCopy.asset.action.restore}</span></button></MenuSection>
             <MenuDivider className="reference-menu-divider" />
-            <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" className="danger" onClick={() => { onDelete(); setContextMenu(null); }}><span><Icon name="trash" />{uiCopy.common.action.removeFromCanvas}</span></button></MenuSection>
+            <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" className="danger" onClick={() => { onDelete(); setContextMenu(null); }}><span><Icon name="delete" />{uiCopy.common.action.removeFromCanvas}</span></button></MenuSection>
         </FloatingMenu>,
         document.body,
       ) : null}

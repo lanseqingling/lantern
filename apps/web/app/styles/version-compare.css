@@ -1,7 +1,7 @@
 .version-compare-shell { position: fixed; inset: 0; display: grid; grid-template-rows: minmax(0,1fr); overflow: hidden; padding: 70px 28px 82px; background: radial-gradient(circle at 1px 1px, var(--dot) 1.2px, transparent 1.4px), linear-gradient(135deg, #fbfcfc 0%, #f6f8f9 55%, #f8faf9 100%); background-size: 24px 24px, 100% 100%; color: #263e42; }
 .version-compare-back { position: fixed; z-index: 10; top: 20px; left: 20px; display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid rgba(255,255,255,.85); border-radius: 15px; background: rgba(255,255,255,.7); color: var(--cyan-deep); box-shadow: var(--shadow-soft); cursor: pointer; backdrop-filter: blur(14px); }
 .version-compare-back:hover { background: rgba(232,248,248,.82); color: #1d777a; }
-.version-compare-back svg { width: 18px; height: 18px; }
+.version-compare-back .lantern-icon { width: 18px; height: 18px; }
 .version-compare-stage { position: relative; display: grid; grid-template-columns: minmax(0,1fr) 1px minmax(0,1fr); min-height: 0; gap: 16px; }
 .version-compare-stage > article { position: relative; display: grid; grid-template-rows: auto minmax(0,1fr); min-width: 0; min-height: 0; overflow: hidden; }
 .version-compare-divider { background: linear-gradient(transparent, rgba(36,127,130,.28) 12%, rgba(36,127,130,.28) 88%, transparent); }

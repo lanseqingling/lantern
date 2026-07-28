@@ -26,7 +26,19 @@ body { color: var(--ink); background: var(--canvas); font-family: var(--font); }
 button, textarea, input, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { color: inherit; }
-button svg { display: block; width: 16px; height: 16px; }
+.lantern-icon { display: block; width: var(--icon-size, 16px); height: var(--icon-size, 16px); flex: none; color: currentColor; }
+.lantern-icon-tone-muted { color: var(--muted); }
+.lantern-icon-tone-accent { color: var(--cyan-deep); }
+.lantern-icon-tone-danger { color: var(--danger); }
+.lantern-icon-tone-inverse { color: #fff; }
+.lantern-icon-button { display: grid; place-items: center; border: 0; padding: 0; cursor: pointer; }
+.lantern-icon-button-compact { width: 24px; height: 24px; border-radius: 9px; }
+.lantern-icon-button-small { width: 28px; height: 28px; border-radius: 10px; }
+.lantern-icon-button-medium { width: 32px; height: 32px; border-radius: 11px; }
+.lantern-icon-button-large { width: 36px; height: 36px; border-radius: 13px; }
+.lantern-icon-button-ghost { background: transparent; }
+.lantern-icon-button-soft { background: var(--cyan-soft); color: var(--cyan-deep); }
+.lantern-icon-button-solid { background: var(--cyan); color: #fff; }
 a { color: inherit; text-decoration: none; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid rgba(100, 200, 200, 0.42); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .42; }

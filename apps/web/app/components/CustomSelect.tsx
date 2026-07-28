@@ -6,6 +6,11 @@ import type { IconName } from "@lantern/ui";
 
 type DiagramSelectIconName = "page" | "vertical" | "fourPanel";
 type SelectIconName = DiagramSelectIconName | IconName;
+const diagramIconNames: Record<DiagramSelectIconName, IconName> = {
+  page: "comicFormatPage",
+  vertical: "comicFormatVertical",
+  fourPanel: "comicFormatFourPanel",
+};
 
 type CustomSelectOption = {
   value: string;
@@ -15,23 +20,13 @@ type CustomSelectOption = {
   disabled?: boolean;
 };
 
-function DiagramSelectIcon({ name }: { name: DiagramSelectIconName }) {
-  const pieceCount = name === "vertical" ? 3 : 4;
-  return (
-    <span className={`custom-select-icon custom-select-icon-${name}`} aria-hidden="true">
-      {Array.from({ length: pieceCount }).map((_, index) => <i key={index} />)}
-    </span>
-  );
-}
-
 function isDiagramSelectIcon(name: SelectIconName): name is DiagramSelectIconName {
   return name === "page" || name === "vertical" || name === "fourPanel";
 }
 
 function SelectOptionIcon({ name }: { name: SelectIconName }) {
-  return isDiagramSelectIcon(name)
-    ? <DiagramSelectIcon name={name} />
-    : <span className="custom-select-leading-icon" aria-hidden="true"><Icon name={name} /></span>;
+  const iconName = isDiagramSelectIcon(name) ? diagramIconNames[name] : name;
+  return <span className="custom-select-leading-icon" aria-hidden="true"><Icon name={iconName} /></span>;
 }
 
 export function CustomSelect({

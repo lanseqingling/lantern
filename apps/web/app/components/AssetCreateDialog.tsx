@@ -79,7 +79,7 @@ export function AssetCreateDialog({
 
   const dialog = <div className="asset-create-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) onClose(); }}>
     <form className="asset-create-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-create-title" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <button type="button" className="asset-create-close" aria-label={uiCopy.asset.create.closeAria} disabled={submitting} onClick={onClose}><Icon name="x" /></button>
+      <button type="button" className="asset-create-close" aria-label={uiCopy.asset.create.closeAria} disabled={submitting} onClick={onClose}><Icon name="close" /></button>
       <header><small>{uiCopy.eyebrow.newAsset}</small><h2 id="asset-create-title">{uiCopy.asset.create.title}</h2><p>{uiCopy.asset.create.description}</p></header>
       <label>{uiCopy.asset.label.type}<CustomSelect ariaLabel={uiCopy.asset.label.type} className="asset-create-kind" value={kind} options={kindOptions} onChange={(value) => setKind(value as AssetKind)} /></label>
       <label>{uiCopy.common.field.name}<input ref={nameInputRef} value={name} maxLength={120} disabled={submitting} placeholder={uiCopy.asset.create.namePlaceholder} onChange={(event) => setName(event.target.value)} /></label>

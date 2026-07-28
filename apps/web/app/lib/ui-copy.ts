@@ -81,6 +81,7 @@ export const uiCopy = {
     windowsLabel: "Windows",
     windowsCommand: "lantern.cmd agent:install",
     copyCommandAria: (platform: string) => `复制 ${platform} 安装命令`,
+    dismissAria: "关闭 MCP + Skill 提示",
   },
   metadata: {
     applicationName: "Lantern AI",

@@ -11,7 +11,7 @@ export function DeleteConfirmDialog({
   description,
   confirmLabel = uiCopy.common.action.confirmDelete,
   tone = "danger",
-  icon = "trash",
+  icon = "delete",
   disabled = false,
   onCancel,
   onConfirm,

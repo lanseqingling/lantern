@@ -167,7 +167,7 @@ export function ImageViewer({
   if (!activeImage) return null;
 
   return <div className="image-viewer-overlay" role="presentation" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <button ref={closeRef} type="button" className="image-viewer-close" aria-label={uiCopy.imageViewer.closeAria} onClick={onClose}><Icon name="x" /></button>
+    <button ref={closeRef} type="button" className="image-viewer-close" aria-label={uiCopy.imageViewer.closeAria} onClick={onClose}><Icon name="close" /></button>
     <div ref={stageRef} className="image-viewer-stage" role="dialog" aria-modal="true" aria-label={activeImage.alt} onClick={onClose} onWheel={zoomWithWheel}>
       <div className="image-viewer-image-space">
         {loadFailed ? <div className="image-viewer-error"><Icon name="asset" /><strong>{uiCopy.imageViewer.unavailable}</strong></div> : <>

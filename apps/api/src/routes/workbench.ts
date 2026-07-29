@@ -23,6 +23,7 @@ import {
   restoreSavedSnapshot,
   updateChangeProposalStatus,
 } from "@lantern/server/version-service";
+import { getProjectAgentActivity } from "@lantern/server/agent-activity-service";
 
 const selectionSchema = z.object({
   type: z.string().min(1),
@@ -116,6 +117,20 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/versions", async (request) => {
     const user = await currentUser(request);
     return ok(request, await getVersionTimeline(user.id, request.params.projectId));
+  });
+
+  app.get<{
+    Params: { projectId: string };
+    Querystring: { cursor?: string; limit?: string };
+  }>("/v1/projects/:projectId/agent-activity", async (request) => {
+    const user = await currentUser(request);
+    const limit = request.query.limit === undefined
+      ? undefined
+      : z.coerce.number().int().min(1).max(50).parse(request.query.limit);
+    return ok(request, await getProjectAgentActivity(user.id, request.params.projectId, {
+      cursor: request.query.cursor,
+      limit,
+    }));
   });
 
   app.get<{ Params: { kind: string; id: string } }>("/v1/version-comparisons/:kind/:id", async (request) => {

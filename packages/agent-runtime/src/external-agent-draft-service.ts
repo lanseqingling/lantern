@@ -1,7 +1,8 @@
 import { getConfig } from "@lantern/server/config";
 import { AppError } from "@lantern/server/errors";
 import { executeIdempotentExternalMutation } from "@lantern/server/external-operation-service";
-import { freezeAgentDraft } from "@lantern/server/version-service";
+import { completeExternalAgentActivityGroup } from "@lantern/server/agent-activity-service";
+import { freezeAgentDraft, parseAgentDraftReference } from "@lantern/server/version-service";
 import { agentDraftCapabilities, agentDraftFinishInputSchema, agentDraftFinishOutputSchema } from "./agent-draft-capabilities";
 import { assertAgentCapabilityAccess } from "./capability-registry";
 
@@ -28,6 +29,11 @@ export async function invokeExternalAgentDraftCapability(ownerUserId: string, ca
         title: parsed.title,
         summary: parsed.summary,
       });
+      await completeExternalAgentActivityGroup({
+        ownerUserId,
+        draftId: parseAgentDraftReference(parsed.draft),
+        title: parsed.title,
+      }).catch(() => undefined);
       const origin = getConfig().WEB_ORIGIN.replace(/\/+$/, "");
       return agentDraftFinishOutputSchema.parse({
         capability: { id: capability.id, version: capability.version },

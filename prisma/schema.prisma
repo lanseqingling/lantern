@@ -125,6 +125,23 @@ enum ChangeProposalStatus {
   STALE
 }
 
+enum AgentActivitySourceType {
+  EXTERNAL_MCP
+  INTERNAL_AGENT
+}
+
+enum AgentActivityObservedStatus {
+  RUNNING
+  COMPLETED
+  TIMED_OUT
+}
+
+enum AgentActivityEventStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 model User {
   id          String   @id @default(cuid())
   email       String   @unique
@@ -132,21 +149,22 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  comics             Comic[]
-  comicSettings      ComicSetting[]
-  chapters           Chapter[]
-  projects           Project[]
-  assets             Asset[]
-  conversations      AgentConversation[]
-  messages           Message[]
-  tasks              GenerationTask[]
-  candidates         Candidate[]
-  snapshots          SavedSnapshot[]
-  canvasAssetItems   CanvasAssetListItem[]
-  externalUploads    ExternalAssetUpload[]
-  externalOperations ExternalAgentOperation[]
-  agentDrafts        AgentDraft[]
-  changeProposals    ChangeProposal[]
+  comics              Comic[]
+  comicSettings       ComicSetting[]
+  chapters            Chapter[]
+  projects            Project[]
+  assets              Asset[]
+  conversations       AgentConversation[]
+  messages            Message[]
+  tasks               GenerationTask[]
+  candidates          Candidate[]
+  snapshots           SavedSnapshot[]
+  canvasAssetItems    CanvasAssetListItem[]
+  externalUploads     ExternalAssetUpload[]
+  externalOperations  ExternalAgentOperation[]
+  agentDrafts         AgentDraft[]
+  changeProposals     ChangeProposal[]
+  agentActivityGroups AgentActivityGroup[]
 }
 
 model Comic {
@@ -230,18 +248,19 @@ model Project {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  owner            User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
-  chapter          Chapter                    @relation(fields: [chapterId], references: [id], onDelete: Restrict)
-  workingRevisions WorkingRevision[]
-  storyboardBeats  StoryboardBeat[]
-  canvasAssetItems CanvasAssetListItem[]
-  conversations    AgentConversation[]
-  placements       CanvasReferencePlacement[]
-  tasks            GenerationTask[]
-  candidates       Candidate[]
-  snapshots        SavedSnapshot[]
-  agentDrafts      AgentDraft[]
-  changeProposals  ChangeProposal[]
+  owner               User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  chapter             Chapter                    @relation(fields: [chapterId], references: [id], onDelete: Restrict)
+  workingRevisions    WorkingRevision[]
+  storyboardBeats     StoryboardBeat[]
+  canvasAssetItems    CanvasAssetListItem[]
+  conversations       AgentConversation[]
+  placements          CanvasReferencePlacement[]
+  tasks               GenerationTask[]
+  candidates          Candidate[]
+  snapshots           SavedSnapshot[]
+  agentDrafts         AgentDraft[]
+  changeProposals     ChangeProposal[]
+  agentActivityGroups AgentActivityGroup[]
 
   @@index([ownerUserId])
 }
@@ -296,10 +315,11 @@ model AgentDraft {
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
 
-  owner     User                 @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
-  project   Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  revisions AgentDraftRevision[]
-  proposal  ChangeProposal?
+  owner         User                 @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project       Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  revisions     AgentDraftRevision[]
+  proposal      ChangeProposal?
+  activityGroup AgentActivityGroup?
 
   @@index([ownerUserId, projectId, status, updatedAt])
   @@index([projectId, baseWorkingRevision])
@@ -681,9 +701,62 @@ model ExternalAgentOperation {
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
 
-  owner User @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  owner         User                @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  activityEvent AgentActivityEvent?
 
   @@unique([ownerUserId, idempotencyKey])
   @@index([ownerUserId, capabilityId, createdAt])
   @@index([ownerUserId, status, updatedAt])
+}
+
+/// A read-only activity projection for one Agent task. It never controls the
+/// source Agent runtime, AgentDraft, or official work revisions.
+model AgentActivityGroup {
+  id                String                      @id @default(cuid())
+  ownerUserId       String
+  projectId         String
+  sourceType        AgentActivitySourceType     @default(EXTERNAL_MCP)
+  sourceReference   String?
+  agentDraftId      String?                     @unique
+  title             String                      @default("外部 Agent 编辑")
+  observedStatus    AgentActivityObservedStatus @default(RUNNING)
+  lastObservedAt    DateTime                    @default(now())
+  observedExpiresAt DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  owner      User                 @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project    Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  agentDraft AgentDraft?          @relation(fields: [agentDraftId], references: [id], onDelete: Restrict)
+  events     AgentActivityEvent[]
+
+  @@index([ownerUserId, projectId, updatedAt])
+  @@index([sourceType, observedStatus, observedExpiresAt])
+}
+
+/// A semantic, user-facing observation of one Agent action. Raw MCP payloads,
+/// prompts, credentials, and signed URLs are intentionally excluded.
+model AgentActivityEvent {
+  id                  String                   @id @default(cuid())
+  groupId             String
+  externalOperationId String?                  @unique
+  dedupeKey           String?
+  capabilityId        String?
+  toolName            String
+  eventType           String
+  observedStatus      AgentActivityEventStatus @default(RUNNING)
+  projection          Json                     @default(dbgenerated("'{}'"))
+  navigation          Json?
+  startedAt           DateTime                 @default(now())
+  completedAt         DateTime?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  group             AgentActivityGroup      @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  externalOperation ExternalAgentOperation? @relation(fields: [externalOperationId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, dedupeKey])
+  @@index([groupId, startedAt])
+  @@index([observedStatus, updatedAt])
 }

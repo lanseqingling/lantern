@@ -16,6 +16,7 @@ import {
 } from "@prisma/client";
 import { compileChapterLayoutPlan } from "@lantern/layout-engine";
 import { initializeDatabaseConnection, prisma } from "@lantern/server/db";
+import { AppError } from "@lantern/server/errors";
 import { archiveAssetFamily, deleteAssetImage, getAssetFamilyDetail, getComicVisualStyle, listComicAssetCards, renameAssetImage, restoreAssetToCanvasList, setPrimaryAssetImage } from "@lantern/server/asset-library-service";
 import { duplicateComic } from "@lantern/server/comic-service";
 import { putImage } from "@lantern/server/object-storage";
@@ -27,6 +28,7 @@ import { executeExternalDirectChange } from "@lantern/agent-runtime/external-edi
 import { invokeExternalPageCapability } from "@lantern/agent-runtime/external-page-service";
 import { invokeExternalCompositionCapability } from "@lantern/agent-runtime/external-composition-service";
 import { invokeExternalAgentDraftCapability } from "@lantern/agent-runtime/external-agent-draft-service";
+import { trackExternalMcpActivity } from "@lantern/agent-runtime/external-activity-adapter";
 import { resolveExternalAgentScope } from "@lantern/agent-runtime/external-scope-service";
 import { SEMANTIC_CAPABILITY_CATALOG_REVISION, type AgentCapabilityDescriptor } from "@lantern/agent-runtime/capability-registry";
 import { getConfig } from "@lantern/server/config";
@@ -34,12 +36,18 @@ import { receiveExternalAssetUpload } from "@lantern/server/external-upload-serv
 import { resolveResourceReference } from "@lantern/server/resource-reference-service";
 import {
   applyChangeProposal,
+  agentDraftReference,
+  createAgentDraft,
   deleteSavedSnapshot,
   getVersionComparison,
   getVersionTimeline,
   restoreSavedSnapshot,
   updateChangeProposalStatus,
 } from "@lantern/server/version-service";
+import {
+  EXTERNAL_AGENT_ACTIVITY_TIMEOUT_MS,
+  getProjectAgentActivity,
+} from "@lantern/server/agent-activity-service";
 import { LocalTaskRunner } from "@lantern/agent-runtime/local-task-runner";
 import { invokeTaskCapability } from "@lantern/agent-runtime/task-service";
 import { validateComicDocument, type StoryboardBeat } from "@lantern/shared";
@@ -1787,6 +1795,8 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.assetVersion.deleteMany({ where: { asset: { comicId: ids.comic } } });
     await prisma.asset.updateMany({ where: { comicId: ids.comic }, data: { variantOfAssetId: null } });
     await prisma.asset.deleteMany({ where: { comicId: ids.comic } });
+    await prisma.agentActivityEvent.deleteMany({ where: { group: { projectId: ids.project } } });
+    await prisma.agentActivityGroup.deleteMany({ where: { projectId: ids.project } });
     await prisma.changeProposal.deleteMany({ where: { projectId: ids.project } });
     await prisma.agentDraftRevision.deleteMany({ where: { agentDraft: { projectId: ids.project } } });
     await prisma.agentDraft.deleteMany({ where: { projectId: ids.project } });
@@ -1797,6 +1807,286 @@ test("database candidate apply and revert preserve version heads atomically", as
     await prisma.comicSetting.deleteMany({ where: { comicId: ids.comic } });
     await prisma.comic.deleteMany({ where: { id: ids.comic } });
     await prisma.externalAgentOperation.deleteMany({ where: { ownerUserId: ids.user } });
+    await prisma.user.deleteMany({ where: { id: ids.user } });
+    await prisma.$disconnect();
+  }
+});
+
+test("external MCP activity is observed without becoming an Agent task controller", async () => {
+  await initializeDatabaseConnection();
+  const suffix = randomUUID();
+  const ids = {
+    user: `activity-user-${suffix}`,
+    comic: `activity-comic-${suffix}`,
+    chapter: `activity-chapter-${suffix}`,
+    project: `activity-project-${suffix}`,
+    beat: `activity-beat-${suffix}`,
+    beatVersion: `activity-beat-version-${suffix}`,
+  };
+  const beat: StoryboardBeat = {
+    id: ids.beat,
+    versionId: ids.beatVersion,
+    title: "看台相遇",
+    description: "角色在旧看台入口短暂停下。",
+  };
+  const document = compileChapterLayoutPlan(
+    { format: "page", preset: "page_basic", readingOrder: [beat.id] },
+    [beat],
+    { comicId: ids.comic, chapterId: ids.chapter },
+  );
+
+  try {
+    await prisma.user.create({
+      data: {
+        id: ids.user,
+        email: `${suffix}@activity.lantern.local`,
+        displayName: "Agent Activity Test",
+      },
+    });
+    await prisma.comic.create({
+      data: {
+        id: ids.comic,
+        ownerUserId: ids.user,
+        title: "Agent Activity Test",
+        format: ComicFormat.PAGE,
+      },
+    });
+    await prisma.chapter.create({
+      data: {
+        id: ids.chapter,
+        ownerUserId: ids.user,
+        comicId: ids.comic,
+        number: 1,
+        title: "Chapter",
+      },
+    });
+    await prisma.project.create({
+      data: { id: ids.project, ownerUserId: ids.user, chapterId: ids.chapter },
+    });
+    await prisma.workingRevision.create({
+      data: {
+        projectId: ids.project,
+        revision: 1,
+        document: document as unknown as Prisma.InputJsonValue,
+        storyboardBeats: [beat] as unknown as Prisma.InputJsonValue,
+        storyboardBeatVersionHeads: { [ids.beat]: ids.beatVersion },
+        assetVersionHeads: {},
+      },
+    });
+
+    await trackExternalMcpActivity({
+      ownerUserId: ids.user,
+      toolName: "lantern_context_get",
+      toolInput: {
+        projectId: ids.project,
+        source: "working",
+        profile: "composition_observation",
+        pageId: document.units[0]!.id,
+      },
+      operation: () => getExternalAgentContext(ids.user, {
+        projectId: ids.project,
+        source: "working",
+        profile: "composition_observation",
+        pageId: document.units[0]!.id,
+      }),
+    });
+    const observationFeed = await getProjectAgentActivity(ids.user, ids.project);
+    assert.equal(observationFeed.groups.length, 1);
+    assert.equal(observationFeed.groups[0]?.events[0]?.eventType, "context_read");
+
+    const unobservedDraft = await createAgentDraft({
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      baseWorkingRevision: 1,
+      title: "非 MCP 草稿",
+    });
+    assert.equal(
+      await prisma.agentActivityGroup.count({ where: { agentDraftId: unobservedDraft.draft.id } }),
+      0,
+    );
+
+    await trackExternalMcpActivity({
+      ownerUserId: ids.user,
+      toolName: "lantern_asset_image_attach",
+      capabilityId: "asset.image.attach",
+      toolInput: { idempotencyKey: `activity:image:${suffix}` },
+      operation: async () => ({
+        capability: { id: "asset.image.attach", version: 1 },
+        effect: "resource_mutation",
+        resource: {
+          type: "asset",
+          id: `activity-asset-${suffix}`,
+          uri: `lantern://assets/activity-asset-${suffix}`,
+        },
+        data: {
+          root: {
+            label: "活动验收图",
+          },
+          attached: {
+            versionId: `activity-version-${suffix}`,
+            imageId: `activity-image-${suffix}`,
+            replayed: false,
+          },
+        },
+      }),
+    });
+    const uploadFeed = await getProjectAgentActivity(ids.user, ids.project);
+    assert.equal(uploadFeed.groups.length, 1);
+    assert.equal(uploadFeed.groups[0]?.sourceReference, undefined);
+    assert.equal(
+      uploadFeed.groups[0]?.events[1]?.projection.data
+        && (uploadFeed.groups[0].events[1].projection.data as { assetVersionId?: string }).assetVersionId,
+      `activity-version-${suffix}`,
+    );
+    assert.deepEqual(uploadFeed.groups[0]?.events[1]?.navigation, {
+      kind: "asset_version",
+      assetVersionId: `activity-version-${suffix}`,
+    });
+    assert.equal(uploadFeed.groups[0]?.events[1]?.projection.targets[0]?.label, "活动验收图");
+
+    const created = await createAgentDraft({
+      ownerUserId: ids.user,
+      projectId: ids.project,
+      baseWorkingRevision: 1,
+      title: "调整开场画格",
+      sourceHost: "lantern-mcp",
+    });
+    assert.equal(
+      await prisma.agentActivityGroup.count({ where: { projectId: ids.project } }),
+      1,
+    );
+    const page = document.units[0]!;
+    const draftContext = await getExternalAgentContext(ids.user, {
+      projectId: ids.project,
+      source: "agent_draft",
+      draft: agentDraftReference(created.draft.id),
+      profile: "composition_observation",
+      pageId: page.id,
+    });
+    const frameTarget = draftContext.targets.find((target) => target.type === "comic_frame");
+    assert.ok(frameTarget);
+    const targetHandle = frameTarget.handle;
+
+    const successfulResult = await trackExternalMcpActivity({
+      ownerUserId: ids.user,
+      toolName: "lantern_capability_canvas_element_move",
+      capabilityId: "canvas.element.move",
+      toolInput: {
+        targetHandles: [targetHandle],
+        idempotencyKey: `activity:move:${suffix}`,
+      },
+      operation: async () => ({
+        capability: { id: "canvas.element.move", version: 1 },
+        effect: "direct_change",
+        data: { action: "move", coordinateSpace: "surface", fields: ["x", "y"] },
+      }),
+    });
+    assert.equal(successfulResult.effect, "direct_change");
+
+    await assert.rejects(
+      () => trackExternalMcpActivity({
+        ownerUserId: ids.user,
+        toolName: "lantern_capability_canvas_element_resize",
+        capabilityId: "canvas.element.resize",
+        toolInput: {
+          targetHandles: [targetHandle],
+          idempotencyKey: `activity:resize:${suffix}`,
+        },
+        operation: async () => {
+          throw new AppError("context_stale", "测试中的上下文已过期。", 409);
+        },
+      }),
+      /测试中的上下文已过期/,
+    );
+
+    const runningFeed = await getProjectAgentActivity(ids.user, ids.project);
+    assert.equal(runningFeed.groups.length, 1);
+    assert.equal(runningFeed.groups[0]?.status, "running");
+    assert.equal(runningFeed.groups[0]?.eventCount, 4);
+    assert.equal(runningFeed.groups[0]?.events.length, 4);
+    assert.deepEqual(
+      runningFeed.groups[0]?.events.map((event) => event.status),
+      ["succeeded", "succeeded", "succeeded", "failed"],
+    );
+    assert.match(runningFeed.groups[0]?.events[2]?.projection.targets[0]?.label ?? "", /画格 0?1/);
+    assert.deepEqual(
+      runningFeed.groups[0]?.events[3]?.projection.data,
+      { errorCode: "context_stale" },
+    );
+
+    const timedOutFeed = await getProjectAgentActivity(ids.user, ids.project, {
+      now: new Date(Date.now() + EXTERNAL_AGENT_ACTIVITY_TIMEOUT_MS + 1_000),
+    });
+    assert.equal(timedOutFeed.groups[0]?.status, "timed_out");
+    assert.equal(
+      (await prisma.agentDraft.findUniqueOrThrow({ where: { id: created.draft.id } })).status,
+      "ACTIVE",
+    );
+
+    await trackExternalMcpActivity({
+      ownerUserId: ids.user,
+      toolName: "lantern_context_get",
+      toolInput: { draft: agentDraftReference(created.draft.id) },
+      operation: async () => ({ draft: agentDraftReference(created.draft.id), profile: "editing" }),
+    });
+    assert.equal(
+      (await getProjectAgentActivity(ids.user, ids.project)).groups[0]?.status,
+      "running",
+    );
+
+    await trackExternalMcpActivity({
+      ownerUserId: ids.user,
+      toolName: "lantern_capability_agent_draft_finish",
+      capabilityId: "agent_draft.finish",
+      toolInput: {
+        draft: agentDraftReference(created.draft.id),
+        title: "开场画格调整",
+        summary: "调整了第一格构图。",
+        idempotencyKey: `activity:finish:${suffix}`,
+      },
+      operation: () => invokeExternalAgentDraftCapability(ids.user, "agent_draft.finish", {
+        draft: agentDraftReference(created.draft.id),
+        title: "开场画格调整",
+        summary: "调整了第一格构图。",
+        idempotencyKey: `activity:finish:${suffix}`,
+      }),
+    });
+    const completedFeed = await getProjectAgentActivity(ids.user, ids.project);
+    assert.equal(completedFeed.groups[0]?.status, "completed");
+    assert.equal(completedFeed.groups[0]?.title, "开场画格调整");
+    assert.equal(completedFeed.groups[0]?.proposal?.status, "available");
+    assert.match(completedFeed.groups[0]?.proposal?.reviewPath ?? "", /^\/reviews\//);
+    assert.equal(completedFeed.groups[0]?.events.at(-1)?.eventType, "proposal_created");
+
+    const proposalId = completedFeed.groups[0]!.proposal!.id;
+    const applied = await applyChangeProposal(ids.user, proposalId, 1);
+    const appliedFeed = await getProjectAgentActivity(ids.user, ids.project);
+    assert.equal(appliedFeed.groups[0]?.status, "completed");
+    assert.equal(appliedFeed.groups[0]?.proposal?.status, "applied");
+    assert.equal(appliedFeed.groups[0]?.proposal?.acceptedWorkingRevision, applied.workingRevision);
+    assert.equal(appliedFeed.groups[0]?.proposal?.acceptedSnapshotId, applied.snapshotId);
+  } finally {
+    await prisma.agentActivityEvent.deleteMany({
+      where: { group: { projectId: ids.project } },
+    });
+    await prisma.agentActivityGroup.deleteMany({ where: { projectId: ids.project } });
+    await prisma.changeProposal.deleteMany({ where: { projectId: ids.project } });
+    await prisma.agentDraftRevision.deleteMany({
+      where: { agentDraft: { projectId: ids.project } },
+    });
+    await prisma.agentDraft.deleteMany({ where: { projectId: ids.project } });
+    await prisma.storyboardBeatVersion.deleteMany({
+      where: { storyboardBeat: { projectId: ids.project } },
+    });
+    await prisma.storyboardBeat.deleteMany({ where: { projectId: ids.project } });
+    await prisma.canvasReferencePlacement.deleteMany({ where: { projectId: ids.project } });
+    await prisma.canvasAssetListItem.deleteMany({ where: { projectId: ids.project } });
+    await prisma.savedSnapshot.deleteMany({ where: { projectId: ids.project } });
+    await prisma.workingRevision.deleteMany({ where: { projectId: ids.project } });
+    await prisma.externalAgentOperation.deleteMany({ where: { ownerUserId: ids.user } });
+    await prisma.project.deleteMany({ where: { id: ids.project } });
+    await prisma.chapter.deleteMany({ where: { id: ids.chapter } });
+    await prisma.comic.deleteMany({ where: { id: ids.comic } });
     await prisma.user.deleteMany({ where: { id: ids.user } });
     await prisma.$disconnect();
   }

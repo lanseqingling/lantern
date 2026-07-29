@@ -14,6 +14,7 @@ import { AppError } from "./errors";
 import { createSignedAssetPath } from "./signed-assets";
 import { commitChangeSet, getLatestWorking, getOwnedProject } from "./workbench-service";
 import { deleteObject } from "./object-storage";
+import { ensureExternalAgentActivityGroup } from "./agent-activity-service";
 
 function json<T>(value: Prisma.JsonValue) {
   return structuredClone(value) as T;
@@ -55,7 +56,7 @@ export async function createAgentDraft(input: {
     where: { projectId_revision: { projectId: input.projectId, revision: input.baseWorkingRevision } },
   });
   if (!working) throw new AppError("context_stale", "作为方案基线的工作稿已经不存在。", 409);
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const draft = await tx.agentDraft.create({
       data: {
         ownerUserId: input.ownerUserId,
@@ -77,6 +78,14 @@ export async function createAgentDraft(input: {
     });
     return { draft, revision };
   }, { isolationLevel: "Serializable" });
+  if (input.sourceHost?.trim() === "lantern-mcp") {
+    await ensureExternalAgentActivityGroup({
+      ownerUserId: input.ownerUserId,
+      draftId: created.draft.id,
+      title: created.draft.title,
+    }).catch(() => undefined);
+  }
+  return created;
 }
 
 export async function getAgentDraft(ownerUserId: string, draftReference: string) {

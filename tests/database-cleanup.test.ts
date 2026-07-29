@@ -24,6 +24,8 @@ function cleanupPrismaMock() {
   });
   const prisma = {
     candidate: model("candidate"),
+    agentActivityEvent: model("agentActivityEvent"),
+    agentActivityGroup: model("agentActivityGroup"),
     changeProposal: model("changeProposal"),
     agentDraftRevision: model("agentDraftRevision"),
     agentDraft: model("agentDraft"),
@@ -57,6 +59,8 @@ test("comic cleanup removes external uploads before their assets", async () => {
   const { prisma, operations, argumentsByOperation } = cleanupPrismaMock();
   await clearComicData(prisma, "comic-1");
   assert.ok(operations.indexOf("externalAssetUpload.deleteMany") < operations.indexOf("asset.deleteMany"));
+  assert.ok(operations.indexOf("agentActivityEvent.deleteMany") < operations.indexOf("agentActivityGroup.deleteMany"));
+  assert.ok(operations.indexOf("agentActivityGroup.deleteMany") < operations.indexOf("agentDraft.deleteMany"));
   assert.ok(operations.indexOf("changeProposal.deleteMany") < operations.indexOf("agentDraftRevision.deleteMany"));
   assert.ok(operations.indexOf("agentDraftRevision.deleteMany") < operations.indexOf("agentDraft.deleteMany"));
   assert.ok(operations.indexOf("agentDraft.deleteMany") < operations.indexOf("project.deleteMany"));

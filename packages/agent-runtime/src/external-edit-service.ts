@@ -198,6 +198,7 @@ export async function executeExternalDirectChange(input: {
               ownerUserId: input.ownerUserId,
               projectId: scope.projectId!,
               baseWorkingRevision: resolved.workingRevision,
+              sourceHost: "lantern-mcp",
             });
             return loadExternalDraftFixture(input.ownerUserId, created.draft.id);
           })();

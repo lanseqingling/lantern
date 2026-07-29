@@ -10,6 +10,8 @@ import { ComicRenderer, type ComicContextPoint } from "./ComicRenderer";
 import { AgentWorkspace, CanvasStage, CreationDock, CreationDrawer, ObjectToolbar, SessionDrawer, WorkbenchShell } from "./workbench/WorkbenchLayout";
 import { FloatingMenu, MenuDivider, MenuSection } from "./workbench/FloatingPrimitives";
 import { ReferenceCard } from "./workbench/ReferenceCard";
+import { AgentActivityPanel } from "./workbench/AgentActivityPanel";
+import { AgentPanelHeader, type AgentPanelView } from "./workbench/AgentPanelHeader";
 import { WorkbenchTour } from "./workbench/WorkbenchTour";
 import { VersionPanel } from "./workbench/VersionPanel";
 import { useOutsidePointerDismiss } from "./workbench/useOutsidePointerDismiss";
@@ -28,6 +30,7 @@ import type {
   WorkspaceChangeSet,
   WorkspaceOperation,
   Geometry,
+  AgentActivityNavigation,
 } from "@lantern/shared";
 import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, type PageDisplayMode } from "@lantern/shared";
 import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
@@ -352,6 +355,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [pageStructureConfirm, setPageStructureConfirm] = useState<{ unitId: string; action: PageStructureAction } | null>(null);
   const [pageEditDraft, setPageEditDraft] = useState<{ name: string; aspectRatio: VerticalSegmentAspectRatio; aspectRatioChanged: boolean }>({ name: "", aspectRatio: "9:16", aspectRatioChanged: false });
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [agentPanelView, setAgentPanelView] = useState<AgentPanelView>("activity");
   const [agentAccessNoticeVisible, setAgentAccessNoticeVisible] = useState(true);
   const [sessionCreateOpen, setSessionCreateOpen] = useState(false);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
@@ -364,8 +368,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [leftOpen, setLeftOpen] = useState(true);
   const [agentOpen, setAgentOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(() => searchParams.get("versions") === "open");
-  const openAgentWorkspace = useCallback(() => {
+  const openAgentWorkspace = useCallback((view?: AgentPanelView) => {
     setVersionsOpen(false);
+    if (view) setAgentPanelView(view);
     setAgentOpen(true);
   }, []);
   const setAgentWorkspaceOpen = useCallback((open: boolean) => {
@@ -593,7 +598,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     const timer = window.setTimeout(() => {
       setComposer(copy);
       setScope(uiCopy.workbench.scope.currentComicAssets);
-      openAgentWorkspace();
+      openAgentWorkspace("conversation");
       setLeftView("assets");
       setToast(uiCopy.toast.workbench.assetCreation.readyForAgent);
       const params = new URLSearchParams(window.location.search);
@@ -1424,6 +1429,100 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         ? comicPage?.elements.find((candidate): candidate is ImageElement => candidate.type === "image" && candidate.comicFrameId === frame.id && candidate.location.space === "frame")
         : undefined;
     return { comicPage, frame, image };
+  };
+
+  const navigateFromAgentActivity = (navigation: AgentActivityNavigation) => {
+    if (navigation.kind === "change_proposal") {
+      navigate(`/reviews/${encodeURIComponent(navigation.proposalId)}`);
+      return;
+    }
+    if (navigation.kind === "saved_snapshot") {
+      navigate(`/versions/saved_snapshot/${encodeURIComponent(navigation.snapshotId)}`);
+      return;
+    }
+    if (navigation.kind === "asset_version") {
+      const asset = state.assets?.find((candidate) =>
+        candidate.versionId === navigation.assetVersionId
+        || candidate.versions?.some((version) => version.id === navigation.assetVersionId)
+        || candidate.images?.some((image) => image.versionId === navigation.assetVersionId));
+      const assetImages = asset
+        ? [
+            ...(asset.images ?? []).flatMap((image) => image.contentUrl
+              ? [{ id: image.versionId, src: image.contentUrl, alt: `${asset.name} · ${image.label}` }]
+              : []),
+            ...(asset.versions ?? []).flatMap((version) => version.contentUrl
+              ? [{ id: version.id, src: version.contentUrl, alt: uiCopy.workbench.agentActivity.assetVersionAlt(asset.name, version.version) }]
+              : []),
+          ].filter((image, index, images) => images.findIndex((candidate) => candidate.id === image.id) === index)
+        : [];
+      const resourceUrl = navigation.contentUrl
+        ?? state.fixture.working.resolvedResources?.[navigation.assetVersionId]?.url;
+      const images = assetImages.length
+        ? assetImages
+        : resourceUrl
+          ? [{ id: navigation.assetVersionId, src: resourceUrl, alt: navigation.label ?? uiCopy.workbench.defaultLabel.comicImage }]
+          : [];
+      const initialIndex = images.findIndex((image) => image.id === navigation.assetVersionId);
+      if (!images.length) {
+        setToast(uiCopy.toast.workbench.image.viewUnavailable);
+        return;
+      }
+      setImageViewer({
+        images,
+        initialIndex: Math.max(0, initialIndex),
+        allowNavigation: images.length > 1,
+      });
+      return;
+    }
+    if (navigation.projectId !== runtimeIds?.projectId) return;
+    const document = state.fixture.working.document;
+    const pageIndex = resolveReadingUnitIndex(document, navigation.unitId);
+    if (pageIndex < 0) return;
+    const page = workingPages.find((candidate) => candidate.id === navigation.unitId);
+    const targetElementId = navigation.elementId ?? navigation.frameId;
+    const element = targetElementId
+      ? page?.elements.find((candidate) => candidate.id === targetElementId)
+      : undefined;
+    let nextSelection: Selection = {
+      type: "presentation_unit",
+      id: navigation.unitId,
+      pageId: navigation.unitId,
+      label: presentationUnitNumberLabel(document.units.find((unit) => unit.id === navigation.unitId)!, pageIndex),
+    };
+    if (element?.type === "comic_frame") {
+      nextSelection = {
+        type: "comic_frame",
+        id: element.id,
+        pageId: navigation.unitId,
+        label: element.name?.trim() || uiCopy.workbench.label.frame(element.readingOrder),
+      };
+    } else if (element?.type === "image") {
+      nextSelection = {
+        type: "image",
+        id: element.id,
+        pageId: navigation.unitId,
+        label: element.name?.trim() || uiCopy.workbench.defaultLabel.comicImage,
+      };
+    } else if (element?.type === "speech_balloon") {
+      nextSelection = {
+        type: "speech_balloon",
+        id: element.id,
+        pageId: navigation.unitId,
+        label: element.name?.trim() || uiCopy.workbench.object.dialogue,
+      };
+    } else if (element?.type === "text") {
+      nextSelection = {
+        type: "text",
+        id: element.id,
+        pageId: navigation.unitId,
+        label: element.name?.trim() || uiCopy.workbench.scope.narration,
+      };
+    }
+    setState((current) => ({ ...current, currentPageIndex: pageIndex }));
+    setSelection(nextSelection);
+    setCanvasMode("focus");
+    setObjectInteractionMode("select");
+    setInspectorOpen(false);
   };
 
   const selectCreatedObject = (next: Selection, editImmediately = false) => {
@@ -2468,7 +2567,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const beat = state.fixture.storyboardBeats.find((item) => item.id === targetSelection.id);
       if (!beat) return;
       addComposerReference({ id: `storyboard:${beat.id}:${beat.versionId}`, objectType: "storyboard_beat", objectId: beat.id, versionId: beat.versionId, label: targetSelection.label, kind: "storyboard_beat" });
-      openAgentWorkspace();
+      openAgentWorkspace("conversation");
       return;
     }
     if (!targetSelection.pageId) return;
@@ -2487,7 +2586,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         dialogueText: targetElement.content.text,
       });
       setScope(uiCopy.workbench.scope.balloon);
-      openAgentWorkspace();
+      openAgentWorkspace("conversation");
       return;
     }
     const frame = targetElement.type === "comic_frame"
@@ -2507,11 +2606,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         imageUrl,
       });
       setScope(uiCopy.workbench.scope.currentFrame);
-      openAgentWorkspace();
+      openAgentWorkspace("conversation");
       return;
     }
     addComposerReference({ id: `canvas:${targetElement.id}`, objectType: "canvas_element", objectId: targetElement.id, label: targetSelection.label, kind: "canvas_element" });
-    openAgentWorkspace();
+    openAgentWorkspace("conversation");
   };
 
   const applyInspectorEdit = () => {
@@ -3782,7 +3881,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const reference = canvasReferences.find((item) => item.id === id);
       if (reference) addCanvasAssetReference(reference);
     });
-    openAgentWorkspace();
+    openAgentWorkspace("conversation");
   };
 
   const removeMultiCanvasElements = () => {
@@ -3952,8 +4051,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         <div className="drawer-stack">
         <div className="drawer-top-card" data-tour-id="creation-space">
         <div className="drawer-heading"><strong>{uiCopy.workbench.panel.creationSpace}</strong><button type="button" onClick={() => setCreationSpaceOpen(false)} aria-label={uiCopy.workbench.creationSpace.collapseAria}><Icon name="collapse" /></button></div>
-        <nav className="drawer-tabs" aria-label={uiCopy.workbench.creationSpace.categoriesAria}>
-          {([['assets', uiCopy.asset.label.asset], ['storyboard', uiCopy.workbench.creationSpace.storyboardTab]] as Array<[LeftView, string]>).map(([value, label]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => setLeftView(value)}>{label}</button>)}
+        <nav className={`drawer-tabs ${leftView === "storyboard" ? "is-storyboard" : ""}`} aria-label={uiCopy.workbench.creationSpace.categoriesAria}>
+          {([['assets', uiCopy.asset.label.asset], ['storyboard', uiCopy.workbench.creationSpace.storyboardTab]] as Array<[LeftView, string]>).map(([value, label]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => setLeftView(value)}><Icon name={value === "assets" ? "asset" : "storyboard"} /><span>{label}</span></button>)}
         </nav>
         <div ref={creationListRef} className={`drawer-main ${leftView === "assets" ? "assets-view" : ""} ${leftView === "storyboard" ? "storyboard-view" : ""} ${creationListOverflows ? "has-scroll-overflow" : ""}`}>
         {leftView === "assets" ? <section className="drawer-view asset-reference-list">
@@ -4022,12 +4121,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         </section>
         </div>
       </CreationDrawer>
-      {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setCreationSpaceOpen(true)} aria-label={uiCopy.workbench.pageFlow.expandAria}><Icon name="expand" /></button> : null}
+      {!leftOpen ? <button className="drawer-reopen left" type="button" onClick={() => setCreationSpaceOpen(true)} aria-label={uiCopy.workbench.pageFlow.expandAria}><Icon name="creationSpaceOpen" /></button> : null}
       {activeAssetMenu && assetMenuPosition ? (() => {
         const visibleInAssetSpace = isAssetVisibleInAssetSpace(activeAssetMenu);
         return <FloatingMenu className="asset-reference-menu-floating" style={{ left: assetMenuPosition.x, top: assetMenuPosition.y }}>
           <MenuSection className="asset-menu-section">
-            <button type="button" onClick={() => { addAssetReference(activeAssetMenu); openAgentWorkspace(); setAssetMenuId(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button>
+          <button type="button" onClick={() => { addAssetReference(activeAssetMenu); openAgentWorkspace("conversation"); setAssetMenuId(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button>
             <button type="button" onClick={handleActiveAssetPlacement}><span><Icon name="pointer" />{activeAssetPlacement ? uiCopy.workbench.action.locateOnCanvas : uiCopy.workbench.action.addToCanvas}</span></button>
           </MenuSection>
           <MenuDivider className="asset-menu-divider" />
@@ -4125,7 +4224,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <button type="button" className="candidate-preview-cancel" onClick={cancelFrameImageCandidatePreview}><Icon name="close" />{uiCopy.common.action.cancel}</button>
         </ObjectToolbar> : null}
         {canvasMode === "focus" && !frameImageCandidatePreview && !multiSelection && !inspectorOpen && !comicContextMenu && toolbarPlacement && selection.type !== "none" && selection.type !== "presentation_unit" && selection.type !== "reference_card" ? <ObjectToolbar className={`side-${toolbarPlacement.side}`} style={toolbarStyle} aria-label={uiCopy.workbench.objectEditor.toolbarAria} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" aria-label={uiCopy.workbench.objectEditor.referenceAria} onClick={() => { addSelectionReference(); openAgentWorkspace(); }}><Icon name="ai" /></button>
+          <button type="button" aria-label={uiCopy.workbench.objectEditor.referenceAria} onClick={() => { addSelectionReference(); openAgentWorkspace("conversation"); }}><Icon name="ai" /></button>
           <button type="button" className={objectInteractionMode === "move" ? "active" : ""} aria-pressed={objectInteractionMode === "move"} aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.toggleBalloonTransformAria : selection.type === "text" ? uiCopy.workbench.objectEditor.toggleNarrationTransformAria : selectedFrameImage ? uiCopy.workbench.objectEditor.toggleFrameMoveAria : selection.type === "image" ? uiCopy.workbench.objectEditor.togglePaperImageTransformAria : uiCopy.workbench.objectEditor.toggleFrameMoveAria} disabled={(selection.type !== "comic_frame" && selection.type !== "speech_balloon" && selection.type !== "text" && selectedElement?.type !== "image") || objectInteractionMode === "crop"} onClick={() => { setInspectorOpen(false); setObjectInteractionMode((mode) => mode === "move" ? "select" : "move"); }}><Icon name="move" /></button>
           <button type="button" className={objectInteractionMode === "crop" ? "active" : ""} aria-pressed={objectInteractionMode === "crop"} aria-label={selection.type === "text" ? uiCopy.workbench.action.rotateNarration : selection.type === "speech_balloon" ? uiCopy.workbench.action.rotateBalloon : selectedElement?.type === "image" && selectedElement.location.space === "overlay" ? uiCopy.workbench.objectEditor.cropPaperImageAria : uiCopy.workbench.objectEditor.cropFrameImageAria} disabled={selection.type !== "text" && selection.type !== "speech_balloon" && selection.type !== "comic_frame" && selectedElement?.type !== "image"} onClick={() => { if (objectInteractionMode === "crop") endCrop(); else beginCrop(); }}><Icon name="crop" /></button>
           <button type="button" aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.editBalloonAria : selection.type === "text" ? uiCopy.workbench.objectEditor.editNarrationAria : selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard} onClick={openSelectionEditor}><Icon name="edit" /></button>
@@ -4196,10 +4295,37 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
 
       <div className="canvas-global-actions" aria-label={uiCopy.common.navigation.globalEntry}><WorkbenchTour leftOpen={leftOpen} agentOpen={agentOpen} versionsOpen={versionsOpen} onLeftOpenChange={setCreationSpaceOpen} onAgentOpenChange={setAgentWorkspaceOpen} onVersionsOpenChange={setVersionWorkspaceOpen} /><button type="button" className={`global-icon-button ${versionsOpen ? "active" : ""}`} data-tour-id="version-history" aria-label={uiCopy.workbench.versions.entryAria} aria-pressed={versionsOpen} onClick={() => setVersionWorkspaceOpen(!versionsOpen)}><Icon name="history" /></button><button type="button" className="global-icon-button" aria-label={uiCopy.common.navigation.globalSettings} onClick={() => navigate(`/settings?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><Icon name="settings" /></button></div>
       <VersionPanel projectId={runtimeIds?.projectId} open={versionsOpen} refreshKey={`${state.fixture.snapshot?.documentId ?? "draft"}:${versionTimelineRefreshKey}`} onClose={() => setVersionsOpen(false)} onNewProposalDetected={handleNewProposalDetected} />
-      <AgentWorkspace className={`${agentOpen ? "open" : "closed"} ${agentAccessNoticeVisible ? "" : "notice-hidden"}`} aria-label={uiCopy.workbench.chat.panelAria}>
-        <div className="agent-head">
-          <div className="agent-head-actions"><span className="agent-session-entry"><button type="button" className={`session-drawer-trigger ${sessionDrawerOpen ? "active" : ""}`} aria-label={uiCopy.workbench.chat.sessionsAria} aria-expanded={sessionDrawerOpen} onClick={() => setSessionDrawerOpen((open) => { if (!open) setInspectorOpen(false); return !open; })}><Icon name="message" /></button></span><button type="button" aria-label={uiCopy.workbench.chat.collapseAria} onClick={() => setAgentOpen(false)}><Icon name="expand" /></button></div>
-        </div>
+      <AgentWorkspace className={agentOpen ? "open" : "closed"} aria-label={agentPanelView === "conversation" ? uiCopy.workbench.chat.panelAria : uiCopy.workbench.agentActivity.panelAria}>
+        <AgentPanelHeader
+          view={agentPanelView}
+          sessionDrawerOpen={sessionDrawerOpen}
+          onViewChange={(nextView) => {
+            setAgentPanelView(nextView);
+            if (nextView === "activity") setSessionDrawerOpen(false);
+          }}
+          onToggleSessions={() => {
+            if (agentPanelView === "activity") {
+              setAgentPanelView("conversation");
+              setInspectorOpen(false);
+              setSessionDrawerOpen(true);
+              return;
+            }
+            setSessionDrawerOpen((open) => {
+              if (!open) setInspectorOpen(false);
+              return !open;
+            });
+          }}
+          onCollapse={() => setAgentOpen(false)}
+        />
+        {sessionDrawerOpen ? <SessionDrawer aria-label={uiCopy.workbench.chat.currentSessionsAria}><header><div><small>{uiCopy.workbench.chat.currentCanvasLabel}</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label={uiCopy.workbench.chat.newSessionAria} onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder={uiCopy.workbench.chat.sessionNamePlaceholder} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.createSessionAria}><Icon name="add" /></button><button type="button" aria-label={uiCopy.workbench.chat.cancelNewSessionAria} onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="close" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.saveSessionNameAria}><Icon name="save" /></button><button type="button" aria-label={uiCopy.workbench.creationSpace.cancelRenameAria} onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="close" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={uiCopy.workbench.aria.manageConversation(conversation.title)} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />{uiCopy.workbench.chat.rename}</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="delete" />{uiCopy.common.action.delete}</button></div> : null}</SessionDrawer> : null}
+        <div className="agent-panel-content">
+          <section
+            id="agent-panel-conversation"
+            className={`agent-panel-view agent-conversation-panel ${agentPanelView === "conversation" ? "active" : "inactive"} ${agentAccessNoticeVisible ? "" : "notice-hidden"}`}
+            role="tabpanel"
+            aria-labelledby="agent-panel-conversation-tab"
+            aria-hidden={agentPanelView !== "conversation"}
+          >
         {agentAccessNoticeVisible ? <div className="agent-access-card" role="note">
           <span><Icon name="mcpConnection" /></span>
           <div>
@@ -4208,7 +4334,6 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           </div>
           <IconButton icon="close" label={uiCopy.agentAccess.dismissAria} className="agent-access-dismiss" onClick={() => setAgentAccessNoticeVisible(false)} />
         </div> : null}
-        {sessionDrawerOpen ? <SessionDrawer aria-label={uiCopy.workbench.chat.currentSessionsAria}><header><div><small>{uiCopy.workbench.chat.currentCanvasLabel}</small><strong>{workbenchMeta.chapterTitle}</strong></div><button type="button" aria-label={uiCopy.workbench.chat.newSessionAria} onClick={() => { setSessionCreateOpen((open) => !open); setSessionMenuId(null); setSessionRenameId(null); }}><Icon name="add" /></button></header>{sessionCreateOpen ? <form className="session-create-form" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}><input autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} placeholder={uiCopy.workbench.chat.sessionNamePlaceholder} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.createSessionAria}><Icon name="add" /></button><button type="button" aria-label={uiCopy.workbench.chat.cancelNewSessionAria} onClick={() => { setSessionCreateOpen(false); setSessionTitleDraft(""); }}><Icon name="close" /></button></form> : null}<div className="canvas-session-list">{state.conversations?.map((conversation) => <div className={`canvas-session-row ${conversation.id === runtimeIds?.conversationId ? "active" : ""}`} key={conversation.id}>{sessionRenameId === conversation.id ? <form className="session-rename-form" onSubmit={(event) => { event.preventDefault(); void renameConversation(conversation.id); }}><input autoFocus value={sessionRenameDraft} onChange={(event) => setSessionRenameDraft(event.target.value)} maxLength={80}/><button type="submit" aria-label={uiCopy.workbench.chat.saveSessionNameAria}><Icon name="save" /></button><button type="button" aria-label={uiCopy.workbench.creationSpace.cancelRenameAria} onClick={() => { setSessionRenameId(null); setSessionRenameDraft(""); }}><Icon name="close" /></button></form> : <><button type="button" className="session-select" onClick={() => void switchConversation(conversation.id)}><span><strong>{conversation.title}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString("zh-CN")}</small></span></button><button type="button" className="session-more" aria-label={uiCopy.workbench.aria.manageConversation(conversation.title)} aria-expanded={sessionMenuId === conversation.id} onClick={(event) => { const drawer = event.currentTarget.closest<HTMLElement>(".canvas-session-drawer"); const button = event.currentTarget.getBoundingClientRect(); const drawerRect = drawer?.getBoundingClientRect(); const top = drawerRect ? clampValue(button.top - drawerRect.top + button.height + 4, 58, Math.max(58, drawerRect.height - 72)) : 58; closeFloatingMenus("session"); setSessionMenuPosition({ top, right: 10 }); setSessionMenuId((id) => id === conversation.id ? null : conversation.id); setSessionRenameId(null); }}><Icon name="moreVertical" /></button></>}</div>)}</div>{sessionMenuConversation && sessionMenuPosition ? <div className="session-row-menu" style={{ top: sessionMenuPosition.top, right: sessionMenuPosition.right }}><button type="button" onClick={() => { setSessionRenameId(sessionMenuConversation.id); setSessionRenameDraft(sessionMenuConversation.title); setSessionMenuId(null); }}><Icon name="edit" />{uiCopy.workbench.chat.rename}</button><button type="button" onClick={() => void deleteConversation(sessionMenuConversation.id)}><Icon name="delete" />{uiCopy.common.action.delete}</button></div> : null}</SessionDrawer> : null}
         <div ref={agentMessagesRef} className="agent-messages" data-testid="agent-messages">
           {state.messages.map((message) => {
             const candidate = message.candidateId ? state.candidates.find((item) => item.id === message.candidateId) : undefined;
@@ -4243,8 +4368,16 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <textarea ref={composerInputRef} data-testid="agent-input" value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={activeTask?.status === "running" ? uiCopy.workbench.composer.queuedPlaceholder : uiCopy.workbench.composer.placeholder} />
           <div className="composer-actions"><input ref={chatUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleAgentUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/><button type="button" className="plus" aria-label={uiCopy.workbench.composer.addReferenceAria} onClick={() => chatUploadRef.current?.click()}><Icon name="add" /></button><span className="composer-mode-label"><Icon name="ai" />{uiCopy.common.action.createContent}</span><button type="button" className="at-button" aria-label={uiCopy.workbench.composer.referenceCurrentAria} onClick={() => addSelectionReference()}><Icon name="reference" /><span>{uiCopy.workbench.chat.referenceLabel}</span></button><button type="button" className="send" aria-label={activeTask?.status === "running" ? uiCopy.workbench.composer.taskRunningAria : composerAttachments.some((attachment) => attachment.status === "uploading") ? uiCopy.workbench.composer.imageUploadingAria : uiCopy.workbench.composer.sendAria} disabled={activeTask?.status === "running" || composerAttachments.some((attachment) => attachment.status === "uploading")} onClick={sendMessage}><Icon name="send" /></button></div>
         </div>
+          </section>
+          <AgentActivityPanel
+            key={runtimeIds?.projectId ?? "no-project"}
+            projectId={runtimeIds?.projectId}
+            active={agentOpen && agentPanelView === "activity"}
+            onNavigate={navigateFromAgentActivity}
+          />
+        </div>
       </AgentWorkspace>
-      {!agentOpen && !versionsOpen ? <button className="drawer-reopen right" type="button" onClick={openAgentWorkspace} aria-label={uiCopy.workbench.chat.expandAria}><Icon name="ai" /></button> : null}
+      {!agentOpen && !versionsOpen ? <button className="drawer-reopen right" type="button" onClick={() => openAgentWorkspace()} aria-label={uiCopy.workbench.chat.expandAria}><Icon name="ai" /></button> : null}
 
       <><input ref={dockUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { handleCanvasUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <input ref={frameImageUploadRef} type="file" accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp" hidden onChange={(event) => { void handleFrameImageUpload(event.target.files?.[0]); event.currentTarget.value = ""; }} />

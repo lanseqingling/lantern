@@ -237,6 +237,18 @@ test("registered domain routes preserve validation and response envelopes", asyn
   });
   assert.equal(chapterCreated.statusCode, 200);
   const chapter = chapterCreated.json().data as { chapterId: string };
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { chapterId: chapter.chapterId },
+    select: { id: true },
+  });
+  const activity = await app.inject({
+    method: "GET",
+    url: `/v1/projects/${project.id}/agent-activity`,
+    headers: { authorization },
+  });
+  assert.equal(activity.statusCode, 200);
+  assert.deepEqual(activity.json().data.groups, []);
+  assert.equal(typeof activity.json().data.observedAt, "string");
   const completedChapter = await app.inject({
     method: "PATCH",
     url: `/v1/comics/${comicId}/chapters/${chapter.chapterId}`,

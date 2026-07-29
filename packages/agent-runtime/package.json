@@ -8,6 +8,7 @@
     "./capability-registry": "./src/capability-registry.ts",
     "./composition-observation": "./src/composition-observation.ts",
     "./external-composition-service": "./src/external-composition-service.ts",
+    "./external-activity-adapter": "./src/external-activity-adapter.ts",
     "./context-builder": "./src/context-builder.ts",
     "./external-candidate-service": "./src/external-candidate-service.ts",
     "./external-edit-service": "./src/external-edit-service.ts",

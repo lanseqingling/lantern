@@ -1,4 +1,4 @@
-import type { Candidate, ReferencePlacement, WorkbenchFixture, WorkspaceChangeSet } from "@lantern/shared";
+import type { AgentActivityFeed, Candidate, ReferencePlacement, WorkbenchFixture, WorkspaceChangeSet } from "@lantern/shared";
 import type { ActiveTaskLike, AgentMessage, PersistedWorkbench } from "@/app/lib/workbench-state";
 import { normalizeAssetVersionDimensions, type AssetVersionWithNullableDimensions } from "@/app/lib/asset-version-normalization";
 import { normalizeResolvedResourceUrls } from "@/app/lib/document-asset-urls";
@@ -787,6 +787,25 @@ export function apiRestoreSnapshot(chapterId: string, expectedWorkingRevision: n
 
 export function apiGetVersionTimeline(projectId: string) {
   return api<VersionTimeline>(`/v1/projects/${encodeURIComponent(projectId)}/versions`);
+}
+
+export function apiGetAgentActivity(projectId: string, options: { cursor?: string; limit?: number } = {}) {
+  const query = new URLSearchParams();
+  if (options.cursor) query.set("cursor", options.cursor);
+  if (options.limit) query.set("limit", String(options.limit));
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return api<AgentActivityFeed>(`/v1/projects/${encodeURIComponent(projectId)}/agent-activity${suffix}`).then((feed) => ({
+    ...feed,
+    groups: feed.groups.map((group) => ({
+      ...group,
+      events: group.events.map((event) => ({
+        ...event,
+        ...(event.navigation?.kind === "asset_version" && event.navigation.contentUrl
+          ? { navigation: { ...event.navigation, contentUrl: apiUrl(event.navigation.contentUrl) } }
+          : {}),
+      })),
+    })),
+  }));
 }
 
 export async function apiGetVersionComparison(kind: "saved_snapshot" | "change_proposal", id: string) {

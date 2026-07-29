@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent-activity-service": "./src/agent-activity-service.ts",
     "./asset-library-service": "./src/asset-library-service.ts",
     "./asset-service": "./src/asset-service.ts",
     "./candidate-service": "./src/candidate-service.ts",

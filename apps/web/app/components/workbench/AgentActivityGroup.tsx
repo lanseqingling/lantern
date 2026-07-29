@@ -14,6 +14,7 @@ import { uiCopy } from "@/app/lib/ui-copy";
 
 function eventIcon(event: AgentActivityEvent): IconName {
   const value = `${event.projection.kind}:${event.projection.action}`;
+  if (event.projection.kind === "system_notice") return "agentActivity";
   if (value.includes("image") || value.includes("upload")) return "referenceImage";
   if (value.includes("frame") || value.includes("composition")) return "layout";
   if (value.includes("page") || value.includes("spread")) return "pages";
@@ -113,6 +114,21 @@ export function AgentActivityGroup({
           <ol id={eventListId} className="agent-activity-events">
             {group.events.map((event) => {
               const description = agentActivityEventDescription(event, group);
+              if (event.projection.kind === "system_notice") {
+                return (
+                  <li
+                    className="agent-activity-system-event"
+                    role="note"
+                    key={event.id}
+                  >
+                    <Icon name={eventIcon(event)} />
+                    <span title={description}>{description}</span>
+                    <time dateTime={event.completedAt ?? event.startedAt}>
+                      {formatAgentActivityTime(event.completedAt ?? event.startedAt)}
+                    </time>
+                  </li>
+                );
+              }
               const navigation = agentActivityEventNavigation(event, group);
               const details = agentActivityEventDetails(event);
               const eventExpanded = expandedEventIds.has(event.id);
@@ -137,7 +153,7 @@ export function AgentActivityGroup({
                 <li className={eventExpanded ? "expanded" : ""} key={event.id}>
                   <button
                     type="button"
-                    className="agent-activity-event-trigger"
+                    className={`agent-activity-event-trigger ${event.projection.kind === "proposal_created" ? "result" : ""}`}
                     aria-expanded={eventExpanded}
                     aria-controls={detailId}
                     aria-label={eventExpanded

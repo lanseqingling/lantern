@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentActivityEvent, AgentActivityGroup } from "@lantern/shared";
 import {
+  agentActivityFeedNeedsAttention,
   agentActivityEventDescription,
   agentActivityEventDetails,
   agentActivityEventNavigation,
+  agentActivityPollIntervalMs,
   agentActivityStatus,
   appendAgentActivityGroups,
   mergeAgentActivityGroups,
@@ -57,6 +59,20 @@ test("loading earlier records appends without duplicating current records", () =
     appendAgentActivityGroups([group("new")], [group("new"), group("older")]).map((item) => item.id),
     ["new", "older"],
   );
+});
+
+test("activity polling is fast only while a group is running", () => {
+  assert.equal(agentActivityPollIntervalMs([]), 10_000);
+  assert.equal(agentActivityPollIntervalMs([group("completed")]), 10_000);
+  assert.equal(agentActivityPollIntervalMs([group("running", { status: "running" })]), 1_000);
+});
+
+test("running and awaiting-review groups request attention on initial load", () => {
+  assert.equal(agentActivityFeedNeedsAttention([group("completed")]), false);
+  assert.equal(agentActivityFeedNeedsAttention([group("running", { status: "running" })]), true);
+  assert.equal(agentActivityFeedNeedsAttention([group("proposal", {
+    proposal: { id: "proposal-1", status: "available", reviewPath: "/reviews/proposal-1" },
+  })]), true);
 });
 
 test("proposal status is presented with text instead of color alone", () => {
@@ -112,6 +128,17 @@ test("event descriptions stay one-line friendly and proposal events resolve navi
   assert.deepEqual(
     agentActivityEventNavigation(proposalEvent, appliedGroup),
     { kind: "saved_snapshot", snapshotId: "snapshot-3" },
+  );
+  assert.equal(
+    agentActivityEventDescription(event({
+      projection: {
+        version: 1,
+        kind: "system_notice",
+        action: "activity.timed_out",
+        targets: [],
+      },
+    })),
+    "未检测到新的 Agent 活动，任务已标记为超时",
   );
 });
 

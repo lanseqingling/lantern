@@ -4,20 +4,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentActivityGroup as AgentActivityGroupData, AgentActivityNavigation } from "@lantern/shared";
 import { Icon } from "@lantern/ui";
 import { apiGetAgentActivity } from "@/app/lib/api-client";
-import { appendAgentActivityGroups, mergeAgentActivityGroups } from "@/app/lib/agent-activity-view";
+import {
+  agentActivityFeedNeedsAttention,
+  agentActivityPollIntervalMs,
+  appendAgentActivityGroups,
+  mergeAgentActivityGroups,
+} from "@/app/lib/agent-activity-view";
 import { uiCopy } from "@/app/lib/ui-copy";
 import { AgentActivityGroup } from "./AgentActivityGroup";
 
 const pageSize = 20;
-const pollIntervalMs = 6_000;
 
 export function AgentActivityPanel({
   projectId,
   active,
+  onInitialAttentionDetected,
   onNavigate,
 }: {
   projectId?: string;
   active: boolean;
+  onInitialAttentionDetected: () => void;
   onNavigate: (navigation: AgentActivityNavigation) => void;
 }) {
   const [groups, setGroups] = useState<AgentActivityGroupData[]>([]);
@@ -31,7 +37,9 @@ export function AgentActivityPanel({
   const requestInFlightRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const hasLoadedEarlierRef = useRef(false);
+  const hasReportedInitialAttentionRef = useRef(false);
   const requestGenerationRef = useRef(0);
+  const pollIntervalMs = agentActivityPollIntervalMs(groups);
 
   const loadLatest = useCallback(async (initial = false) => {
     if (!projectId || requestInFlightRef.current) return;
@@ -53,6 +61,14 @@ export function AgentActivityPanel({
       setError("");
       setRefreshWarning("");
       hasLoadedRef.current = true;
+      if (
+        initial
+        && !hasReportedInitialAttentionRef.current
+        && agentActivityFeedNeedsAttention(result.groups)
+      ) {
+        hasReportedInitialAttentionRef.current = true;
+        onInitialAttentionDetected();
+      }
     } catch {
       if (requestGeneration !== requestGenerationRef.current) return;
       if (hasLoadedRef.current) {
@@ -66,7 +82,7 @@ export function AgentActivityPanel({
         if (initial) setInitialLoading(false);
       }
     }
-  }, [projectId]);
+  }, [onInitialAttentionDetected, projectId]);
 
   useEffect(() => {
     const timer = projectId
@@ -80,10 +96,19 @@ export function AgentActivityPanel({
   }, [loadLatest, projectId]);
 
   useEffect(() => {
-    if (!active || !projectId) return;
-    const timer = window.setInterval(() => void loadLatest(false), pollIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [active, loadLatest, projectId]);
+    if (!projectId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      await loadLatest(false);
+      if (!cancelled) timer = window.setTimeout(() => void poll(), pollIntervalMs);
+    };
+    timer = window.setTimeout(() => void poll(), pollIntervalMs);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [loadLatest, pollIntervalMs, projectId]);
 
   const loadEarlier = async () => {
     if (!projectId || !nextCursor || loadingEarlier || requestInFlightRef.current) return;

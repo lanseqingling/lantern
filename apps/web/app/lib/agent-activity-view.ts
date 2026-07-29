@@ -200,6 +200,8 @@ export function agentActivityEventDescription(event: AgentActivityEvent, group?:
     description = group?.proposal?.status === "applied" && group.proposal.acceptedSnapshotId
       ? uiCopy.workbench.agentActivity.event.formalVersionCreated
       : uiCopy.workbench.agentActivity.event.proposalCreated;
+  } else if (event.projection.kind === "system_notice") {
+    description = uiCopy.workbench.agentActivity.event.systemTimedOut;
   } else if (event.projection.action.endsWith(".upload_prepare")) {
     description = uiCopy.workbench.agentActivity.event.uploadPrepared;
   } else if (event.projection.action.endsWith(".image.attach")) {
@@ -262,4 +264,13 @@ export function appendAgentActivityGroups(
 ) {
   const currentIds = new Set(current.map((group) => group.id));
   return [...current, ...incoming.filter((group) => !currentIds.has(group.id))];
+}
+
+export function agentActivityPollIntervalMs(groups: AgentActivityGroup[]) {
+  return groups.some((group) => group.status === "running") ? 1_000 : 10_000;
+}
+
+export function agentActivityFeedNeedsAttention(groups: AgentActivityGroup[]) {
+  return groups.some((group) =>
+    group.status === "running" || group.proposal?.status === "available");
 }

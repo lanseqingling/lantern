@@ -4,7 +4,9 @@ import { idempotencyKeySchema } from "./resource-capabilities";
 
 export const agentDraftFinishInputSchema = z.strictObject({
   draft: z.string().trim().min(1).max(2048),
-  title: z.string().trim().min(1).max(120).optional(),
+  title: z.string().trim().min(1).max(120)
+    .describe("与本次用户请求一致的简洁任务名，用作活动分组与方案标题。")
+    .optional(),
   summary: z.string().trim().max(1200).optional(),
   idempotencyKey: idempotencyKeySchema,
 });
@@ -25,7 +27,7 @@ export const agentDraftCapabilities = [{
   id: "agent_draft.finish",
   version: 1,
   execution: "synchronous",
-  description: "在用户要求的编辑任务完成后冻结当前 AgentDraft，形成可从 Lantern 历史与草稿入口查看的 ChangeProposal，并返回同一版本对比界面的本地链接。该操作不会修改或保存正式工作稿；只有用户在 Lantern 中明确应用后，方案才进入正式版本历史。",
+  description: "在用户要求的编辑任务完成后冻结当前 AgentDraft，形成可从 Lantern 历史与草稿入口查看的 ChangeProposal，并返回同一版本对比界面的本地链接。title 应使用与本次用户请求一致的简洁任务名，作为活动分组与方案标题。该操作不会修改或保存正式工作稿；只有用户在 Lantern 中明确应用后，方案才进入正式版本历史。",
   inputSchema: agentDraftFinishInputSchema,
   outputSchema: agentDraftFinishOutputSchema,
   target: { required: true, types: ["agent_draft"], min: 1, max: 1 },
@@ -42,4 +44,3 @@ export const agentDraftCapabilities = [{
 export function isAgentDraftCapabilityId(id: string) {
   return agentDraftCapabilities.some((capability) => capability.id === id);
 }
-

@@ -38,6 +38,15 @@ function jsonInput(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
+function timedOutActivityProjection() {
+  return agentActivityProjectionSchema.parse({
+    version: 1,
+    kind: "system_notice",
+    action: "activity.timed_out",
+    targets: [],
+  });
+}
+
 async function ownedExternalDraft(ownerUserId: string, draftId: string) {
   const draft = await prisma.agentDraft.findFirst({
     where: {
@@ -352,7 +361,7 @@ export async function getProjectAgentActivity(
   });
   if (!project) throw new AppError("not_found", "创作空间不存在。", 404);
   const now = input.now ?? new Date();
-  await prisma.agentActivityGroup.updateMany({
+  const expiredGroups = await prisma.agentActivityGroup.findMany({
     where: {
       ownerUserId,
       projectId,
@@ -360,8 +369,34 @@ export async function getProjectAgentActivity(
       observedStatus: AgentActivityObservedStatus.RUNNING,
       observedExpiresAt: { lte: now },
     },
-    data: { observedStatus: AgentActivityObservedStatus.TIMED_OUT },
+    select: { id: true, observedExpiresAt: true },
   });
+  for (const expiredGroup of expiredGroups) {
+    const timedOutAt = expiredGroup.observedExpiresAt ?? now;
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.agentActivityGroup.updateMany({
+        where: {
+          id: expiredGroup.id,
+          observedStatus: AgentActivityObservedStatus.RUNNING,
+          observedExpiresAt: { lte: now },
+        },
+        data: { observedStatus: AgentActivityObservedStatus.TIMED_OUT },
+      });
+      if (updated.count !== 1) return;
+      await tx.agentActivityEvent.create({
+        data: {
+          groupId: expiredGroup.id,
+          dedupeKey: `system:timed-out:${timedOutAt.toISOString()}`,
+          toolName: "lantern_system",
+          eventType: "system_notice",
+          observedStatus: AgentActivityEventStatus.SUCCEEDED,
+          projection: jsonInput(timedOutActivityProjection()),
+          startedAt: timedOutAt,
+          completedAt: timedOutAt,
+        },
+      });
+    });
+  }
   const cursor = decodeCursor(input.cursor);
   const limit = Math.min(50, Math.max(1, input.limit ?? 20));
   const rows = await prisma.agentActivityGroup.findMany({

@@ -59,7 +59,7 @@ When the request asks for a page-composition review, character or scene consiste
 - Generated layout proposals, multi-object creative results, and other effects declared as `candidate` remain Candidates until Lantern reports that they were merged into a draft or otherwise applied.
 - A host Agent may merge an available Candidate into an AgentDraft in the same user request. This does not authorize the host to accept or save the finished ChangeProposal.
 - Never treat a Candidate, task result, or conversation as already applied unless Lantern reports that state.
-- After the first chapter-content mutation, keep the returned `draft`, read fresh `source: agent_draft` context, and discard every older handle. When the requested task is complete, call `lantern_agent_draft_finish` once and keep its `reviewUrl` for the final review action.
+- After the first chapter-content mutation, keep the returned `draft`, read fresh `source: agent_draft` context, and discard every older handle. When the requested task is complete, call `lantern_agent_draft_finish` exactly once, use a concise name for the creator's task as its `title`, and keep its `reviewUrl` for the final review action.
 - Never call an acceptance or save action for a ChangeProposal unless Lantern provides a verifiable user authorization path. The default trusted action is the creator clicking in Lantern's comparison view.
 - Refresh context after a stale or expired handle, draft revision conflict, or meaningful project change.
 - Destructive comic, chapter, or shared-resource capabilities must confirm the exact resource reference. Destructive edits isolated inside one AgentDraft do not require per-object interruption; the creator reviews their complete effect before acceptance.

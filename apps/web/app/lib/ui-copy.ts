@@ -1162,6 +1162,7 @@ export const uiCopy = {
         imagesInspected: (count: number) => `查看了 ${count} 张资源图片`,
         proposalCreated: "生成了方案稿",
         formalVersionCreated: "已应用并保存为正式版本",
+        systemTimedOut: "未检测到新的 Agent 活动，任务已标记为超时",
         uploadPrepared: "准备了图片上传",
         imageAttached: "上传并登记了资源图片",
         pageCreated: "创建了页面",

@@ -2018,6 +2018,15 @@ test("external MCP activity is observed without becoming an Agent task controlle
       now: new Date(Date.now() + EXTERNAL_AGENT_ACTIVITY_TIMEOUT_MS + 1_000),
     });
     assert.equal(timedOutFeed.groups[0]?.status, "timed_out");
+    assert.equal(timedOutFeed.groups[0]?.eventCount, 5);
+    assert.equal(
+      timedOutFeed.groups[0]?.events.at(-1)?.projection.action,
+      "activity.timed_out",
+    );
+    const repeatedTimedOutFeed = await getProjectAgentActivity(ids.user, ids.project, {
+      now: new Date(Date.now() + EXTERNAL_AGENT_ACTIVITY_TIMEOUT_MS + 2_000),
+    });
+    assert.equal(repeatedTimedOutFeed.groups[0]?.eventCount, 5);
     assert.equal(
       (await prisma.agentDraft.findUniqueOrThrow({ where: { id: created.draft.id } })).status,
       "ACTIVE",
@@ -2056,7 +2065,10 @@ test("external MCP activity is observed without becoming an Agent task controlle
     assert.equal(completedFeed.groups[0]?.title, "开场画格调整");
     assert.equal(completedFeed.groups[0]?.proposal?.status, "available");
     assert.match(completedFeed.groups[0]?.proposal?.reviewPath ?? "", /^\/reviews\//);
-    assert.equal(completedFeed.groups[0]?.events.at(-1)?.eventType, "proposal_created");
+    assert.equal(
+      completedFeed.groups[0]?.events.some((event) => event.eventType === "proposal_created"),
+      true,
+    );
 
     const proposalId = completedFeed.groups[0]!.proposal!.id;
     const applied = await applyChangeProposal(ids.user, proposalId, 1);

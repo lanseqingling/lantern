@@ -7,7 +7,7 @@ import type {
   WorkspaceChangeSet,
   WorkspaceCommand,
 } from "@lantern/shared";
-import { changeSetCommands, normalizeStoryboardBeats, orderedUnitSurfaces, validateComicDocument, workspaceChangeSetSchema } from "@lantern/shared";
+import { changeSetCommands, normalizeStoryboardBeats, orderedUnitSurfaces, reframeFramePreservingContent, validateComicDocument, workspaceChangeSetSchema } from "@lantern/shared";
 import { planEditorCapability, type EditorCapabilityContext, type EditorCapabilityId } from "./capabilities";
 
 export * from "./capabilities";
@@ -178,7 +178,10 @@ export function applyWorkspaceChangeSet(
       continue;
     }
     if (operation.type === "resize_frame") {
-      findFrame(operation.unitId, operation.frameId).frame.geometry = structuredClone(operation.geometry);
+      const located = findFrame(operation.unitId, operation.frameId);
+      const reframed = reframeFramePreservingContent(located.frame, operation.geometry);
+      located.frame.geometry = reframed.geometry;
+      located.frame.layers = reframed.layers;
       continue;
     }
     if (operation.type === "set_frame_surface_scope") {

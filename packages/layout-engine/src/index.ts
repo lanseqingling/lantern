@@ -10,7 +10,7 @@ import type {
   StoryboardBeat,
   TextLayer,
 } from "@lantern/shared";
-import { validateComicDocument } from "@lantern/shared";
+import { DEFAULT_BALLOON_STROKE_WIDTH, DEFAULT_FRAME_BORDER_WIDTH, validateComicDocument } from "@lantern/shared";
 
 export type ChapterLayoutPlan = {
   format: ComicFormat;
@@ -60,13 +60,13 @@ function frameForBeat(beat: StoryboardBeat, index: number, rect: typeof pageRect
       id: `balloon-${beat.id}`, kind: "balloon", dialogueId: dialogue.id,
       transform: { x: 18 / rect.width, y: 18 / rect.height, width: balloonWidth, height: Math.min(0.36, 92 / rect.height) },
       tailTarget: { x: 0.6, y: 0.68 }, shape: index === 2 ? "caption_box" : "normal", name: `第 ${index + 1} 格气泡`,
-      style: { fontFamily: "ui-sans-serif", fontSize: 18, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: 3 },
+      style: { fontFamily: "ui-sans-serif", fontSize: 18, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: DEFAULT_BALLOON_STROKE_WIDTH },
     }],
   } : undefined;
   const frame: Frame = {
     id: `frame-${beat.id}`, geometry: rect, zIndex: index + 1, name: `画格 ${index + 1}`,
     storyRefs: [{ storyboardBeatId: beat.id, storyboardBeatVersionId: beat.versionId, role: "primary" }],
-    border: { color: "#111111", width: 4, style: "solid" }, shape: { kind: "rect" }, mask: { mode: "clip" },
+    border: { color: "#111111", width: DEFAULT_FRAME_BORDER_WIDTH, style: "solid" }, shape: { kind: "rect" }, mask: { mode: "clip" },
     layers: [
       ...(art.length ? [{ id: `frame-${beat.id}-art`, kind: "art" as const, name: "画面", zIndex: 10, visible: true, overflow: "clip" as const, elements: art }] : []),
       ...(textLayer ? [textLayer] : []),

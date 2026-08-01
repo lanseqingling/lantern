@@ -4,6 +4,8 @@
  * Frame), visual composition (Layer/Element) and workflow state are separate
  * domains. Persisted LCD data never contains signed or proxy URLs.
  */
+import { frameBalloonCoordinateBounds } from "./defaults";
+
 export type ComicFormat = "page" | "vertical" | "four_panel";
 export type ReadingDirection = "ltr" | "rtl" | "ttb";
 
@@ -419,6 +421,63 @@ export function deriveLocalTransform(frame: Geometry, child: Geometry): LocalTra
     height: child.height / frame.height,
     rotate: child.rotate,
   };
+}
+
+const clampValue = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+
+/**
+ * Changes the frame viewport while keeping the projected source image fixed.
+ * Source bounds still win when expanding past the available image.
+ */
+export function reframeImageCrop(crop: NormalizedRect, previousFrame: Geometry, nextFrame: Geometry): NormalizedRect {
+  const width = Math.min(1, crop.width * nextFrame.width / previousFrame.width);
+  const height = Math.min(1, crop.height * nextFrame.height / previousFrame.height);
+  const x = crop.x + (nextFrame.x - previousFrame.x) * crop.width / previousFrame.width;
+  const y = crop.y + (nextFrame.y - previousFrame.y) * crop.height / previousFrame.height;
+  return {
+    x: clampValue(x, 0, 1 - width),
+    y: clampValue(y, 0, 1 - height),
+    width,
+    height,
+  };
+}
+
+/** Re-bases frame-local elements so resizing the frame does not scale them. */
+export function reframeFramePreservingContent(frame: Frame, geometry: Geometry): Frame {
+  const layers = frame.layers.map((layer) => ({
+    ...layer,
+    elements: layer.elements.map((element): FrameElement => {
+      const fillsArtLayer = element.kind === "image" && layer.kind === "art"
+        && Math.abs(element.transform.x) < 1e-9
+        && Math.abs(element.transform.y) < 1e-9
+        && Math.abs(element.transform.width - 1) < 1e-9
+        && Math.abs(element.transform.height - 1) < 1e-9;
+      if (fillsArtLayer && element.kind === "image") {
+        return { ...element, crop: reframeImageCrop(element.crop, frame.geometry, geometry) };
+      }
+      const absoluteGeometry = resolveLocalTransform(frame.geometry, element.transform);
+      let transform = deriveLocalTransform(geometry, absoluteGeometry);
+      if (element.kind === "balloon") {
+        const bounds = frameBalloonCoordinateBounds(transform);
+        transform = {
+          ...transform,
+          x: clampValue(transform.x, bounds.minX, bounds.maxX - transform.width),
+          y: clampValue(transform.y, bounds.minY, bounds.maxY - transform.height),
+        };
+        const absoluteTail = element.tailTarget ? {
+          x: frame.geometry.x + element.tailTarget.x * frame.geometry.width,
+          y: frame.geometry.y + element.tailTarget.y * frame.geometry.height,
+        } : undefined;
+        return {
+          ...element,
+          transform,
+          ...(absoluteTail ? { tailTarget: { x: (absoluteTail.x - geometry.x) / geometry.width, y: (absoluteTail.y - geometry.y) / geometry.height } } : {}),
+        };
+      }
+      return { ...element, transform };
+    }),
+  }) as FrameLayer);
+  return { ...frame, geometry: { ...geometry }, layers };
 }
 
 export function resolveLocalTransform(frame: Geometry, local: LocalTransform): Geometry {

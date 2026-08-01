@@ -1,5 +1,8 @@
 import { z } from "zod";
 import {
+  DEFAULT_BALLOON_STROKE_WIDTH,
+  DEFAULT_FRAME_BORDER_WIDTH,
+  frameBalloonTransformKeepsSafeArea,
   balloonElementSchema,
   comicDocumentSchema,
   geometrySchema,
@@ -168,30 +171,84 @@ function availableFrameGeometry(unit: PresentationUnit, preferred: { x: number; 
   const surface = unit.surfaces.find((candidate) => preferred.x >= candidate.geometry.x && preferred.x <= candidate.geometry.x + candidate.geometry.width && preferred.y >= candidate.geometry.y && preferred.y <= candidate.geometry.y + candidate.geometry.height) ?? unit.surfaces[0];
   if (!surface) throw new Error("页面没有可放置画格的纸面");
   const gutter = unit.layoutPolicy.gutter ?? 12;
-  const width = size ? Math.min(size.width, surface.geometry.width) : Math.min(240, Math.max(120, surface.geometry.width * .38));
-  const height = size ? Math.min(size.height, surface.geometry.height) : Math.min(190, Math.max(100, width * .72), surface.geometry.height * .34);
-  const minX = surface.geometry.x;
-  const minY = surface.geometry.y;
-  const maxX = surface.geometry.x + surface.geometry.width - width;
-  const maxY = surface.geometry.y + surface.geometry.height - height;
-  const preferredGeometry = {
-    x: clamp(preferred.x - width / 2, minX, maxX),
-    y: clamp(preferred.y - height / 2, minY, maxY),
-    width,
-    height,
-  };
   const occupied = unit.frames;
   const allowed = (geometry: Geometry) => unit.layoutPolicy.frameOverlap === "allow" || !occupied.some((frame) => overlaps(geometry, frame.geometry, gutter));
-  if (allowed(preferredGeometry)) return preferredGeometry;
-  const step = Math.max(20, gutter * 2);
-  const candidates: Geometry[] = [];
-  for (let y = minY; y <= maxY + .5; y += step) {
-    for (let x = minX; x <= maxX + .5; x += step) candidates.push({ x: Math.min(x, maxX), y: Math.min(y, maxY), width, height });
+
+  const defaultWidth = Math.min(240, Math.max(120, surface.geometry.width * .38));
+  const defaultHeight = Math.min(190, Math.max(100, defaultWidth * .72), surface.geometry.height * .34);
+  if (size) {
+    const width = Math.min(size.width, surface.geometry.width);
+    const height = Math.min(size.height, surface.geometry.height);
+    const minX = surface.geometry.x;
+    const minY = surface.geometry.y;
+    const maxX = surface.geometry.x + surface.geometry.width - width;
+    const maxY = surface.geometry.y + surface.geometry.height - height;
+    const preferredGeometry = { x: clamp(preferred.x - width / 2, minX, maxX), y: clamp(preferred.y - height / 2, minY, maxY), width, height };
+    if (allowed(preferredGeometry)) return preferredGeometry;
+    const step = Math.max(20, gutter * 2);
+    const candidates: Geometry[] = [];
+    for (let y = minY; y <= maxY + .5; y += step) {
+      for (let x = minX; x <= maxX + .5; x += step) candidates.push({ x: Math.min(x, maxX), y: Math.min(y, maxY), width, height });
+    }
+    candidates.sort((left, right) => Math.hypot(left.x - preferredGeometry.x, left.y - preferredGeometry.y) - Math.hypot(right.x - preferredGeometry.x, right.y - preferredGeometry.y));
+    const available = candidates.find(allowed);
+    if (!available) throw new Error("当前纸张没有足够空间新增画格，请先移动或缩小现有画格");
+    return available;
   }
-  candidates.sort((left, right) => Math.hypot(left.x - preferredGeometry.x, left.y - preferredGeometry.y) - Math.hypot(right.x - preferredGeometry.x, right.y - preferredGeometry.y));
-  const available = candidates.find(allowed);
-  if (!available) throw new Error("当前纸张没有足够空间新增画格，请先移动或缩小现有画格");
-  return available;
+
+  const minimumWidth = Math.min(96, surface.geometry.width);
+  const minimumHeight = Math.min(72, surface.geometry.height);
+  const maximumWidth = Math.min(defaultWidth + 40, surface.geometry.width);
+  const maximumHeight = Math.min(defaultHeight + 32, surface.geometry.height);
+  const steppedSizes = (minimum: number, maximum: number, preferredSize: number) => {
+    const values = new Set<number>([minimum, maximum, Math.min(maximum, Math.max(minimum, preferredSize))]);
+    for (let value = minimum; value <= maximum; value += 8) values.add(Math.min(value, maximum));
+    return [...values];
+  };
+  const widths = steppedSizes(minimumWidth, maximumWidth, defaultWidth);
+  const heights = steppedSizes(minimumHeight, maximumHeight, defaultHeight);
+  const surfaceRight = surface.geometry.x + surface.geometry.width;
+  const surfaceBottom = surface.geometry.y + surface.geometry.height;
+  const preferredArea = defaultWidth * defaultHeight;
+  const preferredAspect = defaultWidth / defaultHeight;
+  const locationStep = Math.max(4, gutter / 2);
+  let best: { geometry: Geometry; score: [number, number, number, number] } | undefined;
+  const precedes = (left: [number, number, number, number], right: [number, number, number, number]) => {
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) return left[index]! < right[index]!;
+    }
+    return false;
+  };
+
+  for (const width of widths) {
+    for (const height of heights) {
+      const minX = surface.geometry.x;
+      const minY = surface.geometry.y;
+      const maxX = surfaceRight - width;
+      const maxY = surfaceBottom - height;
+      const xValues = new Set<number>([clamp(preferred.x - width / 2, minX, maxX), minX, maxX]);
+      const yValues = new Set<number>([clamp(preferred.y - height / 2, minY, maxY), minY, maxY]);
+      occupied.forEach((frame) => {
+        xValues.add(clamp(frame.geometry.x - gutter - width, minX, maxX));
+        xValues.add(clamp(frame.geometry.x + frame.geometry.width + gutter, minX, maxX));
+        yValues.add(clamp(frame.geometry.y - gutter - height, minY, maxY));
+        yValues.add(clamp(frame.geometry.y + frame.geometry.height + gutter, minY, maxY));
+      });
+      for (const x of xValues) {
+        for (const y of yValues) {
+          const geometry = { x, y, width, height };
+          if (!allowed(geometry)) continue;
+          const distance = Math.hypot(x + width / 2 - preferred.x, y + height / 2 - preferred.y);
+          const areaDeviation = Math.abs(width * height - preferredArea) / preferredArea;
+          const aspectDeviation = Math.abs(Math.log(width / height / preferredAspect));
+          const score: [number, number, number, number] = [Math.floor(distance / locationStep), areaDeviation + aspectDeviation * .2, distance, -width * height];
+          if (!best || precedes(score, best.score)) best = { geometry, score };
+        }
+      }
+    }
+  }
+  if (!best) throw new Error("点击位置附近连最小画格也放不下，请先移动或缩小现有画格");
+  return best.geometry;
 }
 
 function readingIndexForGeometry(context: EditorCapabilityContext, unit: PresentationUnit, geometry: Geometry) {
@@ -214,7 +271,7 @@ function createEmptyFrame(context: EditorCapabilityContext, unit: PresentationUn
     geometry,
     zIndex: Math.max(0, ...unit.frames.map((frame) => frame.zIndex)) + 1,
     storyRefs: [],
-    border: { color: "#111111", width: 4, style: "solid" },
+    border: { color: "#111111", width: DEFAULT_FRAME_BORDER_WIDTH, style: "solid" },
     shape: { kind: "rect" },
     mask: { mode: "clip" },
     constraints: ["stay_on_surface"],
@@ -238,7 +295,7 @@ function dialogueReferenceCount(context: EditorCapabilityContext, dialogueId: st
 
 const createFrameCapability = defineCapability({
   id: "create_frame",
-  version: 2,
+  version: 3,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
     position: z.strictObject({ x: z.number(), y: z.number() }).optional(),
@@ -537,7 +594,7 @@ const createDialogueBalloonCapability = defineCapability({
       id: context.createId("balloon"), kind: "balloon", dialogueId, transform,
       tailTarget: { x: clamp(input.position.x + .08, 0, 1), y: clamp(input.position.y + .25, 0, 1) },
       shape: "normal", name: "新对白",
-      style: { fontFamily: "ui-sans-serif", fontSize: 18, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: 3 },
+      style: { fontFamily: "ui-sans-serif", fontSize: 18, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: DEFAULT_BALLOON_STROKE_WIDTH },
     };
     commands.push(
       { type: "add_dialogue", dialogue },
@@ -687,7 +744,7 @@ const createPageDialogueBalloonCapability = defineCapability({
       transform: { x: clamp(input.position.x - width / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - width), y: clamp(input.position.y - height / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - height), width, height },
       tailTarget: { x: clamp(input.position.x + width * .3, surface.geometry.x, surface.geometry.x + surface.geometry.width), y: clamp(input.position.y + height * .8, surface.geometry.y, surface.geometry.y + surface.geometry.height) },
       shape: "normal", name: "纸面对白",
-      style: { fontFamily: "ui-sans-serif", fontSize: 18, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: 3 },
+      style: { fontFamily: "ui-sans-serif", fontSize: 18, textColor: "#172026", fill: "#ffffff", stroke: "#111111", strokeWidth: DEFAULT_BALLOON_STROKE_WIDTH },
     };
     return [
       { type: "add_dialogue", dialogue: { id: dialogueId, content: input.content ?? "新对白" } },
@@ -698,10 +755,9 @@ const createPageDialogueBalloonCapability = defineCapability({
 });
 
 export const narrationDefaults = {
-  fontSize: 24,
+  fontSize: 20,
   strokeWidth: 2,
-  horizontal: { width: 144, height: 60 },
-  vertical: { width: 60, height: 144 },
+  horizontal: { width: 144, height: 30 },
 } as const;
 
 const createNarrationCapability = defineCapability({
@@ -806,12 +862,10 @@ const updateNarrationCapability = defineCapability({
     const nextWritingMode = input.changes.writingMode;
     const currentWritingMode = element.style.writingMode ?? "horizontal";
     if (nextWritingMode && nextWritingMode !== currentWritingMode) {
-      const source = narrationDefaults[currentWritingMode];
-      const target = narrationDefaults[nextWritingMode];
       const surface = layer.surfaceId ? unit.surfaces.find((candidate) => candidate.id === layer.surfaceId) : undefined;
       const bounds = surface?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
-      const width = Math.min(bounds.width, element.transform.width > source.width + .5 ? element.transform.width : target.width);
-      const height = Math.min(bounds.height, element.transform.height > source.height + .5 ? element.transform.height : target.height);
+      const width = Math.min(bounds.width, element.transform.height);
+      const height = Math.min(bounds.height, element.transform.width);
       const centerX = element.transform.x + element.transform.width / 2;
       const centerY = element.transform.y + element.transform.height / 2;
       commands.push({
@@ -1321,7 +1375,7 @@ const reorderFrameReadingCapability = defineCapability({
 
 const resizeFrameCapability = defineCapability({
   id: "resize_frame",
-  version: 2,
+  version: 3,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
     frameId: z.string().min(1),
@@ -1357,7 +1411,7 @@ const editableFrameShapeSchema = z.discriminatedUnion("kind", [
 
 const reshapeFrameCapability = defineCapability({
   id: "reshape_frame",
-  version: 2,
+  version: 3,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
     frameId: z.string().min(1),
@@ -1427,7 +1481,7 @@ const updateFrameBorderCapability = defineCapability({
 
 const updateFrameBleedCapability = defineCapability({
   id: "update_frame_bleed",
-  version: 1,
+  version: 2,
   inputSchema: z.strictObject({
     unitId: z.string().min(1),
     frameId: z.string().min(1),
@@ -1520,7 +1574,10 @@ const setElementTransformCapability = defineCapability({
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    findLocatedElement(context, input);
+    const { element } = findLocatedElement(context, input);
+    if (input.frameId && element.kind === "balloon" && !frameBalloonTransformKeepsSafeArea(input.transform)) {
+      throw new Error("格内气泡必须在画格内保留可选择区域");
+    }
     return [{ type: "set_element_transform", ...input }];
   },
 });
@@ -1556,6 +1613,9 @@ const updateBalloonCapability = defineCapability({
   execute(input, context) {
     const { element } = findLocatedElement(context, input);
     if (element.kind !== "balloon") throw new Error(`missing BalloonElement: ${input.elementId}`);
+    if (input.frameId && input.changes.transform && !frameBalloonTransformKeepsSafeArea(input.changes.transform)) {
+      throw new Error("格内气泡必须在画格内保留可选择区域");
+    }
     const changes = input.changes.shape === "cut_corner" && !input.changes.cutCorners
       ? { ...input.changes, cutCorners: createBalloonCutCorners(`${element.id}:${context.createId("cut-corners")}`) }
       : input.changes;

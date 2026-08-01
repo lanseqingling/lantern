@@ -18,6 +18,7 @@ If only observation is available, answer questions and offer composition finding
 - A fixed `AssetVersion` identifies source content. A placed image element owns its placement, transform, and crop; changing those does not rewrite the Asset Version.
 
 Do not infer ownership from where pixels happen to appear. Use the structure projection's ownership, anchoring, clipping, and surface fields.
+Treat clipped overflow and visually joined outlines as render projections rather than ownership or identity changes.
 
 ## Use two kinds of evidence together
 

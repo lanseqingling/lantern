@@ -11,7 +11,7 @@ import type {
   TextElement,
   UnitOverlayLayer,
 } from "./lcd/types";
-import { resolveLocalTransform } from "./lcd/types";
+import { balloonCutCornerPoints, resolveLocalTransform } from "./lcd/types";
 
 export type SceneFrameNode = {
   frame: Frame;
@@ -57,6 +57,11 @@ export type BalloonStrokeWidths = {
   tail: number;
 };
 
+export type BalloonOverlapMask =
+  | { shape: "ellipse"; cx: number; cy: number; rx: number; ry: number; expansion: number }
+  | { shape: "rect"; x: number; y: number; width: number; height: number; rx: number; ry: number; expansion: number }
+  | { shape: "polygon"; points: Point[]; expansion: number };
+
 const FRAME_STRIDE = 10_000;
 const FRAME_CONTENT_OFFSET = 100;
 const FRAME_BORDER_OFFSET = 9_000;
@@ -93,7 +98,9 @@ export function projectComicRenderScene(document: ComicDocument, unit: Presentat
           source: "frame",
           frame,
           layerId: layer.id,
-          clipFrame: frame.mask.mode !== "visible" && effectiveOverflow(unit.layoutPolicy.defaultOverflow, layer.overflow, element) !== "visible" ? frame : undefined,
+          // Frame balloons can be positioned across an edge, but remain frame
+          // content: their overflow is always hidden by the frame shape.
+          clipFrame: element.kind === "balloon" || frame.mask.mode !== "visible" && effectiveOverflow(unit.layoutPolicy.defaultOverflow, layer.overflow, element) !== "visible" ? frame : undefined,
           dialogueText: element.kind === "balloon" ? dialogues.get(element.dialogueId) ?? "" : undefined,
         });
       });
@@ -137,9 +144,98 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 
 export function projectBalloonStrokeWidths(balloon: Pick<BalloonElement, "shape" | "style">): BalloonStrokeWidths {
   const base = balloon.style.strokeWidth;
-  return balloon.shape === "normal"
-    ? { outline: base * 1.25, tail: base * 0.7 }
-    : { outline: base * 0.9, tail: base * 0.9 };
+  return { outline: base, tail: base };
+}
+
+const balloonBodyBounds = (balloon: BalloonElement, geometry: Geometry) => {
+  const insetX = balloon.shape === "caption_box" ? .015 : balloon.shape === "cut_corner" ? 0 : .02;
+  const insetY = balloon.shape === "caption_box" ? .015 : balloon.shape === "cut_corner" ? 0 : .04;
+  return {
+    x: geometry.x + geometry.width * insetX,
+    y: geometry.y + geometry.height * insetY,
+    width: geometry.width * (1 - insetX * 2),
+    height: geometry.height * (1 - insetY * 2),
+  };
+};
+
+const boundsOverlap = (left: BalloonElement, leftGeometry: Geometry, right: BalloonElement, rightGeometry: Geometry) => {
+  const a = balloonBodyBounds(left, leftGeometry);
+  const b = balloonBodyBounds(right, rightGeometry);
+  return Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x)
+    && Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y);
+};
+
+const mergeStyleKey = (balloon: BalloonElement) => [
+  balloon.style.fill,
+  balloon.style.stroke,
+  balloon.style.strokeWidth,
+].join("\u0000");
+
+const projectOverlapMask = (partner: SceneElementNode & { element: BalloonElement }, target: SceneElementNode): BalloonOverlapMask => {
+  const x = (value: number) => (partner.geometry.x + value * partner.geometry.width - target.geometry.x) / target.geometry.width * 100;
+  const y = (value: number) => (partner.geometry.y + value * partner.geometry.height - target.geometry.y) / target.geometry.height * 100;
+  // One rendered pixel is enough to absorb the mask's antialiased edge. The
+  // mask must not scale with the balloon or grow into its exterior outline.
+  const expansion = 1;
+  if (partner.element.shape === "caption_box") {
+    return {
+      shape: "rect",
+      x: x(.015),
+      y: y(.015),
+      width: partner.geometry.width / target.geometry.width * 97,
+      height: partner.geometry.height / target.geometry.height * 97,
+      rx: partner.geometry.width / target.geometry.width * 3,
+      ry: partner.geometry.height / target.geometry.height * 3,
+      expansion,
+    };
+  }
+  if (partner.element.shape === "cut_corner") {
+    return {
+      shape: "polygon",
+      points: balloonCutCornerPoints(partner.element).map((point) => ({ x: x(point.x), y: y(point.y) })),
+      expansion,
+    };
+  }
+  return {
+    shape: "ellipse",
+    cx: x(.5),
+    cy: y(.5),
+    rx: partner.geometry.width / target.geometry.width * 48,
+    ry: partner.geometry.height / target.geometry.height * 46,
+    expansion,
+  };
+};
+
+/**
+ * Projects compatible overlapping balloon bodies into each balloon's local
+ * 0..100 SVG plane. Renderers use the projections only as outline masks: the
+ * BalloonElements remain independent content and editing objects.
+ */
+export function projectBalloonOverlapMasks(nodes: SceneElementNode[]) {
+  const balloons = nodes.filter((node): node is SceneElementNode & { element: BalloonElement } => (
+    (node.source === "frame" || node.overlayPurpose === "page_content")
+    && node.element.kind === "balloon"
+    && !node.element.appearance
+    && !node.geometry.rotate
+  ));
+  const masks = new Map<string, BalloonOverlapMask[]>();
+  const renderOrder = new Map(nodes.map((node, index) => [node.element.id, index]));
+  balloons.forEach((node) => {
+    const partners = balloons.filter((candidate) => (
+      candidate.element.id !== node.element.id
+      && (renderOrder.get(candidate.element.id) ?? -1) < (renderOrder.get(node.element.id) ?? -1)
+      && candidate.source === node.source
+      && candidate.frame?.id === node.frame?.id
+      && candidate.layerId === node.layerId
+      && candidate.overlayPurpose === node.overlayPurpose
+      && candidate.surfaceId === node.surfaceId
+      && mergeStyleKey(candidate.element) === mergeStyleKey(node.element)
+      && boundsOverlap(candidate.element, candidate.geometry, node.element, node.geometry)
+    ));
+    if (!partners.length) return;
+    masks.set(node.element.id, partners.map((partner) => projectOverlapMask(partner, node)));
+  });
+  return masks;
 }
 
 export function projectBalloonTail(balloon: Pick<BalloonElement, "shape" | "transform" | "tailTarget" | "appearance">): BalloonTailProjection | undefined {

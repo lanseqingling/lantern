@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
-import type { ArtElement, BalloonElement, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@lantern/shared";
-import { balloonCutCornerPoints, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, scaleImageCrop } from "@lantern/shared";
+import type { ArtElement, BalloonElement, BalloonOverlapMask, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@lantern/shared";
+import { balloonCutCornerPoints, frameBalloonCoordinateBounds, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonOverlapMasks, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reframeFramePreservingContent, reshapeFrameCorner, scaleImageCrop } from "@lantern/shared";
 import type { Selection } from "@/app/lib/workbench-state";
 import { contentSafeArea, snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type MoveSnapGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 import { uiCopy } from "@/app/lib/ui-copy";
@@ -128,6 +128,12 @@ const tailPaths = (tail: NonNullable<ReturnType<typeof projectBalloonTail>>) => 
   fill: `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y} Z`,
   outline: `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y}`,
 });
+const balloonMaskShape = (mask: BalloonOverlapMask, key: number) => {
+  const expansion = { fill: "#000", stroke: "#000", strokeWidth: mask.expansion, vectorEffect: "non-scaling-stroke" as const };
+  if (mask.shape === "rect") return <rect key={key} x={mask.x} y={mask.y} width={mask.width} height={mask.height} rx={mask.rx} ry={mask.ry} {...expansion} />;
+  if (mask.shape === "polygon") return <polygon key={key} points={mask.points.map((point) => `${point.x},${point.y}`).join(" ")} strokeLinejoin="round" {...expansion} />;
+  return <ellipse key={key} cx={mask.cx} cy={mask.cy} rx={mask.rx} ry={mask.ry} {...expansion} />;
+};
 
 type ImageSceneNode = SceneElementNode & { element: ArtElement };
 type TextSceneNode = SceneElementNode & { element: TextElement };
@@ -161,6 +167,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const requestedUnitId = document.reading.unitOrder[pageIndex];
   const unit = document.units.find((item) => item.id === requestedUnitId) ?? document.units[0];
   const paperRef = useRef<HTMLDivElement>(null);
+  const balloonMaskNamespace = useId().replace(/[^a-zA-Z0-9_-]/g, "-");
   const dragRef = useRef<DragState | null>(null);
   const cropWheelRef = useRef<CropWheelState | null>(null);
   const suppressClick = useRef(false);
@@ -174,11 +181,18 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   }, []);
   if (!unit) return <div className="empty-comic">{uiCopy.renderer.empty}</div>;
 
-  const frameDraft = (frame: Frame): Frame => ({
-    ...frame,
-    ...(drafts[frame.id] as Partial<Frame> | undefined),
-    layers: frame.layers.map((layer) => ({ ...layer, elements: layer.elements.map((element) => ({ ...element, ...(drafts[element.id] ?? {}) })) })) as Frame["layers"],
-  });
+  const frameDraft = (frame: Frame): Frame => {
+    const draft = drafts[frame.id] as Partial<Frame> | undefined;
+    const geometry = draft?.geometry;
+    const resized = geometry && (geometry.width !== frame.geometry.width || geometry.height !== frame.geometry.height)
+      ? reframeFramePreservingContent(frame, geometry)
+      : frame;
+    return {
+      ...resized,
+      ...draft,
+      layers: resized.layers.map((layer) => ({ ...layer, elements: layer.elements.map((element) => ({ ...element, ...(drafts[element.id] ?? {}) })) })) as Frame["layers"],
+    };
+  };
   const draftUnit = {
     ...unit,
     frames: unit.frames.map(frameDraft),
@@ -203,6 +217,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   const texts = scene.elements.filter((node): node is TextSceneNode => node.element.kind === "text");
   const narrations = texts.filter((node) => node.source === "overlay" && node.overlayPurpose === "narration" && node.element.role === "narration");
   const balloons = scene.elements.filter((node): node is BalloonSceneNode => node.element.kind === "balloon");
+  const balloonOverlapMasks = projectBalloonOverlapMasks(scene.elements);
   const effects = scene.elements.filter((node): node is EffectSceneNode => node.element.kind === "effect");
   const overlayImages = images.filter((node) => node.source === "overlay");
   const overlayImageLabel = (node: ImageSceneNode) => {
@@ -709,10 +724,14 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const tail = projectBalloonTail(balloon);
       const strokeWidths = projectBalloonStrokeWidths(balloon);
       const paths = tail ? tailPaths(tail) : undefined;
+      const overlapMasks = balloonOverlapMasks.get(balloon.id) ?? [];
+      const needsOutlineMask = overlapMasks.length > 0 || Boolean(paths);
+      const overlapMaskId = `${balloonMaskNamespace}-balloon-overlap-${unit.id}-${balloon.id}`.replace(/[^a-zA-Z0-9_-]/g, "-");
       const cutCornerPoints = balloon.shape === "cut_corner" ? balloonCutCornerPoints(balloon).map((point) => `${point.x * 100},${point.y * 100}`).join(" ") : undefined;
       const localTailTip = tail ? { x: balloon.transform.x + tail.tip.x / 100 * balloon.transform.width, y: balloon.transform.y + tail.tip.y / 100 * balloon.transform.height } : undefined;
       const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
       const coordinateBounds = nodeCoordinateBounds(node, frame);
+      const moveCoordinateBounds = node.source === "frame" && frame ? frameBalloonCoordinateBounds(balloon.transform) : coordinateBounds;
       const oneCharacterWidth = Math.max(balloon.style.fontSize * 1.65, balloon.style.strokeWidth * 2 + 8);
       const minimumWidth = Math.min(balloon.transform.width, frame ? oneCharacterWidth / frame.geometry.width : oneCharacterWidth);
       return <button type="button" className={`lcd-balloon shape-${balloon.shape} ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(balloon.id) ? "multi-selected" : ""}`} data-element-id={balloon.id} data-page-id={unit.id} key={balloon.id}
@@ -720,10 +739,20 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         onClick={(event) => { event.stopPropagation(); if (!suppressClick.current) onSelect?.(balloonSelection); }}
         onDoubleClick={(event) => doubleClick(event, balloonSelection)}
         onContextMenu={(event) => contextFor(event, balloonSelection)}
-        onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, balloonSelection); }}>
+        onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds: moveCoordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, balloonSelection); }}>
         {appearanceSrc ? <img className="balloon-appearance" src={appearanceSrc} alt="" draggable={false} /> : <svg className="balloon-shape" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {balloon.shape === "caption_box" ? <rect className="balloon-outline" x="1.5" y="1.5" width="97" height="97" rx="3" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} /> : balloon.shape === "cut_corner" && cutCornerPoints ? <polygon className="balloon-outline" points={cutCornerPoints} vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline, strokeLinejoin: "round" }} /> : <ellipse className="balloon-outline" cx="50" cy="50" rx="48" ry="46" vectorEffect="non-scaling-stroke" style={{ fill: balloon.style.fill, stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} />}
-          {tail && paths ? <><path className="balloon-tail-fill" d={paths.fill} style={{ fill: balloon.style.fill }} /><path className="balloon-tail-outline" d={paths.outline} vectorEffect="non-scaling-stroke" style={{ stroke: balloon.style.stroke, strokeWidth: strokeWidths.tail }} /><ellipse className="balloon-mask" cx="50" cy="50" rx="48" ry="46" style={{ fill: balloon.style.fill }} /></> : null}
+          {needsOutlineMask ? <defs><mask id={overlapMaskId} maskUnits="userSpaceOnUse" x="-100" y="-100" width="300" height="300"><rect x="-100" y="-100" width="300" height="300" fill="#fff" />{overlapMasks.map(balloonMaskShape)}{paths ? <path d={paths.fill} fill="#000" stroke="#000" strokeWidth="1" strokeLinejoin="round" vectorEffect="non-scaling-stroke" /> : null}</mask></defs> : null}
+          {balloon.shape === "caption_box"
+            ? <rect x="1.5" y="1.5" width="97" height="97" rx="3" style={{ fill: balloon.style.fill }} />
+            : balloon.shape === "cut_corner" && cutCornerPoints
+              ? <polygon points={cutCornerPoints} style={{ fill: balloon.style.fill }} />
+              : <ellipse cx="50" cy="50" rx="48" ry="46" style={{ fill: balloon.style.fill }} />}
+          {tail && paths ? <><path className="balloon-tail-fill" d={paths.fill} style={{ fill: balloon.style.fill }} /><path className="balloon-tail-outline" d={paths.outline} vectorEffect="non-scaling-stroke" style={{ fill: "none", stroke: balloon.style.stroke, strokeWidth: strokeWidths.tail }} /></> : null}
+          {balloon.shape === "caption_box"
+            ? <rect className="balloon-outline" x="1.5" y="1.5" width="97" height="97" rx="3" mask={needsOutlineMask ? `url(#${overlapMaskId})` : undefined} vectorEffect="non-scaling-stroke" style={{ fill: "none", stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} />
+            : balloon.shape === "cut_corner" && cutCornerPoints
+              ? <polygon className="balloon-outline" points={cutCornerPoints} mask={needsOutlineMask ? `url(#${overlapMaskId})` : undefined} vectorEffect="non-scaling-stroke" style={{ fill: "none", stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline, strokeLinejoin: "round" }} />
+              : <ellipse className="balloon-outline" cx="50" cy="50" rx="48" ry="46" mask={needsOutlineMask ? `url(#${overlapMaskId})` : undefined} vectorEffect="non-scaling-stroke" style={{ fill: "none", stroke: balloon.style.stroke, strokeWidth: strokeWidths.outline }} />}
         </svg>}
         <span className="balloon-content">{node.dialogueText ?? ""}</span>
         {selected && interactionMode === "move" ? <><span className="balloon-resize-handle" aria-label={uiCopy.renderer.resizeBalloon} onPointerDown={(event) => startDrag(event, { mode: "balloon_resize", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, minimumWidth }, balloonSelection)}/>{tail && localTailTip ? <span className="balloon-tail-handle" aria-label={uiCopy.renderer.adjustBalloonTail} style={{ left: `${tail.tip.x}%`, top: `${tail.tip.y}%` }} onPointerDown={(event) => startDrag(event, { mode: "balloon_tail", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: localTailTip }, balloonSelection)}/> : null}</> : null}
@@ -740,7 +769,8 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         const nextSelection: Selection = { type: "speech_balloon", id: balloon.id, pageId: unit.id, label };
         const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
         const coordinateBounds = nodeCoordinateBounds(node, frame);
-        return <span className="balloon-order-anchor" key={`${balloon.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`balloon:${balloon.id}`) ?? 0}px 0` }}><button type="button" className={`balloon-order ${crossPage ? "cross-page" : ""} ${selection?.type === "speech_balloon" && selection.id === balloon.id ? "selected" : ""}`} aria-label={uiCopy.renderer.selectObjectAria(label)} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, nextSelection); }}>{crossPage ? label : String(order).padStart(2, "0")}</button></span>;
+        const moveCoordinateBounds = node.source === "frame" && frame ? frameBalloonCoordinateBounds(balloon.transform) : coordinateBounds;
+        return <span className="balloon-order-anchor" key={`${balloon.id}-order`} style={{ ...geometryStyle(node.geometry, unit.canvas.width, unit.canvas.height), translate: `${badgeOffsets.get(`balloon:${balloon.id}`) ?? 0}px 0` }}><button type="button" className={`balloon-order ${crossPage ? "cross-page" : ""} ${selection?.type === "speech_balloon" && selection.id === balloon.id ? "selected" : ""}`} aria-label={uiCopy.renderer.selectObjectAria(label)} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) onSelect?.(nextSelection); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); onSelect?.(nextSelection); if (interactionMode === "move") startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds: moveCoordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, nextSelection); }}>{crossPage ? label : String(order).padStart(2, "0")}</button></span>;
       })}
       {overlayImages.map((node) => {
         if (interactionMode === "move") return null;

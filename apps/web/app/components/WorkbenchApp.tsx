@@ -32,8 +32,8 @@ import type {
   Geometry,
   AgentActivityNavigation,
 } from "@lantern/shared";
-import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, type PageDisplayMode } from "@lantern/shared";
-import { applyWorkspaceChangeSet, createSnapshot, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
+import { createComicPageViews, deriveLocalTransform, displayGroupForUnit, frameBalloonCoordinateBounds, orderedUnitSurfaces, pageDisplayGroups, physicalPageCount, type PageDisplayMode } from "@lantern/shared";
+import { applyWorkspaceChangeSet, createSnapshot, narrationDefaults, planEditorCapabilities, verticalSegmentAspectRatios, verticalSegmentHeight, type EditorCapabilityId, type EditorCapabilityRequest, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
 import {
   createBlankWorkbench,
   loadDemoWorkbench,
@@ -109,6 +109,11 @@ type FrameImageCandidatePreview = {
   previousInspectorOpen: boolean;
 };
 type CanvasCreationMode = "dialogue" | "narration" | null;
+type CreationPointer = {
+  x: number;
+  y: number;
+  narration?: { width: number; height: number; fontSize: number; strokeWidth: number };
+};
 const bleedEdgeIcon: Record<"top" | "right" | "bottom" | "left", IconName> = { top: "chevronUp", right: "expand", bottom: "chevronDown", left: "collapse" };
 type ComicContextMenuState = { target: Selection; point: ComicContextPoint; bleedMenu?: { left: number; top: number }; backgroundMenu?: { left: number; top: number }; imageMoreMenu?: { left: number; top: number } };
 type ComicDeleteTarget = { kind: "frame" | "image" | "dialogue" | "narration"; selection: Selection };
@@ -402,7 +407,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [editingStoryboardTarget, setEditingStoryboardTarget] = useState<StoryboardEditorTarget | null>(null);
   const [objectInteractionMode, setObjectInteractionMode] = useState<CanvasObjectInteractionMode>("select");
   const [creationMode, setCreationMode] = useState<CanvasCreationMode>(null);
-  const [creationPointer, setCreationPointer] = useState<{ x: number; y: number } | null>(null);
+  const [creationPointer, setCreationPointer] = useState<CreationPointer | null>(null);
   const [comicContextMenu, setComicContextMenu] = useState<ComicContextMenuState | null>(null);
   const [downloadingCanvasImageId, setDownloadingCanvasImageId] = useState<string | null>(null);
   const [addingCanvasImageAssetId, setAddingCanvasImageAssetId] = useState<string | null>(null);
@@ -414,6 +419,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [comicDeleteTarget, setComicDeleteTarget] = useState<ComicDeleteTarget | null>(null);
   const [toolbarPlacement, setToolbarPlacement] = useState<ToolbarPlacement | null>(null);
   const [balloonEditorPlacement, setBalloonEditorPlacement] = useState<{ x: number; y: number } | null>(null);
+  const [frameEditorPlacement, setFrameEditorPlacement] = useState<{ x: number; y: number; maxHeight: number } | null>(null);
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("focus");
   const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
   const [canvasScale, setCanvasScale] = useState(1);
@@ -441,6 +447,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const archiveImportRef = useRef<HTMLInputElement>(null);
   const agentMessagesRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLElement>(null);
+  const frameEditorRef = useRef<HTMLElement>(null);
   const pageCanvasFitStageRef = useRef<HTMLDivElement>(null);
   const verticalStripRef = useRef<HTMLDivElement>(null);
   const verticalNavigatorRef = useRef<HTMLElement>(null);
@@ -1180,6 +1187,85 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     window.addEventListener("resize", updatePlacement);
     return () => window.removeEventListener("resize", updatePlacement);
   }, [canvasMode, inspectorOpen, selectedElement?.geometry, selection.id, selection.type]);
+
+  useLayoutEffect(() => {
+    if (canvasMode !== "focus" || !inspectorOpen || !editingStoryboardTarget || !stageRef.current || !frameEditorRef.current) {
+      setFrameEditorPlacement(null);
+      return;
+    }
+    const stageNode = stageRef.current;
+    const updatePlacement = () => {
+      const stage = stageRef.current;
+      const panel = frameEditorRef.current;
+      if (!stage || !panel) return;
+      const frame = Array.from(stage.querySelectorAll<HTMLElement>(".lcd-frame[data-element-id]"))
+        .find((node) => node.dataset.elementId === editingStoryboardTarget.frameId);
+      if (!frame) return;
+      const stageRect = stage.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
+      const dockRect = document.querySelector<HTMLElement>(".creation-dock:not(.multi-hidden)")?.getBoundingClientRect();
+      const inset = 12;
+      const gap = 14;
+      const safeBottom = Math.max(
+        inset + 180,
+        Math.min(stageRect.height - inset, dockRect && dockRect.top > stageRect.top ? dockRect.top - stageRect.top - gap : stageRect.height - inset),
+      );
+      const maxHeight = Math.max(180, safeBottom - inset);
+      const width = panel.getBoundingClientRect().width || 354;
+      const height = Math.min(panel.scrollHeight + 2, maxHeight);
+      const selectedRect = {
+        left: frameRect.left - stageRect.left,
+        top: frameRect.top - stageRect.top,
+        right: frameRect.right - stageRect.left,
+        bottom: frameRect.bottom - stageRect.top,
+      };
+      const candidates = [
+        { x: selectedRect.right + gap, y: selectedRect.top + (frameRect.height - height) / 2 },
+        { x: selectedRect.left - width - gap, y: selectedRect.top + (frameRect.height - height) / 2 },
+        { x: selectedRect.left + (frameRect.width - width) / 2, y: selectedRect.top - height - gap },
+        { x: selectedRect.left + (frameRect.width - width) / 2, y: selectedRect.bottom + gap },
+      ];
+      const obstacleRects = Array.from(document.querySelectorAll<HTMLElement>(".agent-workspace.open, .version-workspace.open, .reference-card, .canvas-session-drawer"))
+        .flatMap((node) => {
+          const rect = node.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0 || rect.right <= stageRect.left || rect.left >= stageRect.right || rect.bottom <= stageRect.top || rect.top >= stageRect.bottom) return [];
+          return [{ left: rect.left - stageRect.left, top: rect.top - stageRect.top, right: rect.right - stageRect.left, bottom: rect.bottom - stageRect.top }];
+        });
+      const scored = candidates.map((candidate) => {
+        const x = clampValue(candidate.x, inset, Math.max(inset, stageRect.width - width - inset));
+        const y = clampValue(candidate.y, inset, Math.max(inset, safeBottom - height));
+        const rect = { left: x, top: y, right: x + width, bottom: y + height };
+        return {
+          x,
+          y,
+          score: (Math.abs(x - candidate.x) + Math.abs(y - candidate.y)) * 120
+            + overlapArea(rect, selectedRect) * 4
+            + obstacleRects.reduce((total, obstacle) => total + overlapArea(rect, obstacle) * 20, 0),
+        };
+      });
+      const best = scored.sort((left, right) => left.score - right.score)[0];
+      if (!best) return;
+      setFrameEditorPlacement((current) => current
+        && Math.abs(current.x - best.x) < .5
+        && Math.abs(current.y - best.y) < .5
+        && Math.abs(current.maxHeight - maxHeight) < .5
+        ? current
+        : { x: best.x, y: best.y, maxHeight });
+    };
+    updatePlacement();
+    window.addEventListener("resize", updatePlacement);
+    const observer = new ResizeObserver(updatePlacement);
+    observer.observe(stageNode);
+    observer.observe(frameEditorRef.current);
+    const dock = document.querySelector<HTMLElement>(".creation-dock");
+    if (dock) observer.observe(dock);
+    stageNode.addEventListener("scroll", updatePlacement, true);
+    return () => {
+      window.removeEventListener("resize", updatePlacement);
+      observer.disconnect();
+      stageNode.removeEventListener("scroll", updatePlacement, true);
+    };
+  }, [agentOpen, canvasMode, editingStoryboardTarget, inspectorOpen, leftOpen, versionsOpen]);
 
   const replaceMessages = (updater: (messages: AgentMessage[]) => AgentMessage[]) =>
     setState((current) => ({ ...current, messages: updater(current.messages) }));
@@ -3140,10 +3226,17 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       const canvasDeltaY = deltaY / pageRect.height * comicPage.canvas.height;
       const parentFrame = element.type === "comic_frame" ? undefined : comicPage.elements.find((candidate): candidate is ComicFrameElement => candidate.type === "comic_frame" && candidate.id === element.comicFrameId);
       const bounds = parentFrame?.geometry ?? { x: 0, y: 0, width: comicPage.canvas.width, height: comicPage.canvas.height };
+      const balloonBounds = element.type === "speech_balloon" && parentFrame
+        ? frameBalloonCoordinateBounds({ width: element.geometry.width / parentFrame.geometry.width, height: element.geometry.height / parentFrame.geometry.height })
+        : undefined;
+      const minX = balloonBounds && parentFrame ? parentFrame.geometry.x + balloonBounds.minX * parentFrame.geometry.width : bounds.x;
+      const minY = balloonBounds && parentFrame ? parentFrame.geometry.y + balloonBounds.minY * parentFrame.geometry.height : bounds.y;
+      const maxX = balloonBounds && parentFrame ? parentFrame.geometry.x + (balloonBounds.maxX - element.geometry.width / parentFrame.geometry.width) * parentFrame.geometry.width : bounds.x + bounds.width - element.geometry.width;
+      const maxY = balloonBounds && parentFrame ? parentFrame.geometry.y + (balloonBounds.maxY - element.geometry.height / parentFrame.geometry.height) * parentFrame.geometry.height : bounds.y + bounds.height - element.geometry.height;
       const geometry = {
         ...element.geometry,
-        x: clampValue(element.geometry.x + canvasDeltaX, bounds.x, bounds.x + bounds.width - element.geometry.width),
-        y: clampValue(element.geometry.y + canvasDeltaY, bounds.y, bounds.y + bounds.height - element.geometry.height),
+        x: clampValue(element.geometry.x + canvasDeltaX, minX, maxX),
+        y: clampValue(element.geometry.y + canvasDeltaY, minY, maxY),
       };
       requests.push(...capabilitiesForElementPatch(item.pageId, item.id, { geometry }));
     });
@@ -3211,7 +3304,8 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     const target = event.target instanceof Element ? event.target : null;
     const objectTarget = target?.closest("[data-element-id], .reference-card, button, input, textarea, select, [role='menu']");
-    if (canvasMode === "focus" && objectInteractionMode === "select" && !objectTarget) {
+    const frameImageTarget = target?.closest(".lcd-image:not(.scene-overlay)");
+    if (canvasMode === "focus" && objectInteractionMode === "select" && (!objectTarget || frameImageTarget)) {
       const stageRect = stage.getBoundingClientRect();
       event.preventDefault();
       event.stopPropagation();
@@ -3300,7 +3394,43 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
 
   const handleCanvasPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    if (creationMode) setCreationPointer({ x: event.clientX, y: event.clientY });
+    if (creationMode === "dialogue") setCreationPointer({ x: event.clientX, y: event.clientY });
+    if (creationMode === "narration") {
+      const target = event.target instanceof Element ? event.target : null;
+      const pageNode = target?.closest<HTMLElement>(".comic-page[data-page-id]");
+      const unit = pageNode ? canvasDocument.units.find((candidate) => candidate.id === pageNode.dataset.pageId) : undefined;
+      const pageRect = pageNode?.getBoundingClientRect();
+      if (!unit || !pageRect?.width || !pageRect.height) {
+        setCreationPointer(null);
+      } else {
+        const scaleX = pageRect.width / unit.canvas.width;
+        const scaleY = pageRect.height / unit.canvas.height;
+        const canvasX = (event.clientX - pageRect.left) / scaleX;
+        const canvasY = (event.clientY - pageRect.top) / scaleY;
+        const surface = unit.surfaces.find((candidate) => canvasX >= candidate.geometry.x
+          && canvasX <= candidate.geometry.x + candidate.geometry.width
+          && canvasY >= candidate.geometry.y
+          && canvasY <= candidate.geometry.y + candidate.geometry.height);
+        if (!surface) {
+          setCreationPointer(null);
+        } else {
+          const width = Math.min(narrationDefaults.horizontal.width, surface.geometry.width);
+          const height = Math.min(narrationDefaults.horizontal.height, surface.geometry.height);
+          const x = clampValue(canvasX - width / 2, surface.geometry.x, surface.geometry.x + surface.geometry.width - width);
+          const y = clampValue(canvasY - height / 2, surface.geometry.y, surface.geometry.y + surface.geometry.height - height);
+          setCreationPointer({
+            x: pageRect.left + x * scaleX,
+            y: pageRect.top + y * scaleY,
+            narration: {
+              width: width * scaleX,
+              height: height * scaleY,
+              fontSize: narrationDefaults.fontSize * scaleX,
+              strokeWidth: narrationDefaults.strokeWidth * scaleX,
+            },
+          });
+        }
+      }
+    }
     const multiMove = multiMoveRef.current;
     if (multiMove) {
       multiMove.currentX = event.clientX;
@@ -3812,8 +3942,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const editingStoryboardFrame = editingStoryboardTarget
     ? workingPages.find((page) => page.id === editingStoryboardTarget.unitId)?.elements.find((element): element is ComicFrameElement => element.type === "comic_frame" && element.id === editingStoryboardTarget.frameId)
     : undefined;
-  const editorStyle: CSSProperties | undefined = editingStoryboardTarget && toolbarPlacement
-    ? { left: toolbarPlacement.x, top: toolbarPlacement.y, right: "auto", bottom: "auto" }
+  const editorPlacement = frameEditorPlacement ?? toolbarPlacement;
+  const editorStyle: CSSProperties | undefined = editingStoryboardTarget && editorPlacement
+    ? { left: editorPlacement.x, top: editorPlacement.y, right: "auto", bottom: "auto", maxHeight: frameEditorPlacement?.maxHeight }
     : undefined;
   const canvasWorldStyle: CSSProperties = { transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasScale})` };
   const pageCanvasFitWidth = pageCanvasAspect > 0 && pageCanvasFitSize.width > 0 && pageCanvasFitSize.height > 0
@@ -4202,6 +4333,12 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         onPointerLeave={() => { if (creationMode) setCreationPointer(null); }}
         onWheel={handleCanvasWheel}
         onClickCapture={(event) => {
+          if (suppressStageClickRef.current) {
+            suppressStageClickRef.current = false;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (canvasMode !== "free" || isFloatingCanvasControl(event.target)) return;
           const target = event.target instanceof Element ? event.target : null;
           if (target?.closest("[data-element-id], .reference-card, button, input, textarea, select, [role='menu']")) return;
@@ -4235,7 +4372,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
           <button type="button" aria-label={selection.type === "speech_balloon" ? uiCopy.workbench.objectEditor.editBalloonAria : selection.type === "text" ? uiCopy.workbench.objectEditor.editNarrationAria : selectedStoryboardBeat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard} onClick={openSelectionEditor}><Icon name="edit" /></button>
           <button type="button" aria-label={uiCopy.workbench.objectEditor.manageAria} aria-expanded={false} onClick={(event) => openSelectionManagement(event.currentTarget)}><Icon name="moreVertical" /></button>
         </ObjectToolbar> : null}
-        {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{uiCopy.workbench.frameEditor.editTitle(editingStoryboardTarget.label)}</span><button type="button" aria-label={uiCopy.workbench.frameEditor.closeAria} onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="close" /></button></div><section className="frame-editor-section"><strong>{uiCopy.workbench.frameEditor.storyboardTitle}</strong><label>{uiCopy.common.field.title}<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder={uiCopy.workbench.frameEditor.titlePlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>{uiCopy.common.field.description}<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder={uiCopy.workbench.frameEditor.descriptionPlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? uiCopy.common.action.save : uiCopy.workbench.frameEditor.createAndBind}</button></section><section className="frame-editor-section"><strong>{uiCopy.workbench.object.frame}</strong><label>{uiCopy.workbench.frameEditor.borderWidthLabel}<NumberStepper ariaLabel={uiCopy.workbench.frameEditor.borderWidthAria} step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>{uiCopy.workbench.frameEditor.saveBorder}</button></section></aside> : null}
+        {inspectorOpen && editingStoryboardTarget && editingStoryboardFrame && editorStyle ? <aside ref={frameEditorRef} className="object-inspector near-selection frame-editor" data-testid="storyboard-editor" style={editorStyle} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="inspector-head"><span><i />{uiCopy.workbench.frameEditor.editTitle(editingStoryboardTarget.label)}</span><button type="button" aria-label={uiCopy.workbench.frameEditor.closeAria} onClick={() => { setInspectorOpen(false); setEditingStoryboardBeatId(null); setEditingStoryboardTarget(null); setEditDraft({}); }}><Icon name="close" /></button></div><section className="frame-editor-section"><strong>{uiCopy.workbench.frameEditor.storyboardTitle}</strong><label>{uiCopy.common.field.title}<input value={editDraft.title ?? editingStoryboardBeat?.title ?? ""} maxLength={40} placeholder={uiCopy.workbench.frameEditor.titlePlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))}/></label><label>{uiCopy.common.field.description}<textarea value={editDraft.description ?? editingStoryboardBeat?.description ?? ""} maxLength={1200} placeholder={uiCopy.workbench.frameEditor.descriptionPlaceholder} onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))}/></label><button className="inspector-save compact-save" type="button" disabled={!(editDraft.title ?? editingStoryboardBeat?.title ?? "").trim()} onClick={applyInspectorEdit}>{editingStoryboardBeat ? uiCopy.common.action.save : uiCopy.workbench.frameEditor.createAndBind}</button></section><section className="frame-editor-section"><strong>{uiCopy.workbench.object.frame}</strong><label>{uiCopy.workbench.frameEditor.borderWidthLabel}<NumberStepper ariaLabel={uiCopy.workbench.frameEditor.borderWidthAria} step={.5} value={editDraft.frameBorderWidth ?? String(editingStoryboardFrame.border.width)} onChange={(value) => setEditDraft((current) => ({ ...current, frameBorderWidth: value }))} onAdjust={adjustFrameBorderWidth} /></label><button className="inspector-save compact-save" type="button" onClick={applyFrameBorderEdit}>{uiCopy.workbench.frameEditor.saveBorder}</button></section></aside> : null}
 
       </CanvasStage>
 
@@ -4293,7 +4430,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {saveChapterConfirmOpen ? <DeleteConfirmDialog dialogId="save-chapter-confirm" tone="neutral" icon="save" title={uiCopy.workbench.dialog.saveVersionTitle} description={uiCopy.workbench.dialog.saveVersionDescription} confirmLabel={uiCopy.workbench.action.saveVersion} disabled={savingChapter} onCancel={() => setSaveChapterConfirmOpen(false)} onConfirm={saveChapter} /> : null}
 
       {creationMode === "dialogue" && creationPointer ? <div className="dialogue-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}><Icon name="message" /><i>+</i></div> : null}
-      {creationMode === "narration" && creationPointer ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y }}>{uiCopy.workbench.narrationEditor.placementPreview}</div> : null}
+      {creationMode === "narration" && creationPointer?.narration ? <div className="narration-cursor-preview" aria-hidden="true" style={{ left: creationPointer.x, top: creationPointer.y, width: creationPointer.narration.width, height: creationPointer.narration.height, fontSize: creationPointer.narration.fontSize, WebkitTextStrokeWidth: creationPointer.narration.strokeWidth }}>{uiCopy.workbench.narrationEditor.placementPreview}</div> : null}
 
       {inspectorOpen && selection.type === "speech_balloon" && selectedElement?.type === "speech_balloon" && balloonEditorPlacement ? <aside className="balloon-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />{uiCopy.workbench.object.dialogue}{String(selectedBalloonNumber || 1).padStart(2, "0")}</span><button type="button" aria-label={uiCopy.workbench.balloonEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="close" /></button></div><label>{uiCopy.workbench.object.dialogue}<textarea autoFocus value={editDraft.dialogue ?? selectedElement.content.text ?? ""} onChange={(event) => setEditDraft((current) => ({ ...current, dialogue: event.target.value }))} /></label><label>{uiCopy.workbench.balloonEditor.textStyleLabel}<CustomSelect ariaLabel={uiCopy.workbench.balloonEditor.textStyleLabel} className="balloon-style-select" value={selectedElement.content.shape} onChange={(value) => updateBalloonShape(value as SpeechBalloonElement["content"]["shape"])} options={balloonStyleOptions} /></label><label>{uiCopy.workbench.balloonEditor.fontSizeLabel}<NumberStepper ariaLabel={uiCopy.workbench.balloonEditor.fontSizeAria} value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("fontSize", delta)} /></label><label>{uiCopy.workbench.frameEditor.borderWidthLabel}<NumberStepper ariaLabel={uiCopy.workbench.balloonEditor.borderWidthAria} step={.5} value={editDraft.strokeWidth ?? String(selectedElement.style.strokeWidth)} onChange={(value) => setEditDraft((current) => ({ ...current, strokeWidth: value }))} onAdjust={(delta) => adjustBalloonStyleNumber("strokeWidth", delta)} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>{uiCopy.common.action.save}</button></div></aside> : null}
       {inspectorOpen && selection.type === "text" && selectedElement?.type === "text" && balloonEditorPlacement ? <aside className="balloon-editor-popover narration-editor-popover" style={{ left: balloonEditorPlacement.x, top: balloonEditorPlacement.y }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><div className="balloon-editor-head"><span><i />{uiCopy.workbench.label.narration(selectedNarrationNumber || 1)}</span><button type="button" aria-label={uiCopy.workbench.narrationEditor.closeAria} onClick={() => setInspectorOpen(false)}><Icon name="close" /></button></div><label>{uiCopy.workbench.narrationEditor.textLabel}<textarea autoFocus value={editDraft.narration ?? selectedElement.content.text} onChange={(event) => setEditDraft((current) => ({ ...current, narration: event.target.value }))} /></label><label>{uiCopy.workbench.balloonEditor.fontSizeLabel}<NumberStepper ariaLabel={uiCopy.workbench.narrationEditor.fontSizeAria} value={editDraft.fontSize ?? String(selectedElement.style.fontSize)} onChange={(value) => setEditDraft((current) => ({ ...current, fontSize: value }))} onAdjust={adjustNarrationFontSize} /></label><div className="balloon-editor-actions"><button type="button" onClick={applyInspectorEdit}>{uiCopy.common.action.save}</button></div></aside> : null}

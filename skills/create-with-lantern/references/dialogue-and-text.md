@@ -38,6 +38,12 @@ Paper narration supports content, transform, font family, size, weight, color, s
 
 Changing ownership invalidates the old handle. Perform it as a separate operation and refresh context and composition before any later edit. Cross-page conversion is the one exception that accepts the destination transform and tail in the conversion call.
 
+## Distinguish clipped overflow from ownership
+
+A frame-layer balloon may cross a Frame edge while remaining frame-owned. The Frame clips the outside portion and Lantern retains a selectable safe portion inside; do not convert it to breakout merely because its resolved geometry crosses the border. Ownership changes only through the explicit placement capability.
+
+Compatible unrotated native balloons in the same composition layer may visually join by suppressing their internal outlines. This is derived rendering only: keep every Dialogue, BalloonElement, transform, tail, handle, and edit independent. Do not merge their text or replace them with one shape.
+
 ## Protect the true-spread gutter
 
 A cross-page balloon may cross the binding, but its writing center and tail endpoint must not sit in the gutter safety band. Bias the balloon's center toward the intended reading-side page, keep the tail clearly on one side, and inspect the rendered spread after conversion. Lantern rejects geometry that does not cross both pages, leaves the spread canvas, or places the center or tail in the protected band.

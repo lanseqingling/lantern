@@ -1,5 +1,6 @@
 export * from "./lcd/types";
 export * from "./lcd/schema";
+export * from "./lcd/defaults";
 export * from "./render-scene";
 export * from "./page-display";
 export * from "./workspace";

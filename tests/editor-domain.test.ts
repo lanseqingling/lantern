@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { demoStoryboardBeats } from "@lantern/shared/fixtures/storyboard-beats";
-import { balloonCutCornerPoints, createComicPageView, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "@lantern/shared";
+import { balloonCutCornerPoints, createComicPageView, frameBalloonCoordinateBounds, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "@lantern/shared";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "@lantern/demo-runtime";
 import { compileChapterLayoutPlan } from "@lantern/layout-engine";
@@ -40,6 +40,8 @@ test("four-panel unit contains four explicitly ordered frames", () => {
   const document = compileChapterLayoutPlan(fourPanelPlan, demoStoryboardBeats, { comicId: "test-comic", chapterId: "test-chapter" });
   assert.equal(document.units[0].frames.length, 4);
   assert.deepEqual(document.units[0].readingSequence.map((entry) => entry.frameId), document.units[0].frames.map((frame) => frame.id));
+  assert.ok(document.units[0].frames.every((frame) => frame.border.width === 3));
+  assert.ok(document.units[0].frames.flatMap(frameElements).filter((element): element is BalloonElement => element.kind === "balloon").every((balloon) => balloon.style.strokeWidth === 1.5));
 });
 
 test("resources are stable bindings and URLs remain in the read model", () => {
@@ -110,6 +112,55 @@ test("moving a frame changes only the frame while local art follows at render ti
   const movedImage = movedFrame.layers.flatMap((layer) => layer.kind === "art" ? layer.elements : [])[0];
   assert.deepEqual(movedImage.transform, originalTransform);
   assert.deepEqual(resolveLocalTransform(movedFrame.geometry, movedImage.transform), movedFrame.geometry);
+});
+
+test("resizing a frame preserves its balloon and image projection", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  unit.frames = [frame];
+  unit.readingSequence = [{ frameId: frame.id }];
+  const balloon = frameElements(frame).find((element): element is BalloonElement => element.kind === "balloon");
+  const image = frameElements(frame).find((element) => element.kind === "image");
+  assert.ok(balloon && image?.kind === "image");
+  const balloonGeometry = resolveLocalTransform(frame.geometry, balloon.transform);
+  const tail = balloon.tailTarget ? {
+    x: frame.geometry.x + balloon.tailTarget.x * frame.geometry.width,
+    y: frame.geometry.y + balloon.tailTarget.y * frame.geometry.height,
+  } : undefined;
+  const projectedImage = (currentFrame: typeof frame, currentImage: typeof image) => {
+    const viewport = resolveLocalTransform(currentFrame.geometry, currentImage.transform);
+    const resource = fixture.working.document.resources.find((candidate) => candidate.assetVersionId === currentImage.assetVersionId);
+    const crop = projectImageCrop(currentImage.crop, resource, viewport);
+    return {
+      x: viewport.x + crop.x * viewport.width,
+      y: viewport.y + crop.y * viewport.height,
+      width: crop.width * viewport.width,
+      height: crop.height * viewport.height,
+    };
+  };
+  const imageGeometry = projectedImage(frame, image);
+  const geometry = { x: frame.geometry.x + 12, y: frame.geometry.y + 10, width: frame.geometry.width - 24, height: frame.geometry.height - 20 };
+  const result = applyWorkspaceChangeSet({ working: fixture.working, storyboardBeats: fixture.storyboardBeats }, {
+    id: "resize-preserving-content",
+    projectId: fixture.working.projectId,
+    baseRevision: fixture.working.revision,
+    source: "manual",
+    commands: [{ type: "resize_frame", unitId: unit.id, frameId: frame.id, geometry }],
+  });
+  const resizedFrame = result.working.document.units[0].frames[0];
+  const resizedBalloon = frameElements(resizedFrame).find((element): element is BalloonElement => element.id === balloon.id && element.kind === "balloon");
+  const resizedImage = frameElements(resizedFrame).find((element) => element.id === image.id && element.kind === "image");
+  assert.ok(resizedBalloon && resizedImage?.kind === "image");
+  const approximatelyEqual = (left: number, right: number) => Math.abs(left - right) < 1e-8;
+  const resizedBalloonGeometry = resolveLocalTransform(resizedFrame.geometry, resizedBalloon.transform);
+  assert.ok((["x", "y", "width", "height"] as const).every((key) => approximatelyEqual(resizedBalloonGeometry[key], balloonGeometry[key])));
+  if (tail && resizedBalloon.tailTarget) {
+    assert.ok(approximatelyEqual(resizedFrame.geometry.x + resizedBalloon.tailTarget.x * resizedFrame.geometry.width, tail.x));
+    assert.ok(approximatelyEqual(resizedFrame.geometry.y + resizedBalloon.tailTarget.y * resizedFrame.geometry.height, tail.y));
+  }
+  const resizedImageGeometry = projectedImage(resizedFrame, resizedImage);
+  assert.ok((["x", "y", "width", "height"] as const).every((key) => approximatelyEqual(resizedImageGeometry[key], imageGeometry[key])));
 });
 
 test("frame corner gestures lock to one axis and rebase an outward trapezoid", () => {
@@ -497,10 +548,10 @@ test("paper narration stays frame-free, topmost, editable and independently remo
   assert.equal(narration.kind === "text" ? narration.content : "", "请输入文本");
   assert.deepEqual(narrationLayer.anchor, { type: "unit" });
   assert.equal(narrationLayer.surfaceId, unit.surfaces[0]?.id);
-  assert.equal(narration.kind === "text" ? narration.style.fontSize : 0, 24);
+  assert.equal(narration.kind === "text" ? narration.style.fontSize : 0, 20);
   assert.equal(narration.kind === "text" ? narration.style.strokeWidth : 0, 2);
   assert.equal(narration.kind === "text" ? projectTextStrokeWidth({ ...narration, style: { ...narration.style, strokeWidth: 1.25 } }) : 0, 2);
-  assert.deepEqual(narration.transform, { x: 288, y: 90, width: 144, height: 60 });
+  assert.deepEqual(narration.transform, { x: 288, y: 105, width: 144, height: 30 });
   const view = createComicPageView(fixture.working.document, fixture.working.document.units[0]).elements.find((element) => element.id === narration.id);
   assert.equal(view?.type, "text");
   assert.equal(view?.type === "text" ? view.location.space : "", "overlay");
@@ -512,7 +563,7 @@ test("paper narration stays frame-free, topmost, editable and independently remo
   assert.equal(updatedText?.kind === "text" ? updatedText.content : "", "残响。");
   assert.equal(updatedText?.kind === "text" ? updatedText.style.fontSize : 0, 22);
   assert.equal(updatedText?.kind === "text" ? updatedText.style.writingMode : "", "vertical");
-  assert.deepEqual(updatedText?.transform, { x: 330, y: 48, width: 60, height: 144 });
+  assert.deepEqual(updatedText?.transform, { x: 345, y: 48, width: 30, height: 144 });
 
   assert.ok(updatedText?.kind === "text");
   const rotated = dryRunEditorCapability("set_element_transform", { unitId: unit.id, layerId: narrationLayer.id, elementId: narration.id, transform: { ...updatedText.transform, rotate: 17.5 } }, context());
@@ -526,6 +577,32 @@ test("paper narration stays frame-free, topmost, editable and independently remo
   const removed = dryRunEditorCapability("delete_narration", { unitId: unit.id, layerId: narrationLayer.id, elementId: narration.id }, context());
   assert.equal(removed.result.working.document.units[0].overlayLayers.flatMap((layer) => layer.elements).some((element) => element.id === narration.id), false);
   assert.throws(() => planEditorCapability("create_narration", { unitId: unit.id, position: { x: 20, y: 20 } }, { ...context(), actor: "agent" }), /disabled for Agent/);
+});
+
+test("changing narration writing direction swaps its current width and height", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const context = { fixture, createId: (prefix: string) => `${prefix}-narration-swap`, actor: "human" as const };
+  const created = dryRunEditorCapability("create_narration", { unitId: unit.id, position: { x: 360, y: 180 } }, context);
+  fixture.working = created.result.working;
+  const layer = fixture.working.document.units[0].overlayLayers.find((candidate) => candidate.purpose === "narration")!;
+  const narration = layer.elements.find((element) => element.kind === "text")!;
+  const resized = dryRunEditorCapability("set_element_transform", {
+    unitId: unit.id,
+    layerId: layer.id,
+    elementId: narration.id,
+    transform: { x: 270, y: 157.5, width: 180, height: 45 },
+  }, context);
+  fixture.working = resized.result.working;
+  const vertical = dryRunEditorCapability("update_narration", {
+    unitId: unit.id,
+    layerId: layer.id,
+    elementId: narration.id,
+    changes: { writingMode: "vertical" },
+  }, context);
+  const changed = vertical.result.working.document.units[0].overlayLayers.flatMap((candidate) => candidate.elements).find((element) => element.id === narration.id);
+  assert.ok(changed?.kind === "text");
+  assert.deepEqual(changed.transform, { x: 337.5, y: 90, width: 45, height: 180 });
 });
 
 test("true spreads stay indivisible, preserve physical surfaces and block unsafe splitting", () => {
@@ -769,6 +846,7 @@ test("human frame, image and dialogue management capabilities form valid atomic 
   const created = dryRunEditorCapability("create_frame", { unitId: unit.id, position: { x: 180, y: 220 } }, context());
   const frame = created.result.working.document.units[0].frames[0];
   assert.ok(frame);
+  assert.equal(frame.border.width, 3);
   assert.equal(frame.layers.some((layer) => layer.kind === "art"), true);
   assert.equal(frame.layers.some((layer) => layer.kind === "text"), true);
 
@@ -792,6 +870,7 @@ test("human frame, image and dialogue management capabilities form valid atomic 
   const dialogue = dryRunEditorCapability("create_dialogue_balloon", { unitId: unit.id, frameId: frame.id, position: { x: .3, y: .25 }, content: "测试对白" }, context());
   const balloon = frameElements(dialogue.result.working.document.units[0].frames[0]).find((element): element is BalloonElement => element.kind === "balloon");
   assert.ok(balloon);
+  assert.equal(balloon.style.strokeWidth, 1.5);
   assert.equal(dialogue.result.working.document.dialogues.find((item) => item.id === balloon.dialogueId)?.content, "测试对白");
 
   fixture.working = dialogue.result.working;
@@ -802,6 +881,51 @@ test("human frame, image and dialogue management capabilities form valid atomic 
   const deletedFrame = dryRunEditorCapability("delete_frame", { unitId: unit.id, frameId: frame.id }, context());
   assert.equal(deletedFrame.result.working.document.units[0].frames.some((item) => item.id === frame.id), false);
   assert.throws(() => planEditorCapability("create_frame", { unitId: unit.id, position: { x: 80, y: 80 } }, { ...context(), actor: "agent" }), /disabled for Agent/);
+});
+
+test("new frames adapt to the gutter-safe space around the clicked position", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const surface = unit.surfaces[0]!;
+  const template = structuredClone(unit.frames[0]!);
+  const gutter = unit.layoutPolicy.gutter ?? 12;
+  const slot = {
+    x: surface.geometry.x + surface.geometry.width / 2 - 60,
+    y: surface.geometry.y + surface.geometry.height / 2 - 40,
+    width: 120,
+    height: 80,
+  };
+  const inset = 40;
+  const obstacleGeometries = [
+    { x: surface.geometry.x + inset, y: slot.y, width: slot.x - gutter - surface.geometry.x - inset, height: slot.height },
+    { x: slot.x + slot.width + gutter, y: slot.y, width: surface.geometry.x + surface.geometry.width - inset - slot.x - slot.width - gutter, height: slot.height },
+    { x: slot.x, y: surface.geometry.y + inset, width: slot.width, height: slot.y - gutter - surface.geometry.y - inset },
+    { x: slot.x, y: slot.y + slot.height + gutter, width: slot.width, height: surface.geometry.y + surface.geometry.height - inset - slot.y - slot.height - gutter },
+  ];
+  unit.frames = obstacleGeometries.map((geometry, index) => ({
+    ...structuredClone(template),
+    id: `adaptive-obstacle-${index + 1}`,
+    geometry,
+    storyRefs: [],
+    layers: template.layers.map((layer, layerIndex) => ({ ...structuredClone(layer), id: `adaptive-obstacle-${index + 1}-layer-${layerIndex + 1}`, elements: [] })),
+  }));
+  unit.readingSequence = unit.frames.map((frame) => ({ frameId: frame.id }));
+  const clicked = { x: slot.x + slot.width / 2, y: slot.y + slot.height / 2 };
+  const result = dryRunEditorCapability("create_frame", { unitId: unit.id, position: clicked }, {
+    fixture,
+    createId: (prefix) => `${prefix}-adaptive`,
+    actor: "human",
+  });
+  const created = result.result.working.document.units[0].frames.find((frame) => frame.id === "frame-adaptive");
+  assert.ok(created);
+  assert.ok(created.geometry.width >= 96 && created.geometry.width <= slot.width);
+  assert.ok(created.geometry.height >= 72 && created.geometry.height <= slot.height);
+  assert.ok(created.geometry.x <= clicked.x && created.geometry.x + created.geometry.width >= clicked.x);
+  assert.ok(created.geometry.y <= clicked.y && created.geometry.y + created.geometry.height >= clicked.y);
+  assert.equal(unit.frames.some((frame) => created.geometry.x < frame.geometry.x + frame.geometry.width + gutter
+    && created.geometry.x + created.geometry.width + gutter > frame.geometry.x
+    && created.geometry.y < frame.geometry.y + frame.geometry.height + gutter
+    && created.geometry.y + created.geometry.height + gutter > frame.geometry.y), false);
 });
 
 test("external frame and image capabilities preserve exact geometry, reading order and fixed image ownership", () => {
@@ -956,6 +1080,7 @@ test("page objects, breakout and frame overlap preserve explicit ownership and v
   const pageLayer = fixture.working.document.units[0].overlayLayers.find((layer) => layer.purpose === "page_content");
   const pageBalloon = pageLayer?.elements.find((element) => element.kind === "balloon");
   assert.ok(pageBalloon?.kind === "balloon");
+  assert.equal(pageBalloon.style.strokeWidth, 1.5);
   const pageView = createComicPageView(fixture.working.document, fixture.working.document.units[0]).elements.find((element) => element.id === pageBalloon.id);
   assert.equal(pageView?.type === "speech_balloon" ? pageView.comicFrameId : "unexpected", undefined);
   assert.equal(pageView?.type === "speech_balloon" ? pageView.location.space : "unexpected", "overlay");
@@ -1036,6 +1161,44 @@ test("multiple human capabilities plan one atomic ChangeSet without mutating the
   assert.equal(changed.transform.rotate, 28);
   assert.equal(result.working.document.dialogues.find((dialogue) => dialogue.id === balloon.dialogueId)?.content, content);
   assert.deepEqual(fixture, before);
+});
+
+test("frame balloons may cross an edge while retaining a selectable safe area", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const layer = frame.layers.find((item) => item.kind === "text");
+  const balloon = layer?.elements.find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(layer && balloon);
+  const context = { fixture, createId: (prefix: string) => `${prefix}-safe-area`, actor: "human" as const };
+  const bounds = frameBalloonCoordinateBounds(balloon.transform);
+  const boundaryTransform = { ...balloon.transform, x: bounds.minX, y: bounds.maxY - balloon.transform.height };
+
+  const moved = dryRunEditorCapability("update_balloon", {
+    unitId: unit.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    changes: { transform: boundaryTransform },
+  }, context);
+  const changed = frameElements(moved.result.working.document.units[0].frames[0]).find((element) => element.id === balloon.id);
+  assert.ok(changed?.kind === "balloon");
+  assert.deepEqual(changed.transform, boundaryTransform);
+
+  assert.throws(() => dryRunEditorCapability("update_balloon", {
+    unitId: unit.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    changes: { transform: { ...boundaryTransform, x: bounds.minX - .001 } },
+  }, context), /保留可选择区域/);
+  assert.throws(() => dryRunEditorCapability("set_element_transform", {
+    unitId: unit.id,
+    frameId: frame.id,
+    layerId: layer.id,
+    elementId: balloon.id,
+    transform: { ...boundaryTransform, y: bounds.maxY - balloon.transform.height + .001 },
+  }, context), /保留可选择区域/);
 });
 
 test("cut-corner dialogue gets a stable irregular octagon without a tail", () => {

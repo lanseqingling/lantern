@@ -14,7 +14,7 @@ import {
   renderPreviewPageGroupPng,
   renderSurfaceSvg,
 } from "@lantern/server/export-renderer";
-import { projectBalloonStrokeWidths, projectComicRenderScene, projectImageCrop, scaleImageCrop, type ComicDocument, type StoryboardBeat } from "@lantern/shared";
+import { projectBalloonOverlapMasks, projectBalloonStrokeWidths, projectComicRenderScene, projectImageCrop, scaleImageCrop, type BalloonElement, type ComicDocument, type StoryboardBeat } from "@lantern/shared";
 
 const storyboardBeats: StoryboardBeat[] = Array.from({ length: 8 }, (_, index) => ({
   id: `golden-storyboardBeat-${index + 1}`,
@@ -69,6 +69,7 @@ test("shared render scene defines visibility, clipping, geometry and overlay ord
   assert.deepEqual(scene.elements.map((node) => node.element.id), ["image-1", "text-1", "balloon-1", "overlay-text"]);
   assert.equal(scene.elements[0].clipFrame?.id, "frame-1");
   assert.equal(scene.elements[1].clipFrame, undefined);
+  assert.equal(scene.elements[2].clipFrame?.id, "frame-1");
   assert.deepEqual(scene.elements.at(-1)?.geometry, { x: 100, y: 21, width: 72, height: 36 });
   assert.ok((scene.elements.at(-1)?.zIndex ?? 0) > scene.frames[0].borderZIndex);
   const raisedFrame = structuredClone(document);
@@ -77,8 +78,69 @@ test("shared render scene defines visibility, clipping, geometry and overlay ord
   assert.ok((raisedScene.elements.find((node) => node.element.id === "image-1")?.zIndex ?? 0) > (raisedScene.elements.find((node) => node.element.id === "overlay-text")?.zIndex ?? 0));
   const balloon = scene.elements.find((node) => node.element.kind === "balloon")?.element;
   assert.ok(balloon?.kind === "balloon");
-  assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "thought" }), { outline: 1.8, tail: 1.8 });
-  assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "caption_box" }), { outline: 1.8, tail: 1.8 });
+  assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "normal" }), { outline: 2, tail: 2 });
+  assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "thought" }), { outline: 2, tail: 2 });
+  assert.deepEqual(projectBalloonStrokeWidths({ ...balloon, shape: "caption_box" }), { outline: 2, tail: 2 });
+});
+
+test("matching balloons of different native shapes project automatic overlap masks", () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  const textLayer = unit.frames[0].layers.find((layer) => layer.id === "text");
+  assert.ok(textLayer?.kind === "text");
+  const first = textLayer.elements.find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(first);
+  textLayer.elements.push({
+    ...structuredClone(first),
+    id: "balloon-2",
+    dialogueId: "dialogue-1",
+    shape: "thought",
+    transform: { x: .6, y: .12, width: .35, height: .26 },
+  });
+  const scene = projectComicRenderScene(document, unit);
+  const masks = projectBalloonOverlapMasks(scene.elements);
+  assert.equal(masks.has("balloon-1"), false);
+  assert.equal(masks.get("balloon-2")?.length, 1);
+  assert.equal(masks.get("balloon-2")?.[0].shape, "ellipse");
+  assert.equal(masks.get("balloon-2")?.[0].expansion, 1);
+
+  const svg = renderSurfaceSvg(document, unit, unit.surfaces[0]);
+  assert.match(svg, /mask id="balloon-overlap-balloon-1"/);
+  assert.match(svg, /fill="#000" stroke="#000" stroke-width="1" vector-effect="non-scaling-stroke"/);
+  assert.match(svg, /mask="url\(#balloon-overlap-balloon-2\)"/);
+
+  const differentStyle = structuredClone(document);
+  const differentLayer = differentStyle.units[0].frames[0].layers.find((layer) => layer.id === "text");
+  assert.ok(differentLayer?.kind === "text");
+  const second = differentLayer.elements.find((element) => element.id === "balloon-2");
+  assert.ok(second?.kind === "balloon");
+  second.style.stroke = "#ff0000";
+  assert.equal(projectBalloonOverlapMasks(projectComicRenderScene(differentStyle, differentStyle.units[0]).elements).size, 0);
+});
+
+test("matching paper balloons in one page-content layer also project overlap masks", () => {
+  const document = renderFixture();
+  const unit = document.units[0];
+  const textLayer = unit.frames[0].layers.find((layer) => layer.kind === "text");
+  assert.ok(textLayer?.kind === "text");
+  const source = textLayer.elements.find((element): element is BalloonElement => element.kind === "balloon");
+  assert.ok(source);
+  unit.overlayLayers.push({
+    id: "paper-dialogues",
+    name: "纸面对话",
+    zIndex: 3,
+    visible: true,
+    anchor: { type: "unit" },
+    purpose: "page_content",
+    surfaceId: "surface-1",
+    elements: [
+      { ...structuredClone(source), id: "paper-balloon-1", transform: { x: 30, y: 40, width: 80, height: 50 } },
+      { ...structuredClone(source), id: "paper-balloon-2", transform: { x: 75, y: 55, width: 80, height: 50 } },
+    ],
+  });
+  const masks = projectBalloonOverlapMasks(projectComicRenderScene(document, unit).elements);
+  assert.equal(masks.has("paper-balloon-1"), false);
+  assert.equal(masks.get("paper-balloon-2")?.length, 1);
 });
 
 test("image crop uses one projection for workbench and export", () => {
@@ -121,11 +183,11 @@ test("export consumes the same render scene semantics", () => {
   assert.match(svg, /<polygon[^>]+stroke="#123456"[^>]+stroke-width="3"/);
   assert.match(svg, /fill="#f6f1e8"/);
   assert.match(svg, /data-scene-id="image-1"[^>]+mix-blend-mode:multiply[^>]+clip-path=/);
-  assert.match(svg, /data-scene-id="balloon-1"/);
+  assert.match(svg, /data-scene-id="balloon-1"[^>]+clip-path="url\(#frame-clip-frame-1\)"/);
   assert.match(svg, /stroke="#234567"/);
-  assert.match(svg, /stroke-width="2.5" vector-effect="non-scaling-stroke"/);
-  assert.match(svg, /stroke-width="1.4"[^>]+vector-effect="non-scaling-stroke"/);
-  assert.equal(svg.match(/vector-effect="non-scaling-stroke"/g)?.length, 2);
+  assert.match(svg, /stroke="#234567" stroke-width="2"/);
+  assert.match(svg, /stroke-width="2" stroke-linecap="round"[^>]+vector-effect="non-scaling-stroke"/);
+  assert.equal(svg.match(/vector-effect="non-scaling-stroke"/g)?.length, 3);
   assert.match(svg, /保持三端一致/);
   assert.match(svg, />最后一句对白<\/tspan>/);
   assert.match(svg, />。<\/tspan>/);
@@ -137,7 +199,8 @@ test("export consumes the same render scene semantics", () => {
   assert.ok(cutCornerBalloon?.kind === "balloon");
   cutCornerBalloon.shape = "cut_corner";
   const cutCornerSvg = renderSurfaceSvg(cutCornerDocument, cutCornerDocument.units[0], cutCornerDocument.units[0].surfaces[0], new Map([["asset-1-v1", "data:image/png;base64,AA=="]]));
-  assert.match(cutCornerSvg, /<polygon points="[^\"]+" fill="#fffdf8" stroke="#234567"/);
+  assert.match(cutCornerSvg, /<polygon points="[^\"]+" fill="#fffdf8"\/>/);
+  assert.match(cutCornerSvg, /<polygon points="[^\"]+" fill="none" stroke="#234567" stroke-width="2"/);
 });
 
 test("bleed frame export clips its content but omits only the selected page-edge borders", () => {

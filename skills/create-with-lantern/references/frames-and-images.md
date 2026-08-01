@@ -21,9 +21,17 @@ Use the rendered page to judge the visible result and the structure projection t
 
 Create a Frame only on a story page. Set exact geometry and, when needed, a 1-based reading position. Enable overlap explicitly before creating or moving overlapping Frames. Visual `zIndex` and reading position are independent.
 
+Honor a creator-specified location. When the usual size does not fit there, prefer a smaller gutter-safe Frame near that location over silently moving it to a distant open area. Do not shrink it until it becomes unusable merely to satisfy spacing.
+
 Use `{kind: "rect"}` for a straight-corner rectangle or a four-point polygon for a controlled slant. Rounded and elliptical Frames may exist in imported or previously authored LCD, but the current external composition capability does not edit them. Keep polygon points ordered around a convex shape and avoid extreme corners that collapse the visible area. Bleed is a per-edge operation that extends that edge to its PageSurface boundary; change geometry and bleed in separate revision-bound calls.
 
 Duplicate and delete only the exact returned Frame handle. Deleting a Frame also removes its frame-anchored overlays, but does not delete reusable Assets or immutable image versions.
+
+## Resize Frames without scaling their contents
+
+Resizing a Frame changes its viewport, not the visible size of its frame-local balloons, text, effects, or non-fill images. Lantern rebases their local transforms to preserve their resolved unit-space geometry; the primary fill image adjusts its crop so its visual scale and position remain stable while the resized Frame changes what is visible. Moving a Frame is different: frame-local content follows it.
+
+After resizing, inspect the new draft for intentional clipping. Do not compensate by resizing each child unless the creator separately asks to change those objects.
 
 ## Place and edit fixed images
 

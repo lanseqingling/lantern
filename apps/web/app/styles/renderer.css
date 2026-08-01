@@ -86,9 +86,8 @@
 .balloon-order-anchor { position: absolute; pointer-events: none; }
 .balloon-order { position: absolute; z-index: 4; right: -7px; top: -7px; display: grid; place-items: center; min-width: 17px; height: 15px; border: 1px solid #fff; border-radius: 5px; background: #172026; padding: 0 3px; color: #fff; box-shadow: 0 3px 8px rgba(23,32,38,.16); font: inherit; font-size: 8px; font-weight: 900; line-height: 1; pointer-events: auto; cursor: grab; }
 .balloon-order.cross-page { min-width: 48px; white-space: nowrap; }
-.balloon-shape { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 2px 0 rgba(0,0,0,.14)); }
+.balloon-shape { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .balloon-appearance { position: absolute; z-index: 0; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
-.lcd-balloon.shape-normal .balloon-shape { filter: none; }
 .balloon-outline { stroke-linejoin: round; }
 .balloon-tail-fill { stroke: none; }
 .balloon-tail-outline { fill: none; stroke-linecap: round; stroke-linejoin: round; }

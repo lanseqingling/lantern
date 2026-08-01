@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { zipSync } from "fflate";
-import type { BalloonElement, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "@lantern/shared";
-import { balloonCutCornerPoints, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "@lantern/shared";
+import type { BalloonElement, BalloonOverlapMask, ComicDocument, Frame, Geometry, PageSurface, PresentationUnit, SceneElementNode, TextElement } from "@lantern/shared";
+import { balloonCutCornerPoints, projectBalloonOverlapMasks, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth } from "@lantern/shared";
 import { prisma } from "./db";
 import { getObject, putObject } from "./object-storage";
 
@@ -144,23 +144,39 @@ function renderTextContent(value: string, geometry: Geometry, style: TextElement
   return `<text x="${x}" y="${startY}" text-anchor="${textAnchor(align)}" font-family="${fontFamily}" font-size="${style.fontSize}"${fontWeight}${textStroke} fill="${escapeXml(color)}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? lineAdvance : 0}">${escapeXml(line)}</tspan>`).join("")}</text>`;
 }
 
-function renderBalloonShell(element: BalloonElement, geometry: Geometry) {
+function renderBalloonShell(element: BalloonElement, geometry: Geometry, overlapMasks: BalloonOverlapMask[] = []) {
   const style = element.style;
   const strokeWidths = projectBalloonStrokeWidths(element);
   const tail = projectBalloonTail(element);
   const tailFill = tail ? `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y} Z` : "";
   const tailOutline = tail ? `M ${tail.start.x} ${tail.start.y} C ${tail.startControl.x} ${tail.startControl.y}, ${tail.tip.x} ${tail.tip.y}, ${tail.tip.x} ${tail.tip.y} C ${tail.tip.x} ${tail.tip.y}, ${tail.endControl.x} ${tail.endControl.y}, ${tail.end.x} ${tail.end.y}` : "";
   const cutCornerPoints = element.shape === "cut_corner" ? balloonCutCornerPoints(element).map((point) => `${point.x * 100},${point.y * 100}`).join(" ") : undefined;
-  const shape = element.shape === "caption_box"
-    ? `<rect x="1.5" y="1.5" width="97" height="97" rx="3" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" vector-effect="non-scaling-stroke"/>`
+  const overlapMaskId = `balloon-overlap-${element.id}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const projectedMaskShape = (mask: BalloonOverlapMask) => {
+    const expansion = `fill="#000" stroke="#000" stroke-width="${mask.expansion}" vector-effect="non-scaling-stroke"`;
+    if (mask.shape === "rect") return `<rect x="${mask.x}" y="${mask.y}" width="${mask.width}" height="${mask.height}" rx="${mask.rx}" ry="${mask.ry}" ${expansion}/>`;
+    if (mask.shape === "polygon") return `<polygon points="${mask.points.map((point) => `${point.x},${point.y}`).join(" ")}" stroke-linejoin="round" ${expansion}/>`;
+    return `<ellipse cx="${mask.cx}" cy="${mask.cy}" rx="${mask.rx}" ry="${mask.ry}" ${expansion}/>`;
+  };
+  const needsOutlineMask = overlapMasks.length > 0 || Boolean(tailFill);
+  const outlineMask = needsOutlineMask
+    ? `<defs><mask id="${overlapMaskId}" maskUnits="userSpaceOnUse" x="-100" y="-100" width="300" height="300"><rect x="-100" y="-100" width="300" height="300" fill="#fff"/>${overlapMasks.map(projectedMaskShape).join("")}${tailFill ? `<path d="${tailFill}" fill="#000" stroke="#000" stroke-width="1" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ""}</mask></defs>`
+    : "";
+  const bodyFill = element.shape === "caption_box"
+    ? `<rect x="1.5" y="1.5" width="97" height="97" rx="3" fill="${escapeXml(style.fill)}"/>`
     : cutCornerPoints
-      ? `<polygon points="${cutCornerPoints}" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`
-    : `<ellipse cx="50" cy="50" rx="48" ry="46" fill="${escapeXml(style.fill)}" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" vector-effect="non-scaling-stroke"/>`;
-  const tailShape = tail ? `<path d="${tailFill}" fill="${escapeXml(style.fill)}"/><path d="${tailOutline}" fill="none" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.tail}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><ellipse cx="50" cy="50" rx="48" ry="46" fill="${escapeXml(style.fill)}"/>` : "";
-  return `<svg x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 100 100" overflow="visible" preserveAspectRatio="none">${shape}${tailShape}</svg>`;
+      ? `<polygon points="${cutCornerPoints}" fill="${escapeXml(style.fill)}"/>`
+      : `<ellipse cx="50" cy="50" rx="48" ry="46" fill="${escapeXml(style.fill)}"/>`;
+  const bodyOutline = element.shape === "caption_box"
+    ? `<rect x="1.5" y="1.5" width="97" height="97" rx="3" fill="none" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}"${needsOutlineMask ? ` mask="url(#${overlapMaskId})"` : ""} vector-effect="non-scaling-stroke"/>`
+    : cutCornerPoints
+      ? `<polygon points="${cutCornerPoints}" fill="none" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}" stroke-linejoin="round"${needsOutlineMask ? ` mask="url(#${overlapMaskId})"` : ""} vector-effect="non-scaling-stroke"/>`
+      : `<ellipse cx="50" cy="50" rx="48" ry="46" fill="none" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.outline}"${needsOutlineMask ? ` mask="url(#${overlapMaskId})"` : ""} vector-effect="non-scaling-stroke"/>`;
+  const tailShape = tail ? `<path d="${tailFill}" fill="${escapeXml(style.fill)}"/><path d="${tailOutline}" fill="none" stroke="${escapeXml(style.stroke)}" stroke-width="${strokeWidths.tail}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : "";
+  return `<svg x="${geometry.x}" y="${geometry.y}" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 100 100" overflow="visible" preserveAspectRatio="none">${outlineMask}${bodyFill}${tailShape}${bodyOutline}</svg>`;
 }
 
-function renderElement(node: SceneElementNode, assets: Map<string, string>, resources: Map<string, ComicDocument["resources"][number]>) {
+function renderElement(node: SceneElementNode, assets: Map<string, string>, resources: Map<string, ComicDocument["resources"][number]>, balloonOverlapMasks: Map<string, BalloonOverlapMask[]>) {
   const element = node.element;
   const geometry = node.geometry;
   const clip = node.clipFrame ? ` clip-path="url(#frame-clip-${escapeXml(node.clipFrame.id)})"` : "";
@@ -173,7 +189,7 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>, reso
     return `<image data-scene-id="${escapeXml(element.id)}" href="${data}" x="${geometry.x + crop.x * geometry.width}" y="${geometry.y + crop.y * geometry.height}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${element.opacity ?? 1}"${blend}${clip}${transform}/>`;
   }
   if (element.kind === "balloon") {
-    const shell = renderAppearance(element.appearance, geometry, assets) ?? renderBalloonShell(element, geometry);
+    const shell = renderAppearance(element.appearance, geometry, assets) ?? renderBalloonShell(element, geometry, balloonOverlapMasks.get(element.id));
     return `<g data-scene-id="${escapeXml(element.id)}"${clip}${transform}>${shell}${renderTextContent(node.dialogueText ?? "", geometry, element.style, element.style.textColor, { align: "center", fontWeight: 720, paddingX: 7, paddingY: 5, verticalFlow: "rl" })}</g>`;
   }
   if (element.kind === "text") {
@@ -190,6 +206,7 @@ function renderElement(node: SceneElementNode, assets: Map<string, string>, reso
 
 export function renderSurfaceSvg(document: ComicDocument, unit: PresentationUnit, surface: PageSurface, assets = new Map<string, string>()) {
   const scene = projectComicRenderScene(document, unit);
+  const balloonOverlapMasks = projectBalloonOverlapMasks(scene.elements);
   const resources = new Map(document.resources.map((resource) => [resource.assetVersionId, resource]));
   const defs: string[] = []; const body: Array<{ z: number; svg: string }> = [];
   for (const { frame, fillZIndex, borderZIndex } of scene.frames) {
@@ -198,7 +215,7 @@ export function renderSurfaceSvg(document: ComicDocument, unit: PresentationUnit
     body.push({ z: fillZIndex, svg: frameShape(frame, "#fff", "none", 0) });
     body.push({ z: borderZIndex, svg: frameBorderShape(frame) });
   }
-  scene.elements.forEach((node) => body.push({ z: node.zIndex, svg: renderElement(node, assets, resources) }));
+  scene.elements.forEach((node) => body.push({ z: node.zIndex, svg: renderElement(node, assets, resources, balloonOverlapMasks) }));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${surface.geometry.width}" height="${surface.geometry.height}" viewBox="${surface.geometry.x} ${surface.geometry.y} ${surface.geometry.width} ${surface.geometry.height}"><defs>${defs.join("")}</defs><rect x="${surface.geometry.x}" y="${surface.geometry.y}" width="${surface.geometry.width}" height="${surface.geometry.height}" fill="${escapeXml(unit.canvas.background.color)}"/>${body.sort((a, b) => a.z - b.z).map((entry) => entry.svg).join("")}</svg>`;
 }
 

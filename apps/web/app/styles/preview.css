@@ -9,6 +9,7 @@
   background-size: 24px 24px, 100% 100%;
   overscroll-behavior: none;
 }
+.preview-back { position: fixed; z-index: 50; left: 20px; top: 20px; }
 .preview-shell .paged-reader { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; touch-action: none; }
 .preview-page-wrap { position: relative; z-index: 2; display: grid; grid-template-columns: 1fr; width: min(100vw, var(--preview-width-at-full-height, 100vw)); height: min(100dvh, var(--preview-height-at-full-width, 100dvh)); max-width: 100vw; max-height: 100dvh; pointer-events: none; }
 .preview-page-wrap .comic-page { width: 100%; height: 100%; min-width: 0; border: 0; border-radius: 0; box-shadow: none; }
@@ -26,6 +27,19 @@
 .preview-page-turn.next { right: 0; cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath d='M7.8 4.2Q5.2 2.8 5.2 5.2v19.6q0 2.4 2.6 1l16.4-9.1q2.1-1.2 0-3.4z' fill='%2364c8c8'/%3E%3C/svg%3E") 15 15, e-resize; }
 .preview-page-turn.previous { cursor: var(--page-turn-previous-cursor); }
 .preview-page-turn.next { cursor: var(--page-turn-next-cursor); }
+.preview-progress-capsule { position: fixed; z-index: 45; left: 50%; bottom: 22px; display: grid; grid-template-columns: 40px minmax(160px, 1fr) 40px; align-items: center; gap: 10px; width: min(25vw, 340px); min-width: 280px; padding: 7px; border: 1px solid rgba(255,255,255,.9); border-radius: 999px; background: rgba(255,255,255,.88); box-shadow: 0 18px 48px rgba(23,32,38,.14), 0 0 0 1px rgba(100,200,200,.09); opacity: 0; visibility: hidden; pointer-events: none; transform: translate(-50%, 12px) scale(.98); backdrop-filter: blur(20px); transition: opacity 140ms ease, transform 180ms cubic-bezier(.2,.8,.2,1), visibility 0s linear 180ms; }
+.preview-shell.progress-visible .preview-progress-capsule { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, 0) scale(1); transition-delay: 0s; }
+.preview-progress-capsule button { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--cyan-deep); cursor: pointer; transition: background 140ms ease, color 140ms ease, opacity 140ms ease; }
+.preview-progress-capsule button:hover { background: var(--cyan-soft); color: var(--cyan-deep); }
+.preview-progress-capsule button:disabled { opacity: .28; cursor: default; }
+.preview-progress-capsule input[type="range"] { width: 100%; height: 6px; margin: 0; appearance: none; border: 0; border-radius: 999px; outline: none; background: linear-gradient(to right, var(--cyan) 0 var(--preview-progress), rgba(36,127,130,.14) var(--preview-progress) 100%); cursor: grab; }
+.preview-progress-capsule input[type="range"]:active { cursor: grabbing; }
+.preview-progress-capsule input[type="range"]:focus-visible { outline: 3px solid rgba(100,200,200,.28); outline-offset: 5px; }
+.preview-progress-capsule input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: transparent; }
+.preview-progress-capsule input[type="range"]::-webkit-slider-thumb { width: 18px; height: 18px; margin-top: -6px; appearance: none; border: 4px solid #fff; border-radius: 50%; background: var(--cyan); box-shadow: 0 2px 8px rgba(36,127,130,.3); }
+.preview-progress-capsule input[type="range"]::-moz-range-track { height: 6px; border: 0; border-radius: 999px; background: rgba(36,127,130,.14); }
+.preview-progress-capsule input[type="range"]::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--cyan); }
+.preview-progress-capsule input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border: 4px solid #fff; border-radius: 50%; background: var(--cyan); box-shadow: 0 2px 8px rgba(36,127,130,.3); }
 .preview-dock { position: fixed; z-index: 50; right: 18px; top: 50%; display: flex; flex-direction: column; align-items: center; gap: 7px; transform: translateY(-50%); visibility: visible; padding: 6px; border: 1px solid rgba(255,255,255,.88); border-radius: 22px; background: rgba(255,255,255,.84); box-shadow: 0 18px 48px rgba(23,32,38,.12), 0 0 0 1px rgba(100,200,200,.08); backdrop-filter: blur(20px); transition: transform 190ms cubic-bezier(.2,.8,.2,1), opacity 150ms ease, visibility 0s linear; }
 @keyframes previewDockModeEnter { from { transform: translate(calc(100% + 34px), -50%); opacity: 0; } to { transform: translateY(-50%); opacity: 1; } }
 .preview-dock.mode-entering { animation: previewDockModeEnter 190ms cubic-bezier(.2,.8,.2,1) both; }
@@ -110,4 +124,13 @@
   border-radius: 50%;
   background: var(--amber);
   box-shadow: 0 0 11px var(--amber);
+}
+
+@media (hover: none) {
+  .preview-progress-capsule { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-progress-capsule,
+  .preview-progress-capsule button { transition: none; }
 }

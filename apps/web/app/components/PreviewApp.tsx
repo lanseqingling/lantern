@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ComicRenderer } from "./ComicRenderer";
 import { createBlankWorkbench, loadDemoWorkbench, persistDemoWorkbench, type PersistedWorkbench } from "@/app/lib/workbench-state";
 import { Icon } from "@lantern/ui";
@@ -13,6 +13,7 @@ import { uiCopy } from "@/app/lib/ui-copy";
 
 export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const entryTransition = useContentRouteEntryTransition();
   const [state, setState] = useState<PersistedWorkbench>(() => createBlankWorkbench());
   const [loaded, setLoaded] = useState(false);
@@ -26,8 +27,11 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [progressVisible, setProgressVisible] = useState(false);
   const verticalReaderRef = useRef<HTMLElement>(null);
   const verticalScrollFrameRef = useRef<number | null>(null);
+  const progressVisibleRef = useRef(false);
+  const progressDraggingRef = useRef(false);
   const workspaceSettingsCommitQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
@@ -126,7 +130,20 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   const downloadsAsSpread = Boolean(downloadSpreadUnit || downloadPreviewSpreadUnits.length === 2);
   const atFirstPage = isVertical ? shownPageIndex === 0 : currentGroupIndex === 0;
   const atLastPage = isVertical ? shownPageIndex >= orderedUnits.length - 1 : currentGroupIndex >= displayGroups.length - 1;
+  const progressValue = isVertical ? shownPageIndex : currentGroupIndex;
+  const progressMaximum = Math.max(0, (isVertical ? orderedUnits.length : displayGroups.length) - 1);
+  const progressPercent = progressMaximum > 0 ? progressValue / progressMaximum * 100 : 0;
   const editUrl = `/comics/${comicId}/chapters/${chapterId}?focus=${shownPageIndex}`;
+  const openedFromChapters = searchParams.get("from") === "chapters";
+  const returnUrl = openedFromChapters ? `/comics/${comicId}` : editUrl;
+  const returnToSource = () => {
+    if (modeSwitching) return;
+    setDownloadMenuOpen(false);
+    setDockEntering(false);
+    setModeSwitching(true);
+    prepareContentRouteEntry("back");
+    window.setTimeout(() => router.push(returnUrl), modeSwitchMotionDelay());
+  };
   const returnToCanvas = () => {
     if (modeSwitching) return;
     setDownloadMenuOpen(false);
@@ -153,15 +170,35 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         });
     }
   };
+  const goToProgress = (value: number, behavior: ScrollBehavior = "auto") => {
+    const nextValue = Math.max(0, Math.min(progressMaximum, value));
+    if (!isVertical) {
+      setPageIndex(displayGroups[nextValue]?.unitIndices[0] ?? 0);
+      return;
+    }
+    setPageIndex(nextValue);
+    const reader = verticalReaderRef.current;
+    const page = reader?.querySelector<HTMLElement>(`[data-preview-page-index="${nextValue}"]`);
+    if (reader && page) reader.scrollTo({ top: page.offsetTop, behavior });
+  };
   const goPrevious = () => {
     if (atFirstPage) { setNotice(uiCopy.toast.preview.firstChapter); return; }
-    if (isVertical) setPageIndex((index) => Math.max(0, index - 1));
-    else setPageIndex(displayGroups[currentGroupIndex - 1]?.unitIndices[0] ?? 0);
+    goToProgress(progressValue - 1, "smooth");
   };
   const goNext = () => {
     if (atLastPage) { setNotice(uiCopy.toast.common.lastPage); return; }
-    if (isVertical) setPageIndex((index) => Math.min(orderedUnits.length - 1, index + 1));
-    else setPageIndex(displayGroups[currentGroupIndex + 1]?.unitIndices[0] ?? shownPageIndex);
+    goToProgress(progressValue + 1, "smooth");
+  };
+  const setProgressVisibility = (visible: boolean) => {
+    if (progressVisibleRef.current === visible) return;
+    progressVisibleRef.current = visible;
+    setProgressVisible(visible);
+  };
+  const handlePreviewPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType !== "mouse" || progressDraggingRef.current) return;
+    const inHorizontalTrigger = event.clientX >= window.innerWidth * .25 && event.clientX <= window.innerWidth * .75;
+    const inVerticalTrigger = event.clientY >= window.innerHeight * .75;
+    setProgressVisibility(inHorizontalTrigger && inVerticalTrigger);
   };
   const handleVerticalScroll = () => {
     if (verticalScrollFrameRef.current !== null) return;
@@ -245,16 +282,41 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
 
   if (loadError) return <main className="runtime-unavailable" role="alert"><section><span>{uiCopy.brand.api}</span><h1>{uiCopy.preview.page.loadFailed}</h1><p>{loadError}</p><button type="button" onClick={() => window.location.reload()}>{uiCopy.common.action.reconnect}</button></section></main>;
   if (!loaded) return <main className="runtime-unavailable"><section><span>{uiCopy.brand.preview}</span><h1>{uiCopy.preview.page.loadingSavedVersion}</h1></section></main>;
-  if (!sourceEnvelope) return <main className={`runtime-unavailable route-page-transition ${entryTransition}`} role="status"><section><span>{uiCopy.brand.preview}</span><h1>{uiCopy.preview.page.noSavedVersion}</h1><p>{uiCopy.preview.page.noSavedVersionDescription}</p><button type="button" onClick={() => { prepareContentRouteEntry("back"); router.push(editUrl); }}>{uiCopy.preview.action.backToWorkbench}</button></section></main>;
+  if (!sourceEnvelope) return <main className={`runtime-unavailable route-page-transition ${entryTransition}`} role="status"><section><span>{uiCopy.brand.preview}</span><h1>{uiCopy.preview.page.noSavedVersion}</h1><p>{uiCopy.preview.page.noSavedVersionDescription}</p><button type="button" onClick={returnToSource}>{openedFromChapters ? uiCopy.preview.action.backToChapters : uiCopy.preview.action.backToWorkbench}</button></section></main>;
 
   return (
-    <main className={`preview-shell route-page-transition ${entryTransition} ${isVertical ? "format-vertical" : "format-page"}`}>
+    <main
+      className={`preview-shell route-page-transition ${entryTransition} ${isVertical ? "format-vertical" : "format-page"} ${progressVisible ? "progress-visible" : ""}`}
+      onPointerMove={handlePreviewPointerMove}
+      onPointerLeave={() => { if (!progressDraggingRef.current) setProgressVisibility(false); }}
+    >
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
+      <button type="button" className="preview-back app-page-corner-button" aria-label={openedFromChapters ? uiCopy.preview.action.backToChapters : uiCopy.preview.action.backToWorkbench} disabled={modeSwitching} onClick={returnToSource}><Icon name="collapse" /></button>
       <section ref={isVertical ? verticalReaderRef : undefined} onScroll={isVertical ? handleVerticalScroll : undefined} className={`reader paged-reader ${isVertical ? "vertical-reader" : displayedPageIndices.length === 2 || currentGroup?.trueSpread ? "is-spread" : "is-single"} ${currentGroup?.trueSpread ? "is-true-spread" : ""}`} data-testid="preview-reader">
         {!isVertical ? <button type="button" className="preview-page-turn previous" aria-label={uiCopy.viewer.action.previousPage} onClick={goPrevious} /> : null}
         <div className={isVertical ? "preview-page-wrap vertical-preview-strip" : "preview-page-wrap"} style={previewPageWrapStyle}>{displayedPageIndices.map((index) => isVertical ? <div className="vertical-preview-page" data-preview-page-index={index} key={orderedUnits[index]?.id ?? index}><ComicRenderer document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} /></div> : <ComicRenderer key={orderedUnits[index]?.id ?? index} document={document} resolvedResources={sourceEnvelope.resolvedResources} pageIndex={index} />)}</div>
         {!isVertical ? <button type="button" className="preview-page-turn next" aria-label={uiCopy.viewer.action.nextPage} onClick={goNext} /> : null}
       </section>
+
+      <nav className="preview-progress-capsule" aria-label={uiCopy.preview.progress.navigationAria}>
+        <button type="button" aria-label={uiCopy.viewer.action.previousPage} disabled={atFirstPage} onClick={goPrevious}><Icon name="collapse" /></button>
+        <input
+          type="range"
+          min={0}
+          max={progressMaximum}
+          step={1}
+          value={progressValue}
+          disabled={progressMaximum === 0}
+          aria-label={uiCopy.preview.progress.navigationAria}
+          aria-valuetext={uiCopy.preview.progress.position(progressValue + 1, progressMaximum + 1)}
+          style={{ "--preview-progress": `${progressPercent}%` } as CSSProperties}
+          onChange={(event) => goToProgress(Number(event.currentTarget.value))}
+          onPointerDown={() => { progressDraggingRef.current = true; setProgressVisibility(true); }}
+          onPointerUp={() => { progressDraggingRef.current = false; }}
+          onPointerCancel={() => { progressDraggingRef.current = false; setProgressVisibility(false); }}
+        />
+        <button type="button" aria-label={uiCopy.viewer.action.nextPage} disabled={atLastPage} onClick={goNext}><Icon name="expand" /></button>
+      </nav>
 
       <nav className={`preview-dock ${dockEntering ? "mode-entering" : ""} ${modeSwitching ? "mode-exiting" : ""}`} aria-label={uiCopy.preview.toolbar.previewAria}>
         <div className="preview-mode-toggle" aria-label={uiCopy.preview.toolbar.modeSwitchAria}>

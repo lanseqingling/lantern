@@ -1376,6 +1376,7 @@ export const uiCopy = {
     },
     action: {
       backToWorkbench: "返回工作台",
+      backToChapters: "返回漫画章节",
       downloadSpread: "下载当前双页",
       downloadPage: "下载当前页",
       downloadChapterImages: "下载本话图片（ZIP）",
@@ -1391,6 +1392,8 @@ export const uiCopy = {
     },
     progress: {
       preparingDownload: "准备下载…",
+      navigationAria: "阅读进度",
+      position: (current: number, total: number) => `第 ${current} 个阅读位置，共 ${total} 个`,
     },
     error: {
       download: "下载失败，请稍后重试。",

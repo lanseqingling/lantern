@@ -62,7 +62,8 @@ export function SpaceNavigation() {
   const comicId = comicMatch ? decodeURIComponent(comicMatch[1]) : null;
   const chapterId = chapterMatch ? decodeURIComponent(chapterMatch[2]) : null;
   const isAssetSpace = /^\/comics\/[^/]+\/assets(?:\/|$)/.test(pathname);
-  const isManagedSpace = pathname === "/workspace" || Boolean(comicId && !isAssetSpace);
+  const isReadingPreview = /^\/comics\/[^/]+\/chapters\/[^/]+\/preview(?:\/|$)/.test(pathname);
+  const isManagedSpace = pathname === "/workspace" || Boolean(comicId && !isAssetSpace && !isReadingPreview);
   const [comicResult, setComicResult] = useState<{ comicId: string; comic: ComicListItem | null } | null>(null);
   const comic = comicResult?.comicId === comicId ? comicResult.comic : null;
   const [projectMeta, setProjectMeta] = useState<ProjectMetaDetail | null>(null);

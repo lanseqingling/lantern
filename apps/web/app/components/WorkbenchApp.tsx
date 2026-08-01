@@ -312,7 +312,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const searchParams = useSearchParams();
   const assetCreateIntent = searchParams.get("assetCreate");
   const assetCreateDraft = searchParams.get("assetDraft");
-  const previewRoute = `/comics/${comicId}/chapters/${chapterId}/preview`;
+  const previewRoute = `/comics/${comicId}/chapters/${chapterId}/preview?from=workbench`;
   const [state, setState] = useState<PersistedWorkbench>(() => createBlankWorkbench());
   const [hydrated, setHydrated] = useState(false);
   const [dockEntering, setDockEntering] = useState(false);

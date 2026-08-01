@@ -289,7 +289,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
       <div className="chapter-list-head"><h2>{uiCopy.comic.overview.section.chapters}</h2></div>
       {error ? <p className="chapter-list-error">{error}</p> : null}
       {comic.chapters.length ? comic.chapters.map((chapter) => <article className="chapter-list-card" key={chapter.id}>
-        <button type="button" className="chapter-list-open" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}${chapter.status === "completed" ? "/preview" : ""}`)}>
+        <button type="button" className="chapter-list-open" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}${chapter.status === "completed" ? "/preview?from=chapters" : ""}`)}>
           {chapter.coverUrl ? <img src={chapter.coverUrl} alt={uiCopy.comic.overview.cover.chapterAlt(chapter.number)} loading="lazy" decoding="async"/> : <div className="chapter-thumb-placeholder"><span>{chapter.number}</span></div>}
           <span><small>{uiCopy.comic.overview.chapter.numberLabel(chapter.number)}</small><strong>{chapter.title}</strong><em><b className={`chapter-status ${chapter.status}`}>{creationStatusLabel(chapter.status)}</b>{chapter.summary}</em></span>
         </button>
@@ -297,7 +297,7 @@ export function ComicOverviewClient({ comicId }: { comicId: string }) {
           <button type="button" className="chapter-more-button" aria-label={uiCopy.comic.overview.chapter.moreAria(chapter.number)} onClick={() => { setChapterMenuId((current) => current === chapter.id ? null : chapter.id); setMenuOpen(false); }}><Icon name="more" /></button>
           {chapterMenuId === chapter.id ? <div className={`chapter-more-menu ${chapterMenuOpensUpward ? "opens-upward" : ""}`} role="menu">
             <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}`)}><Icon name="workbench" variant="compact" /><span>{uiCopy.common.action.enterWorkbench}</span></button>
-            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}/preview`)}><Icon name="preview" /><span>{uiCopy.comic.action.readingPreview}</span></button>
+            <button type="button" onClick={() => navigate(`/comics/${comic.id}/chapters/${chapter.id}/preview?from=chapters`)}><Icon name="preview" /><span>{uiCopy.comic.action.readingPreview}</span></button>
             <button type="button" onClick={() => { setChapterSettingsId(chapter.id); setChapterSettingsDraft({ title: chapter.title, summary: chapter.summary, status: chapter.status }); }}><Icon name="comicSettings" /><span>{uiCopy.comic.overview.section.chapterSettings}</span></button>
             <button type="button" className="chapter-delete-action" disabled={deletingChapterId === chapter.id} onClick={() => setConfirmDelete({ type: "chapter", chapter })}><Icon name="delete" /><span>{deletingChapterId === chapter.id ? uiCopy.common.progress.deletingPlain : uiCopy.comic.overview.action.deleteChapter}</span></button>
           </div> : null}

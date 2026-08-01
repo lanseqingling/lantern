@@ -61,6 +61,7 @@ import {
   ComicFormatVerticalIcon,
   PageSingleIcon,
   PageSpreadIcon,
+  ProjectMenuIcon,
   WorkbenchCompactIcon,
   WorkbenchIcon,
 } from "./custom";
@@ -103,6 +104,7 @@ export const iconRegistry = {
   reference: icon(AtSign),
   edit: icon(Pencil),
   hamburger: icon(Menu),
+  projectMenu: icon(ProjectMenuIcon, { strokeWidth: 2 }),
   download: icon(Download),
   publish: icon(FileUp),
   add: icon(Plus),

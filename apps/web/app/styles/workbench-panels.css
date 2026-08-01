@@ -413,8 +413,7 @@ html[data-lantern-content-route-transition] .route-page-transition.route-page-tr
 .library-brand strong, .library-brand small { display: block; }
 .library-brand strong { color: var(--cyan-deep); font-size: 15px; white-space: nowrap; }
 .library-brand small { margin-top: 2px; color: var(--muted); font-size: 10px; }
-.chapter-back-icon { padding: 10px 14px; border: 1px solid rgba(255,255,255,.85); border-radius: 999px; background: rgba(255,255,255,.7); box-shadow: var(--shadow-soft); color: #405058; font-size: 11px; font-weight: 800; }
-.chapter-top-left { display: flex; align-items: center; gap: 12px; }
+.chapter-top-left { display: flex; align-items: center; gap: 12px; margin-left: 100px; }
 .chapter-top-right, .global-header-actions { display: flex; align-items: center; gap: 10px; }
 .global-icon-button { position: relative; display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.85); border-radius: 15px; background: rgba(255,255,255,.7); box-shadow: var(--shadow-soft); color: var(--cyan-deep); cursor: pointer; backdrop-filter: blur(14px); transition: transform 180ms ease, background 180ms ease, color 180ms ease, box-shadow 180ms ease; }
 .global-icon-button:hover { background: rgba(232,248,248,.82); color: #1d777a; box-shadow: 0 14px 34px rgba(36,127,130,.16); transform: translateY(-1px); }
@@ -451,14 +450,12 @@ html[data-lantern-content-route-transition] .route-page-transition.route-page-tr
 @media (prefers-reduced-motion: reduce) {
   .workbench-tour-target { box-shadow: none; }
 }
-.chapter-back-icon { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border-radius: 15px; color: var(--cyan-deep); }
-.chapter-back-icon .lantern-icon { width: 18px; height: 18px; }
-.library-hero { position: relative; z-index: 2; margin-top: calc(10vh + 42px); }
+.library-hero { position: relative; z-index: 2; margin-top: clamp(88px, calc(7vh + 42px), 118px); }
 .library-hero > span, .chapter-hero > div > span { color: var(--cyan-deep); font-size: 12px; font-weight: 900; letter-spacing: .08em; }
 .library-hero h1 { margin: 16px 0; color: var(--ink); font-size: clamp(50px, 7vw, 82px); line-height: 1.06; letter-spacing: -.05em; }
 .library-hero p { max-width: 600px; color: #52616a; font-size: 15px; line-height: 1.75; }
-.comic-library { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; width: 100%; margin-top: 7vh; }
-.library-add-comic-button { position: absolute; right: 0; top: -64px; display: grid; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 18px; background: var(--cyan); box-shadow: 0 12px 30px rgba(36,127,130,.24), 0 0 0 6px rgba(100,200,200,.12); color: #fff; cursor: pointer; }
+.comic-library { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; width: 100%; margin-top: clamp(26px, 3vh, 38px); }
+.library-add-comic-button, .chapter-add-button { display: grid; place-items: center; width: 42px; height: 42px; flex: none; border: 0; border-radius: 15px; background: var(--cyan); box-shadow: 0 10px 24px rgba(36,127,130,.22), 0 0 0 5px rgba(100,200,200,.12); color: #fff; padding: 0; cursor: pointer; }
 .library-add-comic-button span, .chapter-add-button span { position: relative; display: block; width: 18px; height: 18px; }
 .library-add-comic-button span::before, .library-add-comic-button span::after, .chapter-add-button span::before, .chapter-add-button span::after { content: ""; position: absolute; left: 50%; top: 50%; width: 18px; height: 2px; border-radius: 999px; background: currentColor; transform: translate(-50%, -50%); }
 .library-add-comic-button span::after, .chapter-add-button span::after { transform: translate(-50%, -50%) rotate(90deg); }
@@ -484,10 +481,7 @@ html[data-lantern-content-route-transition] .route-page-transition.route-page-tr
 .chapter-page { padding: 28px var(--app-page-gutter) 70px; }
 .comic-settings-wrap { position: relative; z-index: 91; }
 .comic-settings-trigger { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.85); border-radius: 15px; background: rgba(255,255,255,.7); box-shadow: var(--shadow-soft); color: var(--cyan-deep); cursor: pointer; }
-.settings-mark { position: relative; display: block; width: 18px; height: 18px; color: currentColor; }
-.settings-mark::before, .settings-mark::after { content: ""; position: absolute; box-sizing: border-box; }
-.comic-settings-mark::before { inset: 2px 3px 3px 2px; border: 1.7px solid currentColor; border-radius: 5px; background: linear-gradient(135deg, rgba(100,200,200,.16), rgba(255,255,255,.4)); box-shadow: 3px -3px 0 rgba(100,200,200,.18); }
-.comic-settings-mark::after { right: 1px; top: 1px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 3px rgba(242,184,75,.18); }
+.comic-settings-trigger .lantern-icon { width: 20px; height: 20px; }
 .comic-settings-menu, .chapter-more-menu { position: absolute; z-index: 20; display: grid; gap: 4px; width: 166px; padding: 7px; border: 1px solid rgba(255,255,255,.9); border-radius: 16px; background: rgba(255,255,255,.97); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
 .comic-settings-menu { left: 0; top: 50px; }
 .comic-settings-menu button, .chapter-more-menu button { display: flex; align-items: center; gap: 8px; min-height: 34px; border: 0; border-radius: 11px; background: transparent; color: #405058; padding: 0 10px; font-size: 11px; font-weight: 880; text-align: left; cursor: pointer; }
@@ -507,8 +501,6 @@ html[data-lantern-content-route-transition] .route-page-transition.route-page-tr
 .chapter-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 72px; }
 .chapter-list h2 { font-size: 16px; }
 .chapter-list-head { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; margin-bottom: 2px; }
-.chapter-list-head button { border: 0; border-radius: 999px; background: var(--cyan); color: white; padding: 9px 14px; font-size: 10px; font-weight: 900; cursor: pointer; }
-.chapter-list-head .chapter-add-button { display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border-radius: 18px; box-shadow: 0 12px 30px rgba(36,127,130,.24), 0 0 0 6px rgba(100,200,200,.12); }
 .chapter-list-error { grid-column: 1 / -1; margin: 0 0 10px; color: var(--danger); font-size: 10px; font-weight: 850; }
 .chapter-list-card { position: relative; border: 1px solid rgba(255,255,255,.9); border-radius: 22px; background: rgba(255,255,255,.72); box-shadow: var(--shadow-soft); }
 .chapter-list-open { display: grid; grid-template-columns: 76px minmax(0,1fr); gap: 16px; align-items: center; width: 100%; padding: 10px 54px 10px 10px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }

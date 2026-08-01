@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { SpaceNavigation } from "@/app/components/SpaceNavigation";
 import { uiCopy } from "@/app/lib/ui-copy";
 
 export const metadata: Metadata = {
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body><SpaceNavigation />{children}</body>
     </html>
   );
 }

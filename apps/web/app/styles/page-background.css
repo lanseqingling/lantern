@@ -2,8 +2,8 @@
   --app-page-gutter: clamp(22px, 5vw, 80px);
   --app-page-wide: 1120px;
   --app-page-narrow: 760px;
-  --app-page-corner-top: 28px;
-  --app-page-corner-inset: 32px;
+  --app-page-corner-top: 20px;
+  --app-page-corner-inset: 20px;
   --app-surface-cyan-position: 94% -6%;
   --app-surface-amber-position: 10% 90%;
   --app-surface-cyan-glow: rgba(128, 211, 208, .075);

@@ -91,8 +91,6 @@
   .library-header, .chapter-page > header { left: 16px; right: 16px; }
   .chapter-top-right .library-brand { display: none; }
   .library-hero h1 { font-size: 40px; }
-  .library-add-comic-button { top: -56px; width: 44px; height: 44px; border-radius: 16px; }
-  .chapter-list-head .chapter-add-button { width: 44px; height: 44px; border-radius: 16px; }
   .comic-library-open { grid-template-columns: 110px 1fr; gap: 14px; padding-right: 16px; padding-bottom: 52px; }
   .comic-cover { height: 170px; }
   .comic-library-card h2 { font-size: 22px; }

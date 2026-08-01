@@ -344,6 +344,18 @@ export const uiCopy = {
       creationModeAria: "当前为创作模式",
     },
   },
+  spaceNavigation: {
+    aria: "创作空间层级",
+    library: "我的漫画",
+    recent: "最近工程",
+    recentList: "最近打开的工程",
+    loadingComic: "正在载入漫画",
+    loadingChapter: "正在载入章节",
+    comicFallback: "漫",
+    chapterFallback: "话",
+    chapterTooltip: (comicTitle: string, chapterTitle: string, revision?: number) => `${comicTitle} · ${chapterTitle}${revision === undefined ? "" : ` · r${revision}`}`,
+    recentProjectTooltip: (comicTitle: string, chapterTitle: string) => `${comicTitle} · ${chapterTitle}`,
+  },
   library: {
     hero: {
       currentWorkspace: "当前创作空间",
@@ -426,11 +438,8 @@ export const uiCopy = {
       progress: {
         loading: "正在加载漫画…",
       },
-      navigation: {
-        backToLibraryAria: "返回我的漫画",
-        openAssetsAria: "进入资产空间",
-      },
       action: {
+        openProjectMenu: "漫画菜单",
         openSettings: "漫画设置",
         newChapter: "新建一话",
         saveSettings: "保存设置",
@@ -455,7 +464,6 @@ export const uiCopy = {
         chapterAlt: (number: number) => `第 ${number} 话封面`,
       },
       chapter: {
-        defaultTitle: (number: number) => `第 ${number} 话`,
         numberLabel: (number: number) => `第 ${number} 话`,
         moreAria: (number: number) => `第 ${number} 话更多选项`,
         waiting: "等待第一话",
@@ -942,10 +950,7 @@ export const uiCopy = {
       loadingDraft: "正在载入工作稿",
     },
     navigation: {
-      backToComic: "返回漫画",
-      backToHome: "返回首页",
       projectMenuAria: "打开项目菜单",
-      projectSubtitle: (comic: string, chapter: string, revision: number, mode: "server" | "demo" | "other") => `${comic} · ${chapter} · r${revision}${mode === "server" ? " · 已持久化" : mode === "demo" ? " · 离线演示" : ""}`,
       loadingBrand: "LANTERN WORKBENCH",
     },
     creationSpace: {

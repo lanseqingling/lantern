@@ -34,6 +34,14 @@ export function WorkbenchCompactIcon({ size = 16, ...props }: IconGlyphProps): R
   </IconCanvas>;
 }
 
+export function ProjectMenuIcon({ size = 16, ...props }: IconGlyphProps): ReactElement {
+  return <IconCanvas size={size} {...props}>
+    <rect x="4.5" y="6" width="14" height="13.5" rx="4" />
+    <circle cx="17.5" cy="6.5" r="5" fill="rgba(242,184,75,.2)" stroke="none" />
+    <circle cx="17.5" cy="6.5" r="3.1" fill="#f2b84b" stroke="none" />
+  </IconCanvas>;
+}
+
 export function ComicFormatPageIcon({ size = 16, ...props }: IconGlyphProps): ReactElement {
   return <IconCanvas size={size} {...props}>
     <rect x="3" y="3" width="18" height="18" rx="3" />

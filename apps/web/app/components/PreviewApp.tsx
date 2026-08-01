@@ -21,6 +21,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
   const [pageIndex, setPageIndex] = useState(0);
   const [pageDisplayMode, setPageDisplayMode] = useState<PageDisplayMode>("single");
   const [workspaceProjectId, setWorkspaceProjectId] = useState<string | null>(null);
+  const [previewProjectMeta, setPreviewProjectMeta] = useState<{ comicTitle: string; chapterTitle: string } | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -46,6 +47,7 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
         setState(loaded.state);
         setPageDisplayMode(loaded.state.workspaceSettings?.pageDisplayMode ?? "single");
         setWorkspaceProjectId(loaded.ids.projectId);
+        setPreviewProjectMeta({ comicTitle: loaded.comic.title, chapterTitle: loaded.chapter.title });
         setLoaded(true);
       } catch (error) {
         if (!canceled) setLoadError(error instanceof Error ? error.message : uiCopy.workbench.error.apiUnavailable);
@@ -54,6 +56,17 @@ export function PreviewApp({ comicId, chapterId }: { comicId: string; chapterId:
     void hydrate();
     return () => { canceled = true; };
   }, [chapterId]);
+
+  useEffect(() => {
+    if (!loaded || !previewProjectMeta) return;
+    window.dispatchEvent(new CustomEvent("lantern:space-project-meta", { detail: {
+      comicId,
+      chapterId,
+      comicTitle: previewProjectMeta.comicTitle,
+      chapterTitle: previewProjectMeta.chapterTitle,
+      revision: state.fixture.working.revision,
+    } }));
+  }, [chapterId, comicId, loaded, previewProjectMeta, state.fixture.working.revision]);
 
   useEffect(() => {
     if (!notice) return;

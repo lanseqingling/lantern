@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { apiCreateComic, apiListComics, type ComicListItem } from "@/app/lib/api-client";
 import { navigateWithContentTransition } from "@/app/lib/content-route-transition";
 import { CustomSelect } from "./CustomSelect";
+import { AppDialogPortal } from "./AppDialogPortal";
 import { uiCopy } from "@/app/lib/ui-copy";
+
+const CREATE_COMIC_EVENT = "lantern:create-comic";
 
 function creationStatusLabel(status: ComicListItem["status"]) {
   return status === "completed" ? uiCopy.comic.creationStatus.complete : uiCopy.comic.creationStatus.creating;
@@ -32,6 +35,12 @@ export function LibraryClient() {
       .then((page) => { if (alive) { setComics(page.items); setNextCursor(page.nextCursor); } })
       .catch(() => { if (alive) setError(uiCopy.library.error.listLoadFailed); });
     return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    const openCreateDialog = () => setCreating(true);
+    window.addEventListener(CREATE_COMIC_EVENT, openCreateDialog);
+    return () => window.removeEventListener(CREATE_COMIC_EVENT, openCreateDialog);
   }, []);
 
   const loadMore = async () => {
@@ -63,7 +72,6 @@ export function LibraryClient() {
 
   return <>
     <section className="comic-library app-page-wide" aria-label={uiCopy.library.navigation.listAria}>
-      <button type="button" className="library-add-comic-button" aria-label={uiCopy.library.navigation.newComicAria} onClick={() => setCreating(true)}><span aria-hidden="true" /></button>
       {error ? <p className="library-error">{error}</p> : null}
       {comics.map((comic) => {
         const latest = comic.chapters.at(-1);
@@ -76,13 +84,17 @@ export function LibraryClient() {
       })}
       {nextCursor ? <button type="button" className="library-load-more" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? uiCopy.library.progress.loadingMore : uiCopy.library.action.loadMore}</button> : null}
     </section>
-    {creating ? <div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setCreating(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="new-comic-title" onMouseDown={(event) => event.stopPropagation()}>
+    {creating ? <AppDialogPortal><div className="creation-dialog-backdrop" role="presentation" onMouseDown={() => setCreating(false)}><section className="creation-dialog" role="dialog" aria-modal="true" aria-labelledby="new-comic-title" onMouseDown={(event) => event.stopPropagation()}>
       <div><small>{uiCopy.eyebrow.newComic}</small><h2 id="new-comic-title">{uiCopy.library.empty.creationTitle}</h2></div>
       <label>{uiCopy.comic.field.name}<input autoFocus value={draft.title} placeholder={uiCopy.comic.field.name} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label>
       <label>{uiCopy.comic.field.description}<textarea value={draft.summary} placeholder={uiCopy.library.form.descriptionPlaceholder} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} /></label>
       <label>{uiCopy.library.form.structureLabel}<CustomSelect ariaLabel={uiCopy.library.form.structureLabel} className="creation-select compact" value={draft.format === "four_panel" ? "page" : draft.format} options={formatOptions} onChange={(value) => setDraft((current) => ({ ...current, format: value as typeof current.format }))} /></label>
       {error ? <p className="creation-error">{error}</p> : null}
       <footer><button type="button" onClick={() => setCreating(false)}>{uiCopy.common.action.cancel}</button><button type="button" className="primary" disabled={!draft.title.trim() || submitting} onClick={() => void createComic()}>{submitting ? uiCopy.common.progress.creating : uiCopy.library.action.createComic}</button></footer>
-    </section></div> : null}
+    </section></div></AppDialogPortal> : null}
   </>;
+}
+
+export function LibraryCreateComicButton() {
+  return <button type="button" className="library-add-comic-button" aria-label={uiCopy.library.navigation.newComicAria} onClick={() => window.dispatchEvent(new Event(CREATE_COMIC_EVENT))}><span aria-hidden="true" /></button>;
 }

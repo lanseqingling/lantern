@@ -4004,11 +4004,21 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     return <p>{message.text}</p>;
   };
 
-  const projectSubtitle = uiCopy.workbench.navigation.projectSubtitle(workbenchMeta.comicTitle, workbenchMeta.chapterTitle, state.fixture.working.revision, runtimeAdapter === "server" || runtimeAdapter === "demo" ? runtimeAdapter : "other");
   const setCreationSpaceOpen = (open: boolean) => {
     setLeftOpen(open);
     if (!open) setProjectMenu(false);
   };
+
+  useEffect(() => {
+    if (!hydrated) return;
+    window.dispatchEvent(new CustomEvent("lantern:space-project-meta", { detail: {
+      comicId,
+      chapterId,
+      comicTitle: workbenchMeta.comicTitle,
+      chapterTitle: workbenchMeta.chapterTitle,
+      revision: state.fixture.working.revision,
+    } }));
+  }, [chapterId, comicId, hydrated, state.fixture.working.revision, workbenchMeta.chapterTitle, workbenchMeta.comicTitle]);
 
   if (hydrated && runtimeError) {
     return <main className="runtime-unavailable" role="alert"><section><span>{uiCopy.brand.api}</span><h1>{uiCopy.workbench.page.loadFailed}</h1><p>{runtimeError}</p><button type="button" onClick={() => window.location.reload()}>{uiCopy.common.action.reconnect}</button></section></main>;
@@ -4023,17 +4033,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     <WorkbenchShell className={`route-page-transition ${entryTransition} mode-${canvasMode} ${leftOpen ? "left-open" : ""} ${agentOpen ? "agent-open" : ""} ${versionsOpen ? "version-open" : ""}`} data-testid="workbench" onPointerDownCapture={handleWorkbenchPointerDownCapture}>
       <div className="ambient ambient-cyan" /><div className="ambient ambient-amber" />
       <header className="project-chip" data-testid="project-chip">
-        <button className="project-back app-page-corner-button" type="button" aria-label={uiCopy.workbench.navigation.backToComic} onClick={() => navigate(`/comics/${comicId}`, "back")}><Icon name="collapse" /></button>
-        <button className="project-main" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label={uiCopy.workbench.navigation.projectMenuAria}>
-          <span className="project-main-card">
-            <span><strong>{uiCopy.brand.name}</strong><small className="project-subtitle" data-full-text={projectSubtitle} tabIndex={0}><span>{projectSubtitle}</span></small></span>
-            <Icon name="hamburger" />
-          </span>
-        </button>
+        <button className="project-menu-trigger app-page-corner-button" type="button" onClick={() => { closeFloatingMenus("project"); setProjectMenu((open) => !open); }} aria-label={uiCopy.workbench.navigation.projectMenuAria} aria-expanded={projectMenu}><Icon name="projectMenu" /></button>
         {projectMenu ? (
           <div className="project-menu" role="menu">
-            <button type="button" className="route-item" onClick={() => navigate("/workspace", "back")}><span className="menu-action-label"><Icon name="home" />{uiCopy.workbench.navigation.backToHome}</span></button>
-            <button type="button" className="route-item" onClick={() => navigate(`/comics/${comicId}`, "back")}><span className="menu-action-label"><Icon name="comic" />{uiCopy.workbench.navigation.backToComic}</span></button>
             <button type="button" className="route-item" onClick={() => {
               setProjectMenu(false);
               navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`);

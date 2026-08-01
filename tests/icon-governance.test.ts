@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { iconNames, iconRegistry } from "../packages/ui/src/icons/registry";
+import { iconNames, iconRegistry } from "@lantern/ui";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 

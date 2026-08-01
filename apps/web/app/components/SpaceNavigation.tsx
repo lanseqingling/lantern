@@ -63,22 +63,20 @@ export function SpaceNavigation() {
   const chapterId = chapterMatch ? decodeURIComponent(chapterMatch[2]) : null;
   const isAssetSpace = /^\/comics\/[^/]+\/assets(?:\/|$)/.test(pathname);
   const isManagedSpace = pathname === "/workspace" || Boolean(comicId && !isAssetSpace);
-  const [comic, setComic] = useState<ComicListItem | null>(null);
+  const [comicResult, setComicResult] = useState<{ comicId: string; comic: ComicListItem | null } | null>(null);
+  const comic = comicResult?.comicId === comicId ? comicResult.comic : null;
   const [projectMeta, setProjectMeta] = useState<ProjectMetaDetail | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!comicId) {
-      setComic(null);
-      return;
-    }
+    if (!comicId) return;
     let canceled = false;
     void apiGetComic(comicId).then((next) => {
-      if (!canceled) setComic(next);
+      if (!canceled) setComicResult({ comicId, comic: next });
     }).catch(() => {
-      if (!canceled) setComic(null);
+      if (!canceled) setComicResult({ comicId, comic: null });
     });
     return () => { canceled = true; };
   }, [comicId]);
@@ -93,8 +91,11 @@ export function SpaceNavigation() {
   }, []);
 
   useEffect(() => {
-    if (pathname === "/workspace") setRecentProjects(readRecentProjects());
-    setRecentOpen(false);
+    const timer = window.setTimeout(() => {
+      if (pathname === "/workspace") setRecentProjects(readRecentProjects());
+      setRecentOpen(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [pathname]);
 
   useEffect(() => {
@@ -161,33 +162,39 @@ export function SpaceNavigation() {
   const desiredKeySignature = desiredLayers.map((layer) => layer.key).join("|");
 
   useEffect(() => {
-    if (!isManagedSpace) {
-      renderedLayersRef.current = [];
-      setRenderedLayers([]);
-      return;
-    }
-    const desiredKeys = new Set(desiredLayers.map((layer) => layer.key));
-    const current = renderedLayersRef.current;
-    const hasRemovedLayer = current.some((layer) => !desiredKeys.has(layer.key));
-    const retained: RenderedSpaceLayer[] = current.map((layer) => {
-      const desired = desiredLayers.find((item) => item.key === layer.key);
-      if (desired) return { ...desired, phase: layer.phase === "enter" ? "enter" : undefined };
-      return { ...layer, phase: "exit" };
+    let exitTimer: number | undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (!isManagedSpace) {
+        renderedLayersRef.current = [];
+        setRenderedLayers([]);
+        return;
+      }
+      const desiredKeys = new Set(desiredLayers.map((layer) => layer.key));
+      const current = renderedLayersRef.current;
+      const hasRemovedLayer = current.some((layer) => !desiredKeys.has(layer.key));
+      const retained: RenderedSpaceLayer[] = current.map((layer) => {
+        const desired = desiredLayers.find((item) => item.key === layer.key);
+        if (desired) return { ...desired, phase: layer.phase === "enter" ? "enter" : undefined };
+        return { ...layer, phase: "exit" };
+      });
+      const currentKeys = new Set(current.map((layer) => layer.key));
+      const added: RenderedSpaceLayer[] = desiredLayers
+        .filter((layer) => !currentKeys.has(layer.key))
+        .map((layer) => ({ ...layer, phase: "enter" }));
+      const next = [...retained, ...added];
+      renderedLayersRef.current = next;
+      setRenderedLayers(next);
+      if (!hasRemovedLayer) return;
+      exitTimer = window.setTimeout(() => {
+        const settled = renderedLayersRef.current.filter((layer) => desiredKeys.has(layer.key));
+        renderedLayersRef.current = settled;
+        setRenderedLayers(settled);
+      }, SPACE_LEVEL_EXIT_MS);
     });
-    const currentKeys = new Set(current.map((layer) => layer.key));
-    const added: RenderedSpaceLayer[] = desiredLayers
-      .filter((layer) => !currentKeys.has(layer.key))
-      .map((layer) => ({ ...layer, phase: "enter" }));
-    const next = [...retained, ...added];
-    renderedLayersRef.current = next;
-    setRenderedLayers(next);
-    if (!hasRemovedLayer) return;
-    const timer = window.setTimeout(() => {
-      const settled = renderedLayersRef.current.filter((layer) => desiredKeys.has(layer.key));
-      renderedLayersRef.current = settled;
-      setRenderedLayers(settled);
-    }, SPACE_LEVEL_EXIT_MS);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (exitTimer !== undefined) window.clearTimeout(exitTimer);
+    };
   }, [desiredKeySignature, desiredLayers, isManagedSpace]);
 
   useEffect(() => {
@@ -195,7 +202,7 @@ export function SpaceNavigation() {
     return () => { delete document.documentElement.dataset.lanternSpaceDepth; };
   }, [desiredLayers.length]);
 
-  if (!renderedLayers.length && !desiredLayers.length) return null;
+  if (!isManagedSpace || (!renderedLayers.length && !desiredLayers.length)) return null;
   const currentKey = desiredLayers.at(-1)?.key;
   const navigate = (href: string) => {
     if (href === pathname) return;

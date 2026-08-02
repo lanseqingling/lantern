@@ -137,7 +137,18 @@ type StoryboardFrameRow = {
   label: string;
 };
 
-type LeftView = "assets" | "storyboard" | "pages";
+type LeftView = "assets" | "storyboard" | "text" | "pages";
+type TextCategory = "dialogue" | "narration";
+type ManagedTextRow = {
+  category: TextCategory;
+  element: SpeechBalloonElement | TextCanvasElement;
+  page: ComicPage;
+  pageIndex: number;
+  order: number;
+  label: string;
+  pageLabel: string;
+  locationLabel: string;
+};
 type PageEditorMode = "edit" | "delete";
 type PageStructureAction = "merge_pages" | "split_spread" | "merge_segments" | "split_segments";
 type ContextDebugSection = "input" | "world" | "assets" | "storyboard" | "page" | "activity" | "raw";
@@ -342,6 +353,9 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   const [collapsedTerminalCandidateIds, setCollapsedTerminalCandidateIds] = useState<Set<string>>(() => new Set());
   const [agentScrollRequest, setAgentScrollRequest] = useState(0);
   const [leftView, setLeftView] = useState<LeftView>("assets");
+  const [textCategory, setTextCategory] = useState<TextCategory>("dialogue");
+  const [textMenuId, setTextMenuId] = useState<string | null>(null);
+  const [textMenuPosition, setTextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [assetMenuId, setAssetMenuId] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [assetMenuPosition, setAssetMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -473,7 +487,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { activeTaskRef.current = activeTask; }, [activeTask]);
 
-  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "page" | "page_create" | "session" | "vertical_segment") => {
+  const closeFloatingMenus = (keep?: "project" | "asset" | "storyboard" | "text" | "page" | "page_create" | "session" | "vertical_segment") => {
     setComicContextMenu(null);
     setFrameImageTarget(null);
     if (keep !== "project") setProjectMenu(false);
@@ -482,6 +496,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       setAssetSaveFormId(null);
     }
     if (keep !== "storyboard") setStoryboardMenuFrameId(null);
+    if (keep !== "text") setTextMenuId(null);
     if (keep !== "page") setPageMenuId(null);
     if (keep !== "page_create") setPageCreateMenuOpen(false);
     if (keep !== "session") setSessionMenuId(null);
@@ -493,6 +508,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     setAssetSaveFormId(null);
   });
   useOutsidePointerDismiss(Boolean(storyboardMenuFrameId), ".storyboard-frame-row, .storyboard-row-menu-floating", () => setStoryboardMenuFrameId(null));
+  useOutsidePointerDismiss(Boolean(textMenuId), ".text-element-row, .text-row-menu-floating", () => setTextMenuId(null));
   useOutsidePointerDismiss(Boolean(pageMenuId), ".draft-page-more, .page-item-menu-floating", () => setPageMenuId(null));
   useOutsidePointerDismiss(pageCreateMenuOpen, ".drawer-page-create, .page-create-menu", () => setPageCreateMenuOpen(false));
   useOutsidePointerDismiss(Boolean(pageEditor), ".page-edit-card-floating, .delete-confirm-overlay", () => setPageEditor(null));
@@ -873,6 +889,33 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       })))
       .map((row, index) => ({ ...row, label: uiCopy.workbench.label.frame(index + 1) }));
   }, [state.fixture.storyboardBeats, workingPages]);
+  const managedTextRows = useMemo<ManagedTextRow[]>(() => {
+    let dialogueOrder = 0;
+    let narrationOrder = 0;
+    return workingPages.flatMap((comicPage, pageIndex) => {
+      const unit = state.fixture.working.document.units.find((candidate) => candidate.id === comicPage.id);
+      const pageLabel = unit ? presentationUnitNumberLabel(unit, pageIndex) : defaultComicPageName(comicPage, pageIndex);
+      return comicPage.elements.flatMap((element): ManagedTextRow[] => {
+        if (element.type === "speech_balloon") {
+          dialogueOrder += 1;
+          const locationLabel = element.location.space === "frame"
+            ? uiCopy.workbench.object.insideFrame
+            : element.location.purpose === "cross_page"
+              ? uiCopy.workbench.object.crossPage
+              : element.location.purpose === "cross_segment"
+                ? uiCopy.workbench.object.crossSegment
+                : element.location.anchor.type === "frame"
+                  ? uiCopy.workbench.object.breakout
+                  : uiCopy.workbench.object.paper;
+          return [{ category: "dialogue", element, page: comicPage, pageIndex, order: dialogueOrder, label: uiCopy.workbench.label.dialogue(dialogueOrder), pageLabel, locationLabel }];
+        }
+        if (element.type !== "text" || element.content.role !== "narration" || element.location.space !== "overlay" || element.location.purpose !== "narration") return [];
+        narrationOrder += 1;
+        return [{ category: "narration", element, page: comicPage, pageIndex, order: narrationOrder, label: uiCopy.workbench.label.narration(narrationOrder), pageLabel, locationLabel: uiCopy.workbench.object.paper }];
+      });
+    });
+  }, [state.fixture.working.document.units, workingPages]);
+  const visibleManagedTextRows = managedTextRows.filter((row) => row.category === textCategory);
   const page = workingPages[state.currentPageIndex] ?? workingPages[0];
   const previewCandidate = frameImageCandidatePreview
     ? state.candidates.find((candidate) => candidate.id === frameImageCandidatePreview.candidateId)
@@ -3742,6 +3785,39 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
     }
     setState((current) => ({ ...current, currentPageIndex: nextPageIndex }));
   };
+  const selectionForManagedTextRow = (row: ManagedTextRow): Selection => ({
+    type: row.category === "dialogue" ? "speech_balloon" : "text",
+    id: row.element.id,
+    pageId: row.page.id,
+    label: row.label,
+  });
+  const selectManagedTextRow = (row: ManagedTextRow) => {
+    closeFloatingMenus();
+    setCurrentComicPage(row.pageIndex);
+    setSelectedAssetId(null);
+    setSelection(selectionForManagedTextRow(row));
+    setEditingStoryboardBeatId(null);
+    setEditingStoryboardTarget(null);
+    setObjectInteractionMode("select");
+    setInspectorOpen(false);
+    setScope(row.category === "dialogue" ? uiCopy.workbench.scope.balloon : uiCopy.workbench.scope.narration);
+  };
+  const openManagedTextEditor = (row: ManagedTextRow) => {
+    selectManagedTextRow(row);
+    setEditDraft({});
+    setInspectorOpen(true);
+  };
+  const openManagedTextMenu = (button: HTMLButtonElement, row: ManagedTextRow) => {
+    const workbench = button.closest<HTMLElement>(".workbench");
+    const buttonRect = button.getBoundingClientRect();
+    const workbenchRect = workbench?.getBoundingClientRect();
+    setTextMenuPosition({
+      x: buttonRect.right - (workbenchRect?.left ?? 0) + 12,
+      y: clampValue(buttonRect.top - (workbenchRect?.top ?? 0) - 4, 12, window.innerHeight - 180),
+    });
+    closeFloatingMenus("text");
+    setTextMenuId((current) => current === row.element.id ? null : row.element.id);
+  };
   const turnCanvasPage = (direction: -1 | 1) => {
     const nextPageIndex = displayGroups[currentDisplayGroupIndex + direction]?.unitIndices[0];
     if (nextPageIndex === undefined) {
@@ -3824,6 +3900,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
   };
   const activeAssetSave = canvasAssetLibrary.find((asset) => asset.id === assetSaveFormId);
   const activeStoryboardRow = storyboardFrameRows.find((row) => row.frame.id === storyboardMenuFrameId);
+  const activeManagedTextRow = managedTextRows.find((row) => row.element.id === textMenuId);
   const previewDisabled = currentPages.length === 0 || !state.fixture.snapshot || modeSwitching;
   const previewTitle = !state.fixture.snapshot ? uiCopy.workbench.toolbar.previewDisabledTitle : undefined;
   const goToPreview = () => {
@@ -4187,10 +4264,10 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
         <div className="drawer-stack">
         <div className="drawer-top-card" data-tour-id="creation-space">
         <div className="drawer-heading"><strong>{uiCopy.workbench.panel.creationSpace}</strong><button type="button" onClick={() => setCreationSpaceOpen(false)} aria-label={uiCopy.workbench.creationSpace.collapseAria}><Icon name="collapse" /></button></div>
-        <nav className={`drawer-tabs ${leftView === "storyboard" ? "is-storyboard" : ""}`} aria-label={uiCopy.workbench.creationSpace.categoriesAria}>
-          {([['assets', uiCopy.asset.label.asset], ['storyboard', uiCopy.workbench.creationSpace.storyboardTab]] as Array<[LeftView, string]>).map(([value, label]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => setLeftView(value)}><Icon name={value === "assets" ? "asset" : "storyboard"} /><span>{label}</span></button>)}
+        <nav className={`drawer-tabs ${leftView === "storyboard" ? "is-storyboard" : leftView === "text" ? "is-text" : ""}`} aria-label={uiCopy.workbench.creationSpace.categoriesAria}>
+          {([['assets', uiCopy.asset.label.asset, 'asset'], ['storyboard', uiCopy.workbench.creationSpace.storyboardTab, 'storyboard'], ['text', uiCopy.workbench.creationSpace.textTab, 'lettering']] as Array<[LeftView, string, IconName]>).map(([value, label, icon]) => <button type="button" key={value} className={leftView === value ? "active" : ""} onClick={() => { closeFloatingMenus(); setLeftView(value); }}><Icon name={icon} /><span>{label}</span></button>)}
         </nav>
-        <div ref={creationListRef} className={`drawer-main ${leftView === "assets" ? "assets-view" : ""} ${leftView === "storyboard" ? "storyboard-view" : ""} ${creationListOverflows ? "has-scroll-overflow" : ""}`}>
+        <div ref={creationListRef} className={`drawer-main ${leftView === "assets" ? "assets-view" : ""} ${leftView === "storyboard" ? "storyboard-view" : ""} ${leftView === "text" ? "text-view" : ""} ${creationListOverflows ? "has-scroll-overflow" : ""}`}>
         {leftView === "assets" ? <section className="drawer-view asset-reference-list">
           <div className="asset-sidebar-head"><h2><span><Icon name="asset" /></span>{uiCopy.asset.label.asset}</h2><div className="asset-sidebar-actions"><button type="button" className="asset-studio-entry" onClick={() => navigate(`/comics/${comicId}/assets?from=workbench&chapterId=${chapterId}`)}><Icon name="folder" /><span>{uiCopy.asset.navigation.space}</span></button><button type="button" className="drawer-add-page asset-upload-button" aria-label={uiCopy.workbench.creationSpace.uploadAssetAria} onClick={() => dockUploadRef.current?.click()}><Icon name="add" /></button></div></div>
           <div className="asset-reference-items">
@@ -4201,7 +4278,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
               const thumbnailNode = <span className="asset-row-thumbnail">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} /> : <Icon name="asset" />}</span>;
               return <div className={`asset-row ${highlightedAssetId === asset.id ? "active" : ""}`} key={asset.id}>
                 {assetRenameId === asset.id ? <form className="asset-row-rename" onSubmit={(event) => { event.preventDefault(); renameAssetInList(asset); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><input autoFocus value={assetRenameDraft} onChange={(event) => setAssetRenameDraft(event.target.value)} maxLength={120}/><button type="submit">{uiCopy.common.action.save}</button><button type="button" aria-label={uiCopy.workbench.creationSpace.cancelRenameAria} onClick={() => { setAssetRenameId(null); setAssetRenameDraft(""); }}><Icon name="close" /></button></form> : <><button type="button" className="asset-row-main" onClick={() => { closeFloatingMenus(); setSelectedAssetId(asset.id); setSelection(placement ? { type: "reference_card", id: placement.id, label: asset.name } : noSelection); setScope(uiCopy.workbench.scope.imageOnly); }} onDoubleClick={() => { if (!thumbnail) { setToast(uiCopy.toast.workbench.asset.imageUnavailable(asset.name)); return; } setImageViewer({ images: [{ id: asset.id, src: thumbnail, alt: asset.name }] }); }}>{thumbnailNode}<span className="asset-kind-tag">{kindTag}</span><b>{asset.name}</b></button>
-                <button className="asset-more" type="button" aria-label={uiCopy.workbench.aria.assetMore(asset.name)} onClick={(event) => { const workbench = event.currentTarget.closest<HTMLElement>(".workbench"); const button = event.currentTarget.getBoundingClientRect(); const workbenchRect = workbench?.getBoundingClientRect(); closeFloatingMenus("asset"); setAssetMenuPosition({ x: button.right - (workbenchRect?.left ?? 0) + 16, y: button.top - (workbenchRect?.top ?? 0) - 4 }); setAssetMenuId((id) => id === asset.id ? null : asset.id); }}><Icon name="moreVertical" /></button></>}
+                <button className="asset-more" type="button" aria-label={uiCopy.workbench.aria.itemMore(asset.name)} onClick={(event) => { const workbench = event.currentTarget.closest<HTMLElement>(".workbench"); const button = event.currentTarget.getBoundingClientRect(); const workbenchRect = workbench?.getBoundingClientRect(); closeFloatingMenus("asset"); setAssetMenuPosition({ x: button.right - (workbenchRect?.left ?? 0) + 16, y: button.top - (workbenchRect?.top ?? 0) - 4 }); setAssetMenuId((id) => id === asset.id ? null : asset.id); }}><Icon name="moreVertical" /></button></>}
               </div>;
             })}
             {!canvasAssetLibrary.length ? <p className="drawer-empty">{uiCopy.workbench.creationSpace.emptyAssets}</p> : null}
@@ -4222,7 +4299,7 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
                 <b>{String(index + 1).padStart(2, "0")}</b>
                 <strong>{row.beat?.title || uiCopy.workbench.creationSpace.emptyFrame}</strong>
               </button>
-              <button type="button" className="storyboard-frame-more" aria-label={uiCopy.workbench.aria.assetMore(row.label)} aria-expanded={storyboardMenuFrameId === row.frame.id} onClick={(event) => {
+              <button type="button" className="storyboard-frame-more" aria-label={uiCopy.workbench.aria.itemMore(row.label)} aria-expanded={storyboardMenuFrameId === row.frame.id} onClick={(event) => {
                 const workbench = event.currentTarget.closest<HTMLElement>(".workbench");
                 const button = event.currentTarget.getBoundingClientRect();
                 const workbenchRect = workbench?.getBoundingClientRect();
@@ -4232,6 +4309,21 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
               }}><Icon name="moreVertical" /></button>
             </div>)}
             {!storyboardFrameRows.length ? <p className="drawer-empty">{uiCopy.workbench.creationSpace.emptyFrames}</p> : null}
+          </div>
+        </section> : null}
+        {leftView === "text" ? <section className="drawer-view text-management-view">
+          <nav className="text-category-tabs" aria-label={uiCopy.workbench.creationSpace.textCategoriesAria}>
+            {([['dialogue', uiCopy.workbench.creationSpace.dialogueTab, 'message'], ['narration', uiCopy.workbench.creationSpace.narrationTab, 'text']] as Array<[TextCategory, string, IconName]>).map(([value, label, icon]) => <button type="button" key={value} className={textCategory === value ? "active" : ""} aria-current={textCategory === value ? "page" : undefined} onClick={() => { closeFloatingMenus(); setTextCategory(value); }}><Icon name={icon} /><span>{label}</span></button>)}
+          </nav>
+          <div className="text-element-list">
+            {visibleManagedTextRows.map((row) => <div className={`text-element-row ${selection.id === row.element.id ? "active" : ""}`} key={row.element.id}>
+              <button type="button" className="text-element-main" onClick={() => selectManagedTextRow(row)}>
+                <b>{String(row.order).padStart(2, "0")}</b>
+                <span><strong>{row.element.content.text.trim() || (row.category === "dialogue" ? uiCopy.workbench.creationSpace.emptyDialogue : uiCopy.workbench.creationSpace.emptyNarration)}</strong><small>{uiCopy.workbench.creationSpace.textItemMeta(row.pageLabel, row.locationLabel)}</small></span>
+              </button>
+              <button type="button" className="text-element-more" aria-label={uiCopy.workbench.aria.itemMore(row.label)} aria-expanded={textMenuId === row.element.id} onClick={(event) => openManagedTextMenu(event.currentTarget, row)}><Icon name="moreVertical" /></button>
+            </div>)}
+            {!visibleManagedTextRows.length ? <p className="drawer-empty">{textCategory === "dialogue" ? uiCopy.workbench.creationSpace.emptyDialogues : uiCopy.workbench.creationSpace.emptyNarrations}</p> : null}
           </div>
         </section> : null}
         </div>
@@ -4277,6 +4369,17 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       {activeStoryboardRow && storyboardMenuPosition ? <div className="storyboard-row-menu-floating" style={{ left: storyboardMenuPosition.x, top: storyboardMenuPosition.y }} role="menu">
         <button type="button" onClick={() => openStoryboardRowEditor(activeStoryboardRow)}><Icon name="edit" /><span>{activeStoryboardRow.beat ? uiCopy.workbench.action.editFrameImage : uiCopy.workbench.action.createStoryboard}</span></button>
       </div> : null}
+      {activeManagedTextRow && textMenuPosition ? <FloatingMenu className="text-row-menu-floating" style={{ left: textMenuPosition.x, top: textMenuPosition.y }}>
+        <MenuSection>
+          <button type="button" onClick={() => openManagedTextEditor(activeManagedTextRow)}><span><Icon name="edit" />{uiCopy.common.action.edit}</span></button>
+          <button type="button" onClick={() => { addSelectionReference(selectionForManagedTextRow(activeManagedTextRow)); setTextMenuId(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button>
+        </MenuSection>
+        <MenuDivider />
+        <MenuSection>
+          <button type="button" onClick={() => { const target = selectionForManagedTextRow(activeManagedTextRow); setTextMenuId(null); if (activeManagedTextRow.category === "dialogue") duplicateDialogueBalloon(target); else duplicateNarration(target); }}><span><Icon name="copy" />{activeManagedTextRow.category === "dialogue" ? uiCopy.workbench.action.duplicateDialogue : uiCopy.workbench.action.duplicateNarration}</span></button>
+          <button type="button" onClick={() => { setComicDeleteTarget({ kind: activeManagedTextRow.category, selection: selectionForManagedTextRow(activeManagedTextRow) }); setTextMenuId(null); }}><span><Icon name="delete" />{activeManagedTextRow.category === "dialogue" ? uiCopy.workbench.action.deleteDialogue : uiCopy.workbench.action.deleteNarration}</span></button>
+        </MenuSection>
+      </FloatingMenu> : null}
       {activePageMenu && pageMenuPosition ? <FloatingMenu className="page-item-menu-floating" style={{ left: pageMenuPosition.x, top: pageMenuPosition.y }}>
         <MenuSection className="asset-menu-section">
           <button type="button" onClick={() => openPageEditor(activePageMenu, "edit")}><span><Icon name="edit" />{uiCopy.workbench.action.editPage}</span></button>

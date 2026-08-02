@@ -172,9 +172,10 @@
 .drawer-heading strong { font-size: 13px; }
 .drawer-heading button, .agent-head button { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid rgba(255,255,255,.9); border-radius: 13px; background: rgba(255,255,255,.68); box-shadow: 0 8px 20px rgba(23,32,38,.05); cursor: pointer; }
 .creation-drawer section { margin: 0 0 12px; }
-.drawer-tabs { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px; padding: 3px; border-radius: 14px; background: rgba(23,32,38,.045); }
-.drawer-tabs::before { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 10px) / 2); border-radius: 11px; background: #fff; box-shadow: 0 6px 16px rgba(23,32,38,.07); content: ""; transition: transform 220ms cubic-bezier(.22, .8, .28, 1); }
+.drawer-tabs { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px; padding: 3px; border-radius: 14px; background: rgba(23,32,38,.045); }
+.drawer-tabs::before { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 14px) / 3); border-radius: 11px; background: #fff; box-shadow: 0 6px 16px rgba(23,32,38,.07); content: ""; transition: transform 220ms cubic-bezier(.22, .8, .28, 1); }
 .drawer-tabs.is-storyboard::before { transform: translateX(calc(100% + 4px)); }
+.drawer-tabs.is-text::before { transform: translateX(calc(200% + 8px)); }
 .drawer-tabs button { position: relative; z-index: 1; display: inline-flex; min-width: 0; min-height: 28px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 11px; background: transparent; color: #718087; font-size: 9px; font-weight: 880; cursor: pointer; transition: color 160ms ease; }
 .drawer-tabs button .lantern-icon { width: 12px; height: 12px; flex: 0 0 auto; stroke-width: 2.15; }
 .drawer-tabs button.active { color: var(--cyan-deep); }
@@ -183,7 +184,7 @@
 .drawer-top-card { position: relative; z-index: 2; display: flex; min-height: 0; flex-direction: column; padding: 12px; }
 .drawer-main { min-height: 0; overflow: auto; padding: 1px 1px 8px; }
 .drawer-top-card .drawer-main { flex: 1; }
-.drawer-main.assets-view, .drawer-main.storyboard-view {
+.drawer-main.assets-view, .drawer-main.storyboard-view, .drawer-main.text-view {
   /* Let both scrolling rails run through the card's bottom padding, like the page list. */
   overflow-x: hidden;
   overflow-y: auto;
@@ -191,8 +192,8 @@
   padding-right: 14px;
   scrollbar-gutter: auto;
 }
-.drawer-main.assets-view:not(.has-scroll-overflow), .drawer-main.storyboard-view:not(.has-scroll-overflow) { overflow-y: hidden; }
-.drawer-main.assets-view .drawer-view, .drawer-main.storyboard-view .drawer-view { padding-bottom: 0; }
+.drawer-main.assets-view:not(.has-scroll-overflow), .drawer-main.storyboard-view:not(.has-scroll-overflow), .drawer-main.text-view:not(.has-scroll-overflow) { overflow-y: hidden; }
+.drawer-main.assets-view .drawer-view, .drawer-main.storyboard-view .drawer-view, .drawer-main.text-view .drawer-view { padding-bottom: 0; }
 .drawer-view { padding: 1px 1px 18px; }
 .drawer-pages-fixed {
   display: flex;
@@ -258,6 +259,31 @@
 .storyboard-row-menu-floating button { display: flex; align-items: center; gap: 7px; min-height: 34px; border: 0; border-radius: 8px; background: transparent; padding: 7px 8px; color: #405058; font: inherit; font-size: 10px; text-align: left; cursor: pointer; }
 .storyboard-row-menu-floating button:hover { background: var(--cyan-soft); color: var(--cyan-deep); }
 .storyboard-row-menu-floating .lantern-icon { width: 13px; height: 13px; color: #688087; }
+.text-category-tabs { display: flex; align-items: center; gap: 18px; margin: 0 4px 8px; border-bottom: 1px solid rgba(74,121,126,.12); }
+.text-category-tabs button { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 27px; border: 0; background: transparent; color: #7d898f; padding: 0 1px 6px; font: inherit; font-size: 9px; font-weight: 860; cursor: pointer; }
+.text-category-tabs .lantern-icon { width: 12px; height: 12px; }
+.text-category-tabs button::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 999px; background: var(--cyan); content: ""; opacity: 0; transform: scaleX(.45); transition: opacity 140ms ease, transform 160ms ease; }
+.text-category-tabs button.active { color: var(--cyan-deep); }
+.text-category-tabs button.active::after { opacity: 1; transform: scaleX(1); }
+.text-element-list { display: grid; gap: 6px; }
+.text-element-row { display: grid; min-height: 48px; grid-template-columns: minmax(0,1fr) 28px; gap: 4px; align-items: center; border: 1px solid transparent; border-radius: 14px; background: rgba(255,255,255,.5); padding: 5px; }
+.text-element-row:hover, .text-element-row.active { border-color: rgba(100,200,200,.42); background: rgba(255,255,255,.88); }
+.text-element-main { display: grid; min-width: 0; grid-template-columns: 25px minmax(0,1fr); gap: 8px; align-items: center; border: 0; background: transparent; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.text-element-main > b { display: grid; height: 25px; place-items: center; border-radius: 8px; background: var(--cyan-soft); color: var(--cyan-deep); font-size: 8px; }
+.text-element-main > span { display: grid; min-width: 0; gap: 2px; }
+.text-element-main strong, .text-element-main small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-element-main strong { color: #35464e; font-size: 9px; }
+.text-element-main small { color: var(--muted); font-size: 8px; font-weight: 760; }
+.text-element-more { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #405058; opacity: 0; cursor: pointer; transition: opacity 140ms ease, background 140ms ease; }
+.text-element-row:hover .text-element-more, .text-element-row:focus-within .text-element-more, .text-element-more[aria-expanded="true"] { opacity: 1; }
+.text-element-more:hover { background: rgba(100,200,200,.16); }
+.text-element-more .lantern-icon { width: 15px; height: 15px; }
+.text-row-menu-floating { position: absolute; z-index: 106; display: grid; width: 154px; padding: 5px; border: 1px solid rgba(255,255,255,.92); border-radius: 12px; background: #fff; box-shadow: var(--shadow); }
+.text-row-menu-floating button { width: 100%; border: 0; border-radius: 8px; background: transparent; padding: 8px; color: #405058; font: inherit; font-size: 10px; text-align: left; cursor: pointer; }
+.text-row-menu-floating button > span { display: inline-flex; align-items: center; gap: 7px; }
+.text-row-menu-floating button .lantern-icon { width: 13px; height: 13px; color: #688087; }
+.text-row-menu-floating button:hover { background: var(--cyan-soft); color: var(--cyan-deep); }
+.text-row-menu-floating .floating-menu-divider { margin: 4px; background: rgba(74,121,126,.13); }
 .draft-pages {
   min-height: 0;
   flex: 1;

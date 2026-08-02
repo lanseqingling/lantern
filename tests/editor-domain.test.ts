@@ -651,12 +651,13 @@ test("true spreads stay indivisible, preserve physical surfaces and block unsafe
   assert.deepEqual(pageDisplayGroups(fixture.working.document, "spread"), [{ unitIndices: [0], unitIds: [spread.id], trueSpread: true }]);
 
   const resource = fixture.working.document.resources[0];
-  const crossPage = dryRunEditorCapability("create_cross_page_image", { unitId: spread.id, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context());
+  const crossPage = dryRunEditorCapability("create_cross_page_image", { unitId: spread.id, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType, transform: { x: 24, y: 12, width: spread.canvas.width - 48, height: spread.canvas.height - 24 }, crop: { x: .1, y: .1, width: .8, height: .8 } }, context());
   fixture.working = crossPage.result.working;
   const crossLayer = fixture.working.document.units.find((unit) => unit.id === spread.id)?.overlayLayers.find((layer) => layer.purpose === "cross_page");
   assert.equal(crossLayer?.surfaceId, undefined);
   assert.equal(crossLayer?.elements.length, 1);
-  assert.deepEqual(crossLayer?.elements[0]?.transform, { x: 0, y: 0, width: spread.canvas.width, height: spread.canvas.height });
+  assert.deepEqual(crossLayer?.elements[0]?.transform, { x: 24, y: 12, width: spread.canvas.width - 48, height: spread.canvas.height - 24 });
+  assert.deepEqual(crossLayer?.elements[0]?.kind === "image" ? crossLayer.elements[0].crop : undefined, { x: .1, y: .1, width: .8, height: .8 });
   assert.throws(() => dryRunEditorCapability("replace_frame_image", { unitId: spread.id, layerId: crossLayer!.id, elementId: crossLayer!.elements[0].id, assetId: resource.assetId, assetVersionId: resource.assetVersionId, mediaType: resource.mediaType }, context()), /不能直接更换/);
   assert.throws(() => dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()), /跨越分隔线的对象/);
   const crossImageId = crossLayer!.elements[0].id;
@@ -665,7 +666,7 @@ test("true spreads stay indivisible, preserve physical surfaces and block unsafe
   const restoredLayer = restoredUnit.overlayLayers.find((layer) => layer.purpose === "page_content" && layer.elements.some((element) => element.id === crossImageId));
   assert.equal(restoredUnit.overlayLayers.some((layer) => layer.purpose === "cross_page"), false);
   assert.ok(restoredLayer?.surfaceId);
-  assert.deepEqual(restoredLayer?.elements[0].transform, { x: 0, y: 0, width: spread.canvas.width / 2, height: spread.canvas.height });
+  assert.deepEqual(restoredLayer?.elements[0].transform, { x: 0, y: 12, width: spread.canvas.width / 2, height: spread.canvas.height - 24 });
   assert.equal(dryRunEditorCapability("split_spread_to_pages", { unitId: spread.id }, context()).result.working.document.reading.unitOrder.length, 2);
 });
 

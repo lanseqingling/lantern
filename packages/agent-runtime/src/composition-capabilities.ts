@@ -56,6 +56,7 @@ const frameUpdateSchema = z.strictObject({
   geometry: geometrySchema.optional(),
   shape: frameShapeSchema.optional(),
   borderWidth: z.number().min(0).max(24).optional(),
+  crossPage: z.boolean().optional(),
   bleed: z.strictObject({
     edge: z.enum(["top", "right", "bottom", "left"]),
     enabled: z.boolean(),
@@ -67,7 +68,7 @@ const frameUpdateSchema = z.strictObject({
   if (input.targetHandles.length !== 1) {
     context.addIssue({ code: "custom", path: ["targetHandles"], message: "修改画格只接受一个画格目标。" });
   }
-  if (![input.geometry, input.shape, input.borderWidth, input.bleed, input.zIndex, input.readingPosition, input.allowOverlap].some((value) => value !== undefined)) {
+  if (![input.geometry, input.shape, input.borderWidth, input.crossPage, input.bleed, input.zIndex, input.readingPosition, input.allowOverlap].some((value) => value !== undefined)) {
     context.addIssue({ code: "custom", message: "画格修改不能为空。" });
   }
   if (input.geometry && input.bleed) {
@@ -75,6 +76,9 @@ const frameUpdateSchema = z.strictObject({
   }
   if (input.geometry && input.allowOverlap === false) {
     context.addIssue({ code: "custom", message: "关闭叠格前请先单独完成几何调整、刷新上下文，再关闭叠格。" });
+  }
+  if (input.crossPage !== undefined && [input.geometry, input.shape, input.bleed, input.zIndex, input.readingPosition, input.allowOverlap].some((value) => value !== undefined)) {
+    context.addIssue({ code: "custom", path: ["crossPage"], message: "跨页格归属改变后请刷新上下文，再单独调整几何、形状、出血、层级或阅读顺序。" });
   }
 });
 
@@ -92,6 +96,7 @@ const imagePlaceSchema = z.strictObject({
   assetVersionId: z.string().min(1).optional(),
   transform: geometrySchema.optional(),
   crop: normalizedRectSchema.optional(),
+  placement: z.enum(["page", "cross_page"]).optional(),
 }).superRefine((input, context) => {
   if (input.targetHandles.length !== 1) {
     context.addIssue({ code: "custom", path: ["targetHandles"], message: "放置图片只接受一个画格、页面或纸面目标。" });
@@ -112,7 +117,7 @@ const imageUpdateSchema = z.strictObject({
   assetVersionId: z.string().min(1).optional(),
   transform: geometrySchema.optional(),
   crop: normalizedRectSchema.optional(),
-  placement: z.enum(["breakout", "page"]).optional(),
+  placement: z.enum(["breakout", "page", "cross_page"]).optional(),
   zOrder: z.enum(["front", "back"]).optional(),
 }).superRefine((input, context) => {
   if (input.targetHandles.length !== 1) {
@@ -277,13 +282,13 @@ export const compositionCapabilities = [
   }),
   compositionCapability({
     id: "frame.update",
-    version: 2,
-    description: "修改一个画格的纸面绝对几何、直角矩形/四点斜切形状、边框宽度、单边出血、视觉层级、1-based 阅读位置或叠格策略。当前不开放圆角或椭圆画格编辑。几何和出血必须分次调用；出血会把对应边扩到所在纸面边缘。",
+    version: 3,
+    description: "修改一个画格的纸面绝对几何、直角矩形/四点斜切形状、边框宽度、单边出血、视觉层级、1-based 阅读位置、叠格策略或真正双页中的跨页归属。跨页归属、几何和出血必须分次调用；设置跨页后刷新上下文，才能让画格跨越中缝。",
     inputSchema: frameUpdateSchema,
     target: { required: true, types: ["comic_frame"], min: 1, max: 1 },
     effect: "direct_change",
     risk: "medium",
-    domainCapabilities: ["set_frame_overlap_policy", "resize_frame", "reshape_frame", "update_frame_border", "update_frame_bleed", "reorder_frame", "reorder_frame_reading"],
+    domainCapabilities: ["set_frame_overlap_policy", "set_frame_cross_page", "resize_frame", "reshape_frame", "update_frame_border", "update_frame_bleed", "reorder_frame", "reorder_frame_reading"],
     confirmation: "none",
   }),
   compositionCapability({
@@ -308,22 +313,24 @@ export const compositionCapabilities = [
   }),
   compositionCapability({
     id: "image.place",
-    description: "把资产卡片中的一个不可变图片版本放入画格或纸面。画格图片的 transform 使用 frame_local 归一化坐标；纸面图片使用 unit 绝对坐标。省略版本时使用资产当前主图，省略 transform 时画格填满、纸面按素材比例给出默认尺寸。",
+    version: 2,
+    description: "把资产卡片中的一个不可变图片版本放入画格、纸面或真正双页。画格图片的 transform 使用 frame_local 归一化坐标；纸面与跨页图片使用 unit 绝对坐标。placement=cross_page 只接受真正双页的 presentation_unit handle，图片必须覆盖左右纸面。",
     inputSchema: imagePlaceSchema,
     target: { required: true, types: ["comic_frame", "presentation_unit", "page_surface"], min: 1, max: 1 },
     effect: "direct_change",
     risk: "low",
-    domainCapabilities: ["place_frame_image", "create_page_image"],
+    domainCapabilities: ["place_frame_image", "create_page_image", "create_cross_page_image"],
     confirmation: "none",
   }),
   compositionCapability({
     id: "image.update",
-    description: "更换一个图片元素的固定资产版本，或修改原始 transform、归一化 crop 和覆盖层前后层级。placement=breakout 把格内图变为 frame-anchored 破格覆盖；placement=page 把格内图或破格图转换为纸面图，改变归属后必须刷新上下文。",
+    version: 2,
+    description: "更换一个图片元素的固定资产版本，或修改原始 transform、归一化 crop 和覆盖层前后层级。placement=breakout 把格内图变为 frame-anchored 破格覆盖；placement=page 转为纸面图；placement=cross_page 把已跨越中缝的纸面图转为真正双页对象。改变归属后必须刷新上下文。",
     inputSchema: imageUpdateSchema,
     target: { required: true, types: ["image"], min: 1, max: 1 },
     effect: "direct_change",
     risk: "medium",
-    domainCapabilities: ["replace_image", "set_element_transform", "set_art_crop", "promote_element_to_overlay", "convert_element_to_page", "reorder_overlay_element"],
+    domainCapabilities: ["replace_image", "set_element_transform", "set_art_crop", "promote_element_to_overlay", "convert_element_to_page", "convert_image_to_cross_page", "reorder_overlay_element"],
     confirmation: "none",
   }),
   compositionCapability({

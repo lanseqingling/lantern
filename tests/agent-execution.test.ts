@@ -195,7 +195,20 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   assert.equal(pageDelete?.confirmation, "explicit");
   assert.deepEqual(pageDelete?.domainCapabilities, ["delete_presentation_unit"]);
   const frameUpdate = getAgentCapability("frame.update");
-  assert.equal(frameUpdate?.version, 2);
+  assert.equal(frameUpdate?.version, 3);
+  assert.deepEqual(frameUpdate?.domainCapabilities, ["set_frame_overlap_policy", "set_frame_cross_page", "resize_frame", "reshape_frame", "update_frame_border", "update_frame_bleed", "reorder_frame", "reorder_frame_reading"]);
+  const imagePlace = getAgentCapability("image.place");
+  assert.equal(imagePlace?.version, 2);
+  assert.deepEqual(imagePlace?.domainCapabilities, ["place_frame_image", "create_page_image", "create_cross_page_image"]);
+  const imageUpdate = getAgentCapability("image.update");
+  assert.equal(imageUpdate?.version, 2);
+  assert.equal(imageUpdate?.inputSchema.safeParse({
+    scope: "lantern://chapters/chapter-1",
+    targetHandles: ["image-handle"],
+    expectedRevision: 1,
+    idempotencyKey: "cross-page-image-contract",
+    placement: "cross_page",
+  }).success, true);
   const balloonUpdate = getAgentCapability("balloon.update");
   assert.deepEqual(balloonUpdate?.domainCapabilities, [
     "update_dialogue",

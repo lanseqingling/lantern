@@ -187,6 +187,18 @@ function assertGutterSafeCrossPageBalloon(
   }
 }
 
+function assertCrossPageImageGeometry(unit: PresentationUnit, transform: { x: number; y: number; width: number; height: number }) {
+  const [left, right] = [...unit.surfaces].sort((first, second) => first.geometry.x - second.geometry.x);
+  if (unit.kind !== "spread" || !left || !right) {
+    throw new AppError("invalid_cross_page_image", "跨页图片只能存在于真正双页。", 422);
+  }
+  const gutterStart = left.geometry.x + left.geometry.width;
+  const gutterEnd = right.geometry.x;
+  if (!(transform.x < gutterStart && transform.x + transform.width > gutterEnd)) {
+    throw new AppError("invalid_cross_page_image", "跨页图片必须同时覆盖左右纸面。", 422);
+  }
+}
+
 async function fixedImage(
   context: ExternalDirectChangeContext,
   assetReference: string,
@@ -267,6 +279,14 @@ function frameCreatePlan(parsed: ParsedCompositionInput, context: ExternalDirect
 function frameUpdatePlan(parsed: ParsedCompositionInput, context: ExternalDirectChangeContext) {
   const { unit, frame } = targetFrame(context);
   const commands: WorkspaceCommand[] = [];
+  if (typeof parsed.crossPage === "boolean") {
+    commands.push(...planDomainCapability("set_frame_cross_page", {
+      unitId: unit.id,
+      frameId: frame.id,
+      enabled: parsed.crossPage,
+    }, context).commands);
+    return { commands, data: { action: "updated", crossPage: parsed.crossPage } };
+  }
   if (typeof parsed.allowOverlap === "boolean" && !parsed.geometry) {
     commands.push(...planDomainCapability("set_frame_overlap_policy", {
       unitId: unit.id,
@@ -350,6 +370,21 @@ async function imagePlacePlan(parsed: ParsedCompositionInput, context: ExternalD
   const { target, unit } = targetUnit(context);
   const image = await fixedImage(context, String(parsed.asset), parsed.assetVersionId as string | undefined);
   const commands: WorkspaceCommand[] = [];
+  if (parsed.placement === "cross_page") {
+    if (target.type !== "presentation_unit" || unit.kind !== "spread") {
+      throw new AppError("invalid_cross_page_image", "创建跨页图片需要真正双页的 presentation_unit handle。", 422);
+    }
+    const transform = (parsed.transform ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height }) as { x: number; y: number; width: number; height: number };
+    assertCrossPageImageGeometry(unit, transform);
+    const placed = planDomainCapability("create_cross_page_image", {
+      unitId: unit.id,
+      ...image,
+      transform,
+      ...(parsed.crop ? { crop: parsed.crop } : {}),
+    }, context);
+    commands.push(...placed.commands);
+    return { commands, data: { action: "placed_cross_page", assetVersionId: image.assetVersionId, coordinateSpace: "unit" } };
+  }
   if (target.type === "comic_frame") {
     const frame = unit.frames.find((candidate) => candidate.id === target.frameId);
     if (!frame) throw new AppError("target_not_found", "目标画格已不存在，请重新读取上下文。", 404);
@@ -424,6 +459,14 @@ async function imageUpdatePlan(parsed: ParsedCompositionInput, context: External
     }
     const plan = planDomainCapability("convert_element_to_page", base, context);
     return { commands: plan.commands, data: { action: "converted_to_page", coordinateSpace: "unit" } };
+  }
+  if (parsed.placement === "cross_page") {
+    if (located.source !== "overlay" || located.layer.anchor.type !== "unit") {
+      throw new AppError("invalid_image_placement", "格内或绑定出格图片不能直接设为跨页；请先转为纸面图片。", 422);
+    }
+    assertCrossPageImageGeometry(located.unit, located.element.transform);
+    const plan = planDomainCapability("convert_image_to_cross_page", base, context);
+    return { commands: plan.commands, data: { action: "converted_to_cross_page", coordinateSpace: "unit" } };
   }
   const commands: WorkspaceCommand[] = [];
   if (parsed.asset) {

@@ -14,6 +14,7 @@ Use the rendered page to judge the visible result and the structure projection t
 - A frame-layer image uses normalized `frame_local` transform coordinates. `{x: 0, y: 0, width: 1, height: 1}` fills its Frame before crop.
 - A frame-anchored breakout remains `frame_local`, follows the Frame, and can extend beyond the Frame mask.
 - A paper image uses absolute `unit` coordinates.
+- A cross-page image exists once in a true spread and also uses absolute `unit` coordinates; it must visibly cross both physical pages. Target the spread's `presentation_unit` handle, never either `PageSurface` handle.
 - The inspection result's `geometry` is the resolved unit-space projection. Do not write it back as a frame-local transform.
 - Image crop is normalized to the fixed source image and does not modify its AssetVersion.
 
@@ -42,7 +43,14 @@ Use an Asset URI and, when the creator needs exact reproducibility, an explicit 
 - Replace an image without changing its element identity, transform, or crop unless the same request explicitly changes those fields.
 - Use `placement: breakout` only for a frame-layer image.
 - Use `placement: page` to convert a frame-layer or frame-anchored image into paper-owned art.
+- Use `image.place` with `placement: cross_page` to place one fixed image across a true spread. Use `image.update placement: cross_page` only to convert an already cross-gutter paper image; refresh context after either ownership change.
 - Overlay `zOrder` affects paper or breakout layers. A frame-layer image follows its Frame's visual layer.
+
+## Compose a true spread
+
+Only a true spread can hold cross-page objects. First use the returned `presentation_unit` handle to place a cross-page image, then inspect the resulting draft before adding other content. The image is stored once and is separately clipped by the left and right physical pages at preview and export; do not duplicate it into two paper images.
+
+To make a panel itself cross the gutter, call `frame.update` with `crossPage: true` on a Frame in a true spread, refresh context, then make its geometry change in a separate call. Frame-local art and a bound true-breakout foreground remain attached to that Frame, so they cross and move together. A cross-page Frame or object blocks splitting the spread until it is returned to one physical page.
 
 The same fixed image may be placed more than once with different crop values. This creates distinct placement elements referencing one immutable AssetVersion.
 

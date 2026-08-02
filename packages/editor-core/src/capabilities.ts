@@ -1945,13 +1945,13 @@ const splitVerticalSegmentsCapability = defineCapability({
   execute(input, context) { const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId); if (!unit || unit.kind !== "vertical_segment" || unit.surfaces.length < 2) throw new Error("目标不是复合滚动段"); return splitCompositeCommands(context, unit); },
 });
 
-const crossSurfaceImageInputSchema = z.strictObject({ unitId: z.string().min(1), assetId: z.string().min(1), assetVersionId: z.string().min(1), mediaType: z.string().startsWith("image/"), width: z.number().positive().optional(), height: z.number().positive().optional() });
+const crossSurfaceImageInputSchema = z.strictObject({ unitId: z.string().min(1), assetId: z.string().min(1), assetVersionId: z.string().min(1), mediaType: z.string().startsWith("image/"), width: z.number().positive().optional(), height: z.number().positive().optional(), transform: geometrySchema.optional(), crop: normalizedRectSchema.optional() });
 function createCrossSurfaceImage(input: z.infer<typeof crossSurfaceImageInputSchema>, context: EditorCapabilityContext, purpose: "cross_page" | "cross_segment") {
   const unit = context.fixture.working.document.units.find((item) => item.id === input.unitId);
   const valid = purpose === "cross_page" ? unit?.kind === "spread" : unit?.kind === "vertical_segment" && unit.surfaces.length > 1;
   if (!unit || !valid) throw new Error(purpose === "cross_page" ? "跨页图片只能放入真正双页" : "跨段图片只能放入已合并的滚动段");
   const overlay = overlayLayerFor(context, unit, { type: "unit" }, purpose, purpose === "cross_page" ? "跨页内容" : "跨段内容");
-  const element: ArtElement = { id: context.createId(purpose === "cross_page" ? "cross-page-image" : "cross-segment-image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId, transform: { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height }, crop: { x: 0, y: 0, width: 1, height: 1 }, name: purpose === "cross_page" ? "跨页图片" : "跨段图片" };
+  const element: ArtElement = { id: context.createId(purpose === "cross_page" ? "cross-page-image" : "cross-segment-image"), kind: "image", assetId: input.assetId, assetVersionId: input.assetVersionId, transform: input.transform ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height }, crop: input.crop ?? { x: 0, y: 0, width: 1, height: 1 }, name: purpose === "cross_page" ? "跨页图片" : "跨段图片" };
   const commands: WorkspaceCommand[] = [];
   if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
   if (overlay.command) commands.push(overlay.command);

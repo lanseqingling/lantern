@@ -37,6 +37,7 @@ export function AgentPanelHeader({
     <header className="agent-head">
       <div
         className={`agent-panel-tabs ${view === "conversation" ? "is-conversation" : ""}`}
+        data-tour-id="agent-panel-navigation"
         role="tablist"
         aria-label={uiCopy.workbench.agentActivity.navigationAria}
       >

@@ -1474,7 +1474,7 @@ export const uiCopy = {
         historyAndSave: "撤销、重做与保存",
         pageDisplay: "页面显示",
         creationAndPreview: "创作与预览",
-        agentCollaboration: "与 Agent 协作",
+        agentNavigation: "活动与对话",
       },
       stepContent: {
         creationSpace: "在资产与分镜之间切换，整理当前一话的创作素材。",
@@ -1488,7 +1488,8 @@ export const uiCopy = {
         creationMode: "创作模式编辑漫画。",
         previewMode: "预览模式检查最终画面。",
         versionHistory: "查看正式版本和 Agent 方案，对比差异后应用、保留、丢弃或回退。",
-        agentComposer: "选择对象后，在这里描述要生成、修改或确认的内容。",
+        agentActivity: "在活动中查看 Agent 的执行过程与结果。",
+        agentConversation: "在对话中描述需求并继续协作。",
       },
     },
   },

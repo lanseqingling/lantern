@@ -117,13 +117,16 @@ const workbenchTourSteps: TourStep[] = [
     }],
   },
   {
-    id: "agent-composer",
+    id: "agent-navigation",
     panel: "agent",
     callouts: [{
-      id: "agent-composer",
-      title: uiCopy.tour.workbench.stepTitle.agentCollaboration,
-      content: uiCopy.tour.workbench.stepContent.agentComposer,
-      targets: ["agent-composer"],
+      id: "agent-navigation",
+      title: uiCopy.tour.workbench.stepTitle.agentNavigation,
+      items: [
+        { icon: "agentActivity", text: uiCopy.tour.workbench.stepContent.agentActivity },
+        { icon: "message", text: uiCopy.tour.workbench.stepContent.agentConversation },
+      ],
+      targets: ["agent-panel-navigation"],
       placement: "left",
     }],
   },

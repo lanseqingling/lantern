@@ -410,20 +410,25 @@ export function VersionCompareApp({ targetKind, targetId }: {
         </article>
       </section>
       <nav className="version-compare-toolbar" aria-label={uiCopy.workbench.versions.compareTitle}>
-        <button type="button" aria-label={uiCopy.workbench.versions.previousUnit} disabled={differenceIndex <= 0} onClick={() => setDifferenceIndex((index) => Math.max(0, index - 1))}><Icon name="collapse" /></button>
-        <span>{differenceIndex + 1} / {comparison.differences.length || 1}</span>
-        <button type="button" aria-label={uiCopy.workbench.versions.nextUnit} disabled={differenceIndex >= comparison.differences.length - 1} onClick={() => setDifferenceIndex((index) => Math.min(comparison.differences.length - 1, index + 1))}><Icon name="expand" /></button>
-        <button type="button" className="difference-jump" disabled={previousDifferenceIndex === undefined} onClick={() => moveDifference(-1)}>{uiCopy.workbench.versions.previousDifference}</button>
-        <button type="button" className="difference-jump" disabled={nextDifferenceIndex === undefined} onClick={() => moveDifference(1)}>{uiCopy.workbench.versions.nextDifference}</button>
-        <i />
-        {comparison.target.kind === "change_proposal" ? <>
-          <button type="button" className="secondary" disabled={acting || comparison.target.status !== "available"} onClick={() => void act(() => apiRetainChangeProposal(comparison.target.id))}>{uiCopy.workbench.versions.retain}</button>
-          <button type="button" className="danger" disabled={acting || !canDiscardProposal} onClick={() => setConfirmation("discard")}>{uiCopy.workbench.versions.discard}</button>
-          <button type="button" className="primary" disabled={acting || !canApplyProposal} title={stale ? uiCopy.workbench.versions.stale : undefined} onClick={() => { if (stale) setConfirmation("apply_stale"); else void act(() => apiApplyChangeProposal(comparison.target.id, comparison.current.revision)); }}>{uiCopy.workbench.versions.applyAndSave}</button>
-        </> : <>
-          <button type="button" className="primary" disabled={acting} onClick={() => setConfirmation("restore")}>{uiCopy.workbench.versions.restore}</button>
-          <button type="button" className="secondary" disabled={acting} onClick={() => setConfirmation("delete")}>{uiCopy.workbench.versions.deleteVersion}</button>
-        </>}
+        <div className="version-compare-toolbar-group unit-navigation">
+          <button type="button" aria-label={uiCopy.workbench.versions.previousUnit} disabled={differenceIndex <= 0} onClick={() => setDifferenceIndex((index) => Math.max(0, index - 1))}><Icon name="collapse" /></button>
+          <span>{differenceIndex + 1} / {comparison.differences.length || 1}</span>
+          <button type="button" aria-label={uiCopy.workbench.versions.nextUnit} disabled={differenceIndex >= comparison.differences.length - 1} onClick={() => setDifferenceIndex((index) => Math.min(comparison.differences.length - 1, index + 1))}><Icon name="expand" /></button>
+        </div>
+        <div className="version-compare-toolbar-group difference-navigation">
+          <button type="button" className="difference-jump" disabled={previousDifferenceIndex === undefined} onClick={() => moveDifference(-1)}><Icon name="collapse" />{uiCopy.workbench.versions.previousDifference}</button>
+          <button type="button" className="difference-jump" disabled={nextDifferenceIndex === undefined} onClick={() => moveDifference(1)}><Icon name="expand" />{uiCopy.workbench.versions.nextDifference}</button>
+        </div>
+        <div className="version-compare-toolbar-group version-actions">
+          {comparison.target.kind === "change_proposal" ? <>
+            <button type="button" className="secondary" disabled={acting || comparison.target.status !== "available"} onClick={() => void act(() => apiRetainChangeProposal(comparison.target.id))}><Icon name="pin" />{uiCopy.workbench.versions.retain}</button>
+            <button type="button" className="secondary" disabled={acting || !canDiscardProposal} onClick={() => setConfirmation("discard")}><Icon name="delete" />{uiCopy.workbench.versions.discard}</button>
+            <button type="button" className="primary" disabled={acting || !canApplyProposal} title={stale ? uiCopy.workbench.versions.stale : undefined} onClick={() => { if (stale) setConfirmation("apply_stale"); else void act(() => apiApplyChangeProposal(comparison.target.id, comparison.current.revision)); }}><Icon name="save" />{uiCopy.workbench.versions.applyAndSave}</button>
+          </> : <>
+            <button type="button" className="primary" disabled={acting} onClick={() => setConfirmation("restore")}><Icon name="history" />{uiCopy.workbench.versions.restore}</button>
+            <button type="button" className="secondary" disabled={acting} onClick={() => setConfirmation("delete")}><Icon name="delete" />{uiCopy.workbench.versions.deleteVersion}</button>
+          </>}
+        </div>
       </nav>
       {stale ? <p className="version-compare-notice">{uiCopy.workbench.versions.stale}</p> : error ? <p className="version-compare-notice error">{error}</p> : null}
       {confirmation === "apply_stale" && comparison.target.kind === "change_proposal" ? <DeleteConfirmDialog

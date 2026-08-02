@@ -902,16 +902,11 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
       .map((row, index) => ({ ...row, label: uiCopy.workbench.label.frame(index + 1) }));
   }, [state.fixture.storyboardBeats, workingPages]);
   const managedTextRows = useMemo<ManagedTextRow[]>(() => {
-    let dialogueOrder = 0;
-    let narrationOrder = 0;
-    return workingPages.flatMap((comicPage, pageIndex) => {
+    const entries = workingPages.flatMap((comicPage, pageIndex) => {
       const unit = state.fixture.working.document.units.find((candidate) => candidate.id === comicPage.id);
       const pageLabel = unit ? presentationUnitNumberLabel(unit, pageIndex) : defaultComicPageName(comicPage, pageIndex);
       return comicPage.elements.flatMap((element): ManagedTextRow[] => {
         if (element.type === "speech_balloon") {
-          // This counter is local to the memo calculation and only derives a display order.
-          // eslint-disable-next-line react-hooks/immutability
-          dialogueOrder += 1;
           const locationLabel = element.location.space === "frame"
             ? uiCopy.workbench.object.insideFrame
             : element.location.purpose === "cross_page"
@@ -921,12 +916,15 @@ export function WorkbenchApp({ comicId, chapterId }: { comicId: string; chapterI
                 : element.location.anchor.type === "frame"
                   ? uiCopy.workbench.object.breakout
                   : uiCopy.workbench.object.paper;
-          return [{ category: "dialogue", element, page: comicPage, pageIndex, order: dialogueOrder, label: uiCopy.workbench.label.dialogue(dialogueOrder), pageLabel, locationLabel }];
+          return [{ category: "dialogue", element, page: comicPage, pageIndex, order: 0, label: "", pageLabel, locationLabel }];
         }
         if (element.type !== "text" || element.content.role !== "narration" || element.location.space !== "overlay" || element.location.purpose !== "narration") return [];
-        narrationOrder += 1;
-        return [{ category: "narration", element, page: comicPage, pageIndex, order: narrationOrder, label: uiCopy.workbench.label.narration(narrationOrder), pageLabel, locationLabel: uiCopy.workbench.object.paper }];
+        return [{ category: "narration", element, page: comicPage, pageIndex, order: 0, label: "", pageLabel, locationLabel: uiCopy.workbench.object.paper }];
       });
+    });
+    return entries.map((entry) => {
+      const order = entries.filter((candidate) => candidate.category === entry.category).indexOf(entry) + 1;
+      return { ...entry, order, label: entry.category === "dialogue" ? uiCopy.workbench.label.dialogue(order) : uiCopy.workbench.label.narration(order) };
     });
   }, [state.fixture.working.document.units, workingPages]);
   const visibleManagedTextRows = managedTextRows.filter((row) => row.category === textCategory);

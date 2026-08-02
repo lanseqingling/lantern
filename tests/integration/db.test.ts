@@ -1347,7 +1347,22 @@ test("database candidate apply and revert preserve version heads atomically", as
     assert.equal(finalPageContext.pageSequence.some((page) => page.name === "雨幕过场·重命名 副本"), false);
     assert.equal(finalPageContext.pageSequence[0]?.pageRole, "cover");
 
-    let compositionRevision = 16;
+    const createdSpread = await invokeExternalPageCapability(ids.user, "page.create_spread", {
+      scope: chapterScope,
+      targetHandles: [finalPageContext.pages[0]!.handle],
+      expectedRevision: 16,
+      idempotencyKey: `page-spread-create-${suffix}`,
+      name: "屋顶大图",
+      side: "after",
+    });
+    assert.equal(createdSpread.workingRevision, 17);
+    const createdSpreadContext = await pageContext([{ name: "屋顶大图" }]);
+    assert.equal(createdSpreadContext.pages[0]?.kind, "spread");
+    assert.equal(createdSpreadContext.pages[0]?.pageRole, "story");
+    assert.deepEqual(createdSpreadContext.pages[0]?.surfaces.map((surface) => surface.role), ["left", "right"]);
+    assert.equal(createdSpreadContext.targets.filter((target) => target.type === "page_surface").length, 2);
+
+    let compositionRevision = 17;
     const compositionPage = async () => {
       const context = await pageContext([{ name: "站台余波" }]);
       const inspection = await inspectExternalAgentComposition(ids.user, {

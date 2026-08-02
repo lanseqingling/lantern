@@ -30,10 +30,11 @@ Only adjacent ordinary pages with the same `story` or `interlude` role can becom
 ## Apply the narrow page action
 
 - Create a story or interlude relative to one current page handle with `side: before | after`. A cover still uses one current page handle to bind ownership and revision, but Lantern fixes its position.
+- Create a new true story spread relative to one current page handle with `side: before | after`. Use this direct operation when the creator wants a new cross-page composition; after it succeeds, refresh context and compose the returned true spread. Do not create two ordinary pages and merge them as a substitute.
 - Rename one page without changing its role or order. An empty name restores the derived label.
 - Duplicate one non-cover PresentationUnit. A true spread is duplicated as one complete unit.
 - Move a page with two handles: the page to move first, the reference page second, plus `side`.
-- Merge two adjacent pages using their two handles; their input order does not replace the Chapter reading order.
+- Merge two existing adjacent pages using their two handles only when the creator wants to preserve those pages as one true spread; their input order does not replace the Chapter reading order.
 - Split one true-spread handle.
 - Delete only after the creator confirms the exact page. Pass the same handle in `targetHandles` and `confirmedTargetHandles`.
 

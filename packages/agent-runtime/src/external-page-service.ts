@@ -99,6 +99,25 @@ function pagePlan(
       },
     };
   }
+  if (capability.id === "page.create_spread") {
+    const plan = planDomainCapability("create_spread", {
+      relativeToUnitId: pageIds[0],
+      side: parsed.side,
+      ...(typeof parsed.name === "string" ? { name: parsed.name } : {}),
+    }, context);
+    const created = plan.commands.find((command) => command.type === "add_presentation_unit");
+    if (!created || created.type !== "add_presentation_unit") {
+      throw new AppError("capability_contract_error", "跨页创建能力没有返回真正双页。", 500);
+    }
+    return {
+      commands: plan.commands,
+      data: {
+        action: "spread_created",
+        page: pageSummary(created.unit),
+        readingPosition: (created.readingIndex ?? context.fixture.working.document.reading.unitOrder.length) + 1,
+      },
+    };
+  }
   if (capability.id === "page.rename") {
     const plan = planDomainCapability("update_presentation_unit", {
       unitId: pageIds[0],

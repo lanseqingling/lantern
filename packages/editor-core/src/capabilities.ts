@@ -2110,6 +2110,53 @@ const createPageCapability = defineCapability({
   },
 });
 
+const createSpreadCapability = defineCapability({
+  id: "create_spread",
+  version: 1,
+  inputSchema: z.strictObject({
+    relativeToUnitId: z.string().min(1),
+    side: z.enum(["before", "after"]),
+    name: z.string().trim().max(80).optional(),
+  }),
+  scope: "chapter",
+  humanEntry: "planned",
+  agentAccess: "disabled",
+  externalAgentAccess: "execute",
+  risk: "medium",
+  preconditions: ["page_working_document_exists", "insertion_anchor_exists"],
+  outputCommandTypes: ["add_presentation_unit"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const document = context.fixture.working.document;
+    if (document.format !== "page") throw new Error("只有页漫可以直接创建真正双页");
+    const anchorIndex = document.reading.unitOrder.indexOf(input.relativeToUnitId);
+    if (anchorIndex < 0) throw new Error("找不到插入位置对应的页面");
+    const anchor = document.units.find((unit) => unit.id === input.relativeToUnitId);
+    const referenceSurface = anchor && orderedUnitSurfaces(anchor, document.reading.direction)[0];
+    if (!anchor || !referenceSurface) throw new Error("找不到插入位置对应的页面");
+    const pageCanvas = { width: referenceSurface.geometry.width, height: referenceSurface.geometry.height, background: structuredClone(anchor.canvas.background) };
+    const readingIndex = anchorIndex + (input.side === "after" ? 1 : 0);
+    const id = context.createId("spread");
+    const unit: PresentationUnit = {
+      id,
+      ...(input.name ? { name: input.name } : {}),
+      kind: "spread",
+      pageRole: "story",
+      canvas: { width: pageCanvas.width * 2, height: pageCanvas.height, background: pageCanvas.background },
+      surfaces: [
+        { id: `${id}-left`, role: "left", geometry: { x: 0, y: 0, width: pageCanvas.width, height: pageCanvas.height }, pageNumber: readingIndex + 1 },
+        { id: `${id}-right`, role: "right", geometry: { x: pageCanvas.width, y: 0, width: pageCanvas.width, height: pageCanvas.height }, pageNumber: readingIndex + 2 },
+      ],
+      frames: [],
+      overlayLayers: [],
+      readingSequence: [],
+      layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },
+    };
+    return [{ type: "add_presentation_unit", unit, readingIndex }];
+  },
+});
+
 const createVerticalSegmentCapability = defineCapability({
   id: "create_vertical_segment",
   version: 1,
@@ -2458,6 +2505,7 @@ const capabilityRegistry = {
   convert_image_to_cross_segment: convertImageToCrossSegmentCapability,
   convert_balloon_to_cross_page: convertBalloonToCrossPageCapability,
   create_page: createPageCapability,
+  create_spread: createSpreadCapability,
   create_vertical_segment: createVerticalSegmentCapability,
   update_presentation_unit: updatePresentationUnitCapability,
   set_presentation_unit_background: setPresentationUnitBackgroundCapability,

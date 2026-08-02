@@ -172,7 +172,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 19;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 20;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });

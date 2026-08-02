@@ -507,6 +507,7 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
     "convert_image_to_cross_segment",
     "convert_balloon_to_cross_page",
     "create_page",
+    "create_spread",
     "create_vertical_segment",
     "update_presentation_unit",
     "set_presentation_unit_background",
@@ -1431,6 +1432,32 @@ test("create_page inserts before or after a page unit and renumbers physical sur
   });
   assert.deepEqual(after.result.working.document.reading.unitOrder, ["page-before", originalId, "page-after"]);
   assert.deepEqual(after.result.working.document.reading.unitOrder.flatMap((id) => after.result.working.document.units.find((unit) => unit.id === id)?.surfaces.map((surface) => surface.pageNumber) ?? []), [1, 2, 3]);
+});
+
+test("create_spread directly inserts a valid two-surface page unit", () => {
+  const fixture = createInitialFixture();
+  const originalId = fixture.working.document.reading.unitOrder[0]!;
+  const dryRun = dryRunEditorCapability("create_spread", {
+    relativeToUnitId: originalId,
+    side: "after",
+    name: "屋顶大图",
+  }, {
+    fixture,
+    createId: () => "spread-direct",
+    actor: "external_agent",
+  });
+  const spread = dryRun.result.working.document.units.find((unit) => unit.id === "spread-direct");
+
+  assert.equal(spread?.kind, "spread");
+  assert.equal(spread?.pageRole, "story");
+  assert.equal(spread?.name, "屋顶大图");
+  assert.deepEqual(spread?.canvas, { width: 1440, height: 1080, background: { color: "#ffffff" } });
+  assert.deepEqual(spread?.surfaces, [
+    { id: "spread-direct-left", role: "left", geometry: { x: 0, y: 0, width: 720, height: 1080 }, pageNumber: 2 },
+    { id: "spread-direct-right", role: "right", geometry: { x: 720, y: 0, width: 720, height: 1080 }, pageNumber: 3 },
+  ]);
+  assert.deepEqual(dryRun.result.working.document.reading.unitOrder, [originalId, "spread-direct"]);
+  assert.deepEqual(fixture.working.document.reading.unitOrder, [originalId]);
 });
 
 test("create_vertical_segment keeps chapter width and applies every supported aspect ratio", () => {

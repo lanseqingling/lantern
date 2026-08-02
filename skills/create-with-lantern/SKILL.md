@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to create, draw, compose, revise, organize, inspect, or review a creator's comics through the domain capabilities Lantern currently exposes. Use for comic work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "1.5.0"
-  minimum_catalog_revision: "19"
+  version: "1.6.0"
+  minimum_catalog_revision: "20"
 ---
 
 # Create with Lantern
@@ -41,7 +41,7 @@ When the request asks to inspect or discuss page layout, cropping, overlap, ball
 
 When a creative layout decision depends on reading path, visual grouping, pacing, whitespace, page turns, spreads, bleed, breakout, dialogue space, sound effects, or motion cues, also read [references/composition-craft.md](references/composition-craft.md). Use it as optional craft guidance, not as a template or as evidence that Lantern exposes a matching edit capability.
 
-When the request creates, names, duplicates, orders, deletes, merges, or splits pages, read [references/pages.md](references/pages.md). Use page roles, physical page numbers, reading positions, and true-spread surfaces as distinct facts; never turn a workbench display pairing into a true spread.
+When the request creates, names, duplicates, orders, deletes, merges, or splits pages, read [references/pages.md](references/pages.md). For a new true spread, use the direct creation capability rather than creating two single pages and merging them. Use page roles, physical page numbers, reading positions, and true-spread surfaces as distinct facts; never turn a workbench display pairing into a true spread.
 
 When the request creates or edits Frames, places or replaces fixed images, changes crop or transform, enables bleed or overlap, or creates a frame-anchored breakout, read [references/frames-and-images.md](references/frames-and-images.md). Refresh both context and composition after each successful direct change before targeting another object.
 

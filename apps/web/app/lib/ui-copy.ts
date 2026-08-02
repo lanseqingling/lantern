@@ -1183,6 +1183,7 @@ export const uiCopy = {
         uploadPrepared: "准备了图片上传",
         imageAttached: "上传并登记了资源图片",
         pageCreated: "创建了页面",
+        spreadCreated: "创建了跨页",
         pageRenamed: "重命名了页面",
         pageDuplicated: "复制了页面",
         pageMoved: "调整了页面顺序",

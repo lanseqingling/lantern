@@ -1136,7 +1136,14 @@ export async function inspectExternalAgentImages(
     projectId: resolved.projectId,
     baseRevision: resolved.workingRevision,
     source: resolved.source,
-    images: images.map(({ bytes: _bytes, ...image }) => image),
+    images: images.map((image) => ({
+      handle: image.handle,
+      assetId: image.assetId,
+      assetVersionId: image.assetVersionId,
+      mimeType: image.mimeType,
+      ...(image.width ? { width: image.width } : {}),
+      ...(image.height ? { height: image.height } : {}),
+    })),
   });
   return { output, images };
 }

@@ -143,6 +143,7 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "candidate.apply",
     "agent_draft.finish",
     "page.create",
+    "page.create_spread",
     "page.rename",
     "page.duplicate",
     "page.move",
@@ -243,9 +244,11 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "comic.update"), false);
   assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "candidate.apply"), false);
   assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "page.create"), false);
+  assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "page.create_spread"), false);
   assert.equal(plannerCapabilityCatalog().some((capability) => capability.id === "frame.create"), false);
   const externalCatalog = listExternalCapabilities().capabilities;
   assert.equal(externalCatalog.some((capability) => capability.id === "page.create"), true);
+  assert.equal(externalCatalog.some((capability) => capability.id === "page.create_spread"), true);
   assert.equal(externalCatalog.some((capability) => capability.id === "image.update"), true);
   assert.equal(externalCatalog.some((capability) => capability.id === "annotation.inspect"), true);
   assert.equal(externalCatalog.some((capability) => capability.id === "storyboard.edit_single_entry"), false);

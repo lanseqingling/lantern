@@ -23,6 +23,16 @@ const pageCreateSchema = z.strictObject({
   }
 });
 
+const spreadCreateSchema = z.strictObject({
+  ...externalDirectChangeEnvelopeShape,
+  name: pageNameSchema.optional(),
+  side: relativeSideSchema,
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) {
+    context.addIssue({ code: "custom", path: ["targetHandles"], message: "创建跨页需要一个当前页面作为 revision-bound 定位锚点。" });
+  }
+});
+
 const singlePageTargetSchema = z.strictObject({
   ...externalDirectChangeEnvelopeShape,
 }).superRefine((input, context) => {
@@ -93,6 +103,16 @@ export const pageCapabilities = [
     effect: "direct_change",
     risk: "medium",
     domainCapabilities: ["create_page"],
+    confirmation: "none",
+  }),
+  pageCapability({
+    id: "page.create_spread",
+    description: "在页漫一话中直接创建由左右两个物理纸面构成的正文双页。targetHandles 提供一个当前页面锚点，side 决定插入其前后；新双页可立即承载跨页图片、跨页格与跨页对象。不创建封面或过场跨页，也不适用于条漫。",
+    inputSchema: spreadCreateSchema,
+    target: { required: true, types: ["presentation_unit"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "medium",
+    domainCapabilities: ["create_spread"],
     confirmation: "none",
   }),
   pageCapability({

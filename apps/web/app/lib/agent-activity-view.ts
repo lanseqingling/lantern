@@ -160,6 +160,7 @@ export function agentActivityStatus(group: AgentActivityGroup): AgentActivitySta
 
 const eventLabels: Record<string, string> = {
   "page.create": uiCopy.workbench.agentActivity.event.pageCreated,
+  "page.create_spread": uiCopy.workbench.agentActivity.event.spreadCreated,
   "page.rename": uiCopy.workbench.agentActivity.event.pageRenamed,
   "page.duplicate": uiCopy.workbench.agentActivity.event.pageDuplicated,
   "page.move": uiCopy.workbench.agentActivity.event.pageMoved,

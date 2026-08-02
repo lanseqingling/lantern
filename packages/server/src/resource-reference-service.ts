@@ -3,7 +3,7 @@ import { prisma } from "./db";
 import { AppError } from "./errors";
 import { validateComicDocument } from "@lantern/shared";
 
-export const lanternResourceTypes = ["comic", "chapter", "project", "asset", "candidate"] as const;
+export const lanternResourceTypes = ["comic", "chapter", "project", "asset", "candidate", "annotation"] as const;
 export type LanternResourceType = typeof lanternResourceTypes[number];
 
 export type ResolvedResourceReference = {
@@ -47,7 +47,7 @@ function parseCanonicalReference(reference: string): ParsedReference | undefined
     return undefined;
   }
   if (url.protocol !== "lantern:") return undefined;
-  const type = ({ comics: "comic", chapters: "chapter", projects: "project", assets: "asset", candidates: "candidate" } as const)[url.hostname];
+  const type = ({ comics: "comic", chapters: "chapter", projects: "project", assets: "asset", candidates: "candidate", annotations: "annotation" } as const)[url.hostname];
   const [id, extra] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   if (!type || !id || extra || url.search || url.hash) return undefined;
   return { type, id };
@@ -96,7 +96,7 @@ function invalidReference() {
 }
 
 function notFound(type: LanternResourceType) {
-  const label = ({ comic: "漫画", chapter: "章节", project: "创作空间", asset: "资产", candidate: "候选" } as const)[type];
+  const label = ({ comic: "漫画", chapter: "章节", project: "创作空间", asset: "资产", candidate: "候选", annotation: "批注" } as const)[type];
   return new AppError("not_found", `${label}不存在或不属于当前用户。`, 404);
 }
 
@@ -192,6 +192,33 @@ export async function resolveResourceReference(
     };
   }
 
+  if (parsed.type === "annotation") {
+    const annotation = await prisma.artworkAnnotation.findFirst({
+      where: {
+        id: parsed.id,
+        ownerUserId,
+        project: { chapter: { archivedAt: null, comic: { archivedAt: null } } },
+      },
+      select: {
+        id: true,
+        projectId: true,
+        project: { select: { chapter: { select: { id: true, comicId: true } } } },
+      },
+    });
+    if (!annotation) throw notFound(parsed.type);
+    const working = await latestWorking(annotation.projectId);
+    return {
+      type: "annotation",
+      id: annotation.id,
+      canonicalUri: canonicalUri("annotation", annotation.id),
+      displayName: "作品批注",
+      comicId: annotation.project.chapter.comicId,
+      chapterId: annotation.project.chapter.id,
+      projectId: annotation.projectId,
+      workingRevision: working?.revision,
+    };
+  }
+
   const candidate = await prisma.candidate.findFirst({
     where: {
       id: parsed.id,
@@ -251,7 +278,7 @@ export async function resolveResourceScope(
       throw new AppError("invalid_resource_locator", "已有 Lantern 引用时不要同时提供漫画名称。", 422);
     }
     const resolved = await resolveResourceReference(ownerUserId, reference);
-    if (resolved.type === "asset" || resolved.type === "candidate") throw invalidReference();
+    if (resolved.type === "asset" || resolved.type === "candidate" || resolved.type === "annotation") throw invalidReference();
     if (resolved.type !== "comic") {
       if (chapterTitle !== undefined || chapterNumber !== undefined) {
         throw new AppError("invalid_resource_locator", "一话或创作空间引用不能再附加另一话定位条件。", 422);

@@ -6,8 +6,8 @@ import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@lantern/ui";
 import { useClientMounted } from "@/app/lib/client-environment";
 import { uiCopy } from "@/app/lib/ui-copy";
+import type { AgentPanelView } from "./AgentPanelHeader";
 
-type AgentPanelView = "activity" | "conversation";
 type PanelSnapshot = { leftOpen: boolean; agentOpen: boolean; versionsOpen: boolean; agentView: AgentPanelView };
 type TargetRect = { id: string; left: number; top: number; width: number; height: number; radius: number };
 type CalloutPlacement = "right" | "left" | "above" | "tools";
@@ -124,6 +124,7 @@ const workbenchTourSteps: TourStep[] = [
       title: uiCopy.tour.workbench.stepTitle.agentNavigation,
       items: [
         { icon: "agentActivity", text: uiCopy.tour.workbench.stepContent.agentActivity },
+        { icon: "annotation", text: uiCopy.tour.workbench.stepContent.agentAnnotation },
         { icon: "message", text: uiCopy.tour.workbench.stepContent.agentConversation },
       ],
       targets: ["agent-panel-navigation"],

@@ -7,6 +7,7 @@
     "./agent-loop": "./src/agent-loop.ts",
     "./capability-registry": "./src/capability-registry.ts",
     "./composition-observation": "./src/composition-observation.ts",
+    "./external-artwork-annotation-service": "./src/external-artwork-annotation-service.ts",
     "./external-composition-service": "./src/external-composition-service.ts",
     "./external-activity-adapter": "./src/external-activity-adapter.ts",
     "./context-builder": "./src/context-builder.ts",

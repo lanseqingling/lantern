@@ -28,17 +28,20 @@ import { executeExternalDirectChange } from "@lantern/agent-runtime/external-edi
 import { invokeExternalPageCapability } from "@lantern/agent-runtime/external-page-service";
 import { invokeExternalCompositionCapability } from "@lantern/agent-runtime/external-composition-service";
 import { invokeExternalAgentDraftCapability } from "@lantern/agent-runtime/external-agent-draft-service";
+import { inspectExternalArtworkAnnotation, listExternalArtworkAnnotations } from "@lantern/agent-runtime/external-artwork-annotation-service";
 import { trackExternalMcpActivity } from "@lantern/agent-runtime/external-activity-adapter";
 import { resolveExternalAgentScope } from "@lantern/agent-runtime/external-scope-service";
 import { SEMANTIC_CAPABILITY_CATALOG_REVISION, type AgentCapabilityDescriptor } from "@lantern/agent-runtime/capability-registry";
 import { getConfig } from "@lantern/server/config";
 import { receiveExternalAssetUpload } from "@lantern/server/external-upload-service";
 import { resolveResourceReference } from "@lantern/server/resource-reference-service";
+import { createArtworkAnnotation, deleteArtworkAnnotation, listArtworkAnnotations, startArtworkAnnotationWork, updateArtworkAnnotation } from "@lantern/server/artwork-annotation-service";
 import {
   applyChangeProposal,
   agentDraftReference,
   createAgentDraft,
   deleteSavedSnapshot,
+  freezeAgentDraft,
   getVersionComparison,
   getVersionTimeline,
   restoreSavedSnapshot,
@@ -1883,7 +1886,6 @@ test("external MCP activity is observed without becoming an Agent task controlle
     [beat],
     { comicId: ids.comic, chapterId: ids.chapter },
   );
-
   try {
     await prisma.user.create({
       data: {
@@ -2274,6 +2276,162 @@ test("initial data contains only the built-in example comic", async () => {
     assert.deepEqual(workbench.assets.map((asset) => asset.id), canvasAssets.map((item) => item.assetId));
     assert.ok(workbench.messages.every((message) => message.kind === "plain"));
     assert.ok(workbench.candidates.every((candidate) => candidate.id !== "candidate-campus-page3-rhythm"));
+  } finally {
+    await prisma.$disconnect();
+  }
+});
+
+test("artwork annotations preserve ordered references and remain creator-controlled through an Agent proposal", async () => {
+  await initializeDatabaseConnection();
+  const suffix = randomUUID();
+  const ids = {
+    user: `annotation-user-${suffix}`,
+    comic: `annotation-comic-${suffix}`,
+    chapter: `annotation-chapter-${suffix}`,
+    project: `annotation-project-${suffix}`,
+    attachmentAsset: `annotation-attachment-asset-${suffix}`,
+    attachmentVersion: `annotation-attachment-version-${suffix}`,
+  };
+  const beat: StoryboardBeat = {
+    id: `annotation-beat-${suffix}`,
+    versionId: `annotation-beat-version-${suffix}`,
+    title: "雨夜回头",
+    description: "角色在灯笼下回头。",
+  };
+  const document = compileChapterLayoutPlan(
+    { format: "page", preset: "page_basic", readingOrder: [beat.id] },
+    [beat],
+    { comicId: ids.comic, chapterId: ids.chapter },
+  );
+  const effectId = `annotation-effect-${suffix}`;
+  document.units[0]!.overlayLayers.push({
+    id: `annotation-effect-layer-${suffix}`,
+    name: "纸面效果",
+    zIndex: 10,
+    visible: true,
+    anchor: { type: "unit" },
+    purpose: "page_effect",
+    elements: [{
+      id: effectId,
+      kind: "effect",
+      effectType: "focus",
+      transform: { x: 144, y: 216, width: 288, height: 432 },
+      opacity: 0.7,
+    }],
+  });
+
+  try {
+    const attachmentPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n0YAAAAASUVORK5CYII=", "base64");
+    const attachmentObject = await putImage(attachmentPng, `integration/${suffix}/annotation-attachment`);
+    await prisma.user.create({ data: { id: ids.user, email: `${suffix}@annotation.lantern.local`, displayName: "Annotation Test" } });
+    await prisma.comic.create({ data: { id: ids.comic, ownerUserId: ids.user, title: "Annotation Test", format: ComicFormat.PAGE } });
+    await prisma.chapter.create({ data: { id: ids.chapter, ownerUserId: ids.user, comicId: ids.comic, number: 1, title: "Chapter" } });
+    await prisma.project.create({ data: { id: ids.project, ownerUserId: ids.user, chapterId: ids.chapter } });
+    await prisma.asset.create({ data: {
+      id: ids.attachmentAsset,
+      ownerUserId: ids.user,
+      comicId: ids.comic,
+      kind: AssetKind.REFERENCE_IMAGE,
+      name: "批注参考图",
+      versions: { create: {
+        id: ids.attachmentVersion,
+        version: 1,
+        origin: AssetVersionOrigin.UPLOAD,
+        objectKey: attachmentObject.objectKey,
+        contentType: attachmentObject.contentType,
+        width: attachmentObject.width,
+        height: attachmentObject.height,
+      } },
+    } });
+    await prisma.workingRevision.create({
+      data: {
+        projectId: ids.project,
+        revision: 1,
+        document: document as unknown as Prisma.InputJsonValue,
+        storyboardBeats: [beat] as unknown as Prisma.InputJsonValue,
+        storyboardBeatVersionHeads: { [beat.id]: beat.versionId },
+        assetVersionHeads: {},
+      },
+    });
+
+    const created = await createArtworkAnnotation(ids.user, ids.project, {
+      expectedWorkingRevision: 1,
+      content: "把这里的灯光压暗一点。",
+      references: [{ kind: "point", unitId: document.units[0]!.id, surfaceId: document.units[0]!.surfaces[0]!.id, unitPoint: { x: 0.42, y: 0.36 } }],
+    });
+    assert.equal(created.status, "open");
+    assert.deepEqual(created.references[0]?.resolvedUnitPoint, { x: 0.42, y: 0.36 });
+    assert.equal(created.messages[0]?.content, "把这里的灯光压暗一点。");
+    const effectAnnotation = await createArtworkAnnotation(ids.user, ids.project, {
+      expectedWorkingRevision: 1,
+      content: "把聚焦效果再收窄一点。",
+      references: [{ kind: "point", unitId: document.units[0]!.id, unitPoint: { x: 0.12, y: 0.16 } }, {
+        kind: "object",
+        unitId: document.units[0]!.id,
+        surfaceId: document.units[0]!.surfaces[0]!.id,
+        objectType: "effect",
+        objectId: effectId,
+        localPoint: { x: 0.5, y: 0.25 },
+        fallbackUnitPoint: { x: 0.4, y: 0.3 },
+      }],
+    });
+    assert.equal(effectAnnotation.references[1]?.targetLabel, "效果 01");
+    assert.deepEqual(effectAnnotation.references[1]?.resolvedUnitPoint, { x: 0.4, y: 0.3 });
+    const unboundAnnotation = await createArtworkAnnotation(ids.user, ids.project, {
+      expectedWorkingRevision: 1,
+      content: "整体节奏再紧一点。",
+      references: [],
+      attachments: [{ assetId: ids.attachmentAsset, versionId: ids.attachmentVersion, name: "节奏参考.png" }],
+    });
+    assert.equal(unboundAnnotation.references.length, 0);
+    assert.equal(unboundAnnotation.attachments[0]?.name, "节奏参考.png");
+    const externalList = await listExternalArtworkAnnotations(ids.user, { project: `lantern://projects/${ids.project}` });
+    assert.deepEqual(new Set(externalList.annotations.map((annotation) => annotation.reference)), new Set([created.reference, effectAnnotation.reference, unboundAnnotation.reference]));
+    const evidence = await inspectExternalArtworkAnnotation(ids.user, { annotation: created.reference });
+    assert.equal(evidence.type, "annotation_evidence");
+    assert.equal(evidence.workingRevision, 1);
+    assert.match(evidence.evidence[0]?.pageHandle ?? "", /^lctx1\./);
+    const effectEvidence = await inspectExternalArtworkAnnotation(ids.user, { annotation: effectAnnotation.reference });
+    assert.equal(effectEvidence.evidence.length, 2);
+    assert.match(effectEvidence.evidence[1]?.targetHandle ?? "", /^lctx1\./);
+    assert.equal(effectEvidence.annotation.references[1]?.anchor.kind, "object");
+    const unboundEvidence = await inspectExternalArtworkAnnotation(ids.user, { annotation: unboundAnnotation.reference });
+    assert.equal(unboundEvidence.evidence.length, 0);
+    assert.match(unboundEvidence.attachmentHandles[0]?.handle ?? "", /^lctx1\./);
+    const attachmentEvidence = await inspectExternalAgentImages(ids.user, {
+      projectId: ids.project,
+      targetHandles: [unboundEvidence.attachmentHandles[0]!.handle],
+    });
+    assert.equal(attachmentEvidence.output.images[0]?.assetVersionId, ids.attachmentVersion);
+
+    const draft = await createAgentDraft({ ownerUserId: ids.user, projectId: ids.project, baseWorkingRevision: 1, title: "处理灯光批注" });
+    const started = await startArtworkAnnotationWork({
+      ownerUserId: ids.user,
+      draftId: draft.draft.id,
+      annotationIds: [created.id],
+      actorType: "EXTERNAL_AGENT",
+    });
+    assert.equal(started.annotations[0]?.status, "in_progress");
+
+    const proposal = await freezeAgentDraft({ ownerUserId: ids.user, draft: agentDraftReference(draft.draft.id), title: "灯光调整方案" });
+    const awaiting = await listArtworkAnnotations(ids.user, ids.project, { ids: [created.id] });
+    assert.equal(awaiting.annotations[0]?.status, "awaiting_review");
+    assert.equal(awaiting.annotations[0]?.work[0]?.proposal, `lantern://change-proposals/${proposal.id}`);
+    assert.equal(awaiting.annotations[0]?.work[0]?.reviewPath, `/reviews/${proposal.id}`);
+
+    await updateChangeProposalStatus(ids.user, proposal.id, "discard");
+    const reopened = await listArtworkAnnotations(ids.user, ids.project, { ids: [created.id] });
+    assert.equal(reopened.annotations[0]?.status, "open");
+
+    const resolved = await updateArtworkAnnotation(ids.user, created.id, {
+      expectedVersion: reopened.annotations[0]!.version,
+      action: "resolve",
+    });
+    assert.equal(resolved.status, "resolved");
+    await deleteArtworkAnnotation(ids.user, created.id);
+    const deleted = await listArtworkAnnotations(ids.user, ids.project, { ids: [created.id] });
+    assert.equal(deleted.annotations.length, 0);
+    assert.equal(await prisma.artworkAnnotation.count({ where: { id: created.id } }), 0);
   } finally {
     await prisma.$disconnect();
   }

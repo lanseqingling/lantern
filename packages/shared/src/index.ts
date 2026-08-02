@@ -7,3 +7,4 @@ export * from "./workspace";
 export * from "./workspace-schema";
 export * from "./chapter-archive";
 export * from "./agent-activity";
+export * from "./artwork-annotation";

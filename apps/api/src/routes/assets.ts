@@ -49,7 +49,7 @@ export function registerAssetRoutes(app: FastifyInstance) {
       ownerUserId: user.id,
       projectId: request.params.projectId,
       placeOnCanvas: request.query.place === "canvas",
-      conversationAttachment: request.query.usage === "conversation",
+      attachmentUsage: request.query.usage === "conversation" || request.query.usage === "annotation" ? request.query.usage : undefined,
       kind: fields.kind?.value,
       name: fields.name?.value,
       description: fields.description?.value,

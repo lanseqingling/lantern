@@ -3,7 +3,7 @@ import { createInitialFixture } from "@lantern/demo-runtime";
 import { uiCopy } from "@/app/lib/ui-copy";
 
 export type Selection = {
-  type: "none" | "presentation_unit" | "comic_frame" | "image" | "text" | "speech_balloon" | "reference_card" | "storyboard_beat";
+  type: "none" | "presentation_unit" | "comic_frame" | "image" | "text" | "speech_balloon" | "effect" | "reference_card" | "storyboard_beat";
   id?: string;
   pageId?: string;
   label: string;

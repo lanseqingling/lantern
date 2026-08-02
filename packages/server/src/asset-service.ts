@@ -13,7 +13,7 @@ export async function createUploadedAsset(input: {
   ownerUserId: string;
   projectId: string;
   placeOnCanvas: boolean;
-  conversationAttachment?: boolean;
+  attachmentUsage?: "conversation" | "annotation";
   kind?: string;
   name?: string;
   description?: string;
@@ -21,7 +21,7 @@ export async function createUploadedAsset(input: {
   y?: number;
   uploaded: UploadedImage;
 }) {
-  const { ownerUserId, projectId, placeOnCanvas, conversationAttachment, uploaded } = input;
+  const { ownerUserId, projectId, placeOnCanvas, attachmentUsage, uploaded } = input;
   const kindText = input.kind ?? "reference_image";
   const kind = ({ character: AssetKind.CHARACTER, scene: AssetKind.SCENE, style: AssetKind.STYLE, sketch: AssetKind.SKETCH, reference_image: AssetKind.REFERENCE_IMAGE } as Record<string, AssetKind>)[kindText] ?? AssetKind.REFERENCE_IMAGE;
   return prisma.$transaction(async (tx) => {
@@ -32,9 +32,9 @@ export async function createUploadedAsset(input: {
         ownerUserId,
         comicId: project.chapter.comicId,
         kind,
-        libraryStatus: placeOnCanvas || conversationAttachment ? AssetLibraryStatus.CANVAS_ONLY : AssetLibraryStatus.LIBRARY,
+        libraryStatus: placeOnCanvas || attachmentUsage ? AssetLibraryStatus.CANVAS_ONLY : AssetLibraryStatus.LIBRARY,
         name: input.name?.trim() || uploaded.filename.replace(/\.[^.]+$/, "") || "上传图片",
-        description: input.description?.trim() || (conversationAttachment ? "对话图片附件" : "用户上传图片"),
+        description: input.description?.trim() || (attachmentUsage === "conversation" ? "对话图片附件" : attachmentUsage === "annotation" ? "批注图片附件" : "用户上传图片"),
         versions: {
           create: {
             version: 1,

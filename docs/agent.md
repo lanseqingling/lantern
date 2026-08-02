@@ -28,6 +28,7 @@ MCP + Skill 列表示外部 Agent 能否通过宿主、MCP、Skill 与 Lantern �
 | 创建和编排对白、气泡、旁白与纸面文字 | ✅ | ❌ |
 | 普通破格、纸面叠加和有限跨页对象编排 | ✅；真正双页中的跨页格、图片和中缝安全气泡 | ❌ |
 | 同源透明前景绑定真出格 | ✅；抠图由宿主完成 | ❌ |
+| 读取纸面批注、精确定位目标并关联处理方案 | ✅；对象或坐标锚点进入同一 AgentDraft 与 ChangeProposal | ❌；保留未来复用接口 |
 | AgentDraft 连续编辑、ChangeProposal 冻结与整体审查入口 | ✅ | ⚪ |
 | 单页构图与人物、场景、风格一致性检查 | ✅；只读 | ❌ |
 | 相邻分镜连续性与创作表达检查 | ✅；只读 | ❌ |
@@ -77,7 +78,7 @@ flowchart LR
 
 工作台与 MCP 共享同一套语义 Capability；内置 Agent 只在图中保留未来复用关系。外部 Agent 不直接写 LCD、数据库或底层 WorkspaceCommand，也不能提交任意 ChangeSet。MCP 只开放已登记的语义 Capability；每项 Capability 由共享 schema 定义输入输出、适用对象、作用范围、风险、幂等规则、确认要求和版本前置条件。
 
-领域操作产生四类结果：
+领域操作产生五类结果：
 
 | 效果 | 用途 | 结果 |
 |---|---|---|
@@ -85,6 +86,7 @@ flowchart LR
 | `resource_mutation` | 上传并登记外部图片 | AssetVersion |
 | `direct_change` | 确定、有界的页面、画格、图片和文字编辑 | ChangeSet |
 | `candidate` | 生成式结构方案或需要预览的高风险结果 | Candidate |
+| `collaboration_change` | 领取批注或追加处理说明，不修改作品 | 批注协作状态 |
 
 ### 2.1 对象定位与上下文
 
@@ -159,6 +161,21 @@ flowchart LR
 
 单次 MCP 操作失败只保留原失败事件，不能据此推断任务失败；观察窗口到期时，系统追加超时事件。活动只记录 Lantern 已观察到的事实，不把外部宿主不可见的中断推断为新的任务状态。
 
+### 2.4 作品批注协作
+
+作品批注把用户在 Web UI 中写下的修改意图转换为外部 Agent 可直接读取的稳定协作对象。批注属于 Project，保存用户原文、状态、消息、处理关系和零到多个有序引用。无引用正文、多个坐标、多个元素、图片附件和混合引用都是同一模型，不按“批注对象”分类。Web UI 上传图片时先登记不可变 AssetVersion，再作为批注附件保存。
+
+| 引用 | 保存内容 | 当前定位 |
+|---|---|---|
+| 元素引用 | PresentationUnit、Frame、Image、Balloon、Text 或 Effect 的稳定身份，对象内相对位置，以及展示单元备用坐标 | 对象仍存在时随其当前几何变化；不存在时退回备用坐标并标记目标缺失 |
+| 坐标引用 | PresentationUnit 与其纸面归一化坐标，可附属 PageSurface | 始终解析到当前展示单元中的同一相对纸面位置 |
+
+批注不属于 LCD，不创建 WorkingRevision，也不进入 SavedSnapshot、预览或导出。服务端在每次读取时依据当前 WorkingRevision 分别解析每个引用，并比较创建时的目标指纹，返回 `unchanged`、`changed` 或 `missing`；外部 Agent 不能把变化或缺失的引用静默替换成猜测对象。
+
+外部 Agent 的标准处理流程是：按明确 Project 列出待处理批注；逐条检查批注并保留引用顺序；对实际要处理的引用使用其页面 handle 调用合成画面检查，对相关附件使用固定版本 handle 调用图片检查；再使用当前 revision 的目标或所在画格 handle 完成真实编辑。无引用批注不能据正文猜测页面。第一个编辑返回 AgentDraft 后，把同一任务中的批注绑定到该草稿；必要时追加统一处理说明；最后只冻结一次 ChangeProposal。冻结方案使批注进入待确认并关联审查路径，丢弃方案使其恢复待处理，应用方案仍保持待确认。确认解决、搁置、恢复、编辑和永久删除始终是创作者动作，MCP 不开放这些管理写入。
+
+批注能力与作品编辑能力使用同一个 Capability Registry、owner 边界、幂等机制和活动观察装配。领取与回复是 `collaboration_change`，不会推进 AgentDraft revision；未来内置 Agent 可以复用同一批注服务和 Capability，但不能获得额外解决权限。
+
 ## 3. MCP
 
 MCP 是 Lantern 对外提供作品上下文和执行能力的传输层，负责：
@@ -167,9 +184,11 @@ MCP 是 Lantern 对外提供作品上下文和执行能力的传输层，负责�
 - 解析自然语言范围、Lantern 链接和稳定引用；
 - 查询漫画、一话、页面、资产、revision 和渲染画面；
 - 返回固定 AssetVersion 的原图和稳定映射；
+- 列出并检查作品批注，返回每个引用绑定当前 revision 的页面与对象 handle，以及附件固定版本 handle；
 - 暴露经过筛选的语义 Capability；
 - 登记外部生成或用户提供的图片；
 - 创建并推进 AgentDraft，冻结 ChangeProposal 和审查链接；
+- 把批注绑定到活动 AgentDraft，并向用户追加处理说明；
 - 返回结构化结果、幂等结果、冲突和确认要求。
 
 MCP 不代理图片生成 Provider。宿主 Agent 自行生成图片，或使用用户提供的图片，再由 MCP 登记为不可变 AssetVersion。普通画格成图默认只登记为作品使用的固定图片版本；只有用户要求沉淀，或图片确实属于角色、场景、道具、视觉风格等长期上下文时，才加入资产空间。
@@ -188,12 +207,13 @@ MCP 也不复制工作台状态。画布导航、选择、悬停、工具条、�
 
 Lantern 分发一个应用级入口 Skill。Skill 不复制 MCP schema 或完整工具目录，而是让宿主 Agent 理解作品、选择正确能力并遵守漫画创作约束。
 
-Skill 主要提供四类知识：
+Skill 主要提供五类知识：
 
 1. **作品语义**：Comic、Chapter、Project、PresentationUnit、PageSurface、Frame、Overlay、Dialogue 与 AssetVersion 的关系。
 2. **编排知识**：页漫坐标、格间距、阅读顺序、安全区、出血、普通破格、绑定真出格、跨页、中缝、留白、气泡避让和视觉引导。
 3. **创作契约**：根据用户目标处理一话、一页、数页或局部重编排；图片按画格分别生成和放置，不默认生成包含多个漫画格的合成图。
 4. **检查方法**：联合 LCD、最终合成画面、固定原图、角色与场景资产、故事和视觉风格设定，分析构图、一致性、分镜连续性和创作表达。
+5. **批注处理**：按 Project 读取并逐条检查当前证据，把兼容批注合入一个 AgentDraft，正确处理目标变化或缺失，并把最终方案交回用户确认。
 
 Skill 帮助 Agent 在局部修改时先观察整页关系，必要时联动调整相邻画格，避免只放大目标格而破坏安全区、格间距或整体阅读节奏。它也指导 Agent 区分临时成图与长期资产、区分 WorkingRevision 与 SavedSnapshot，并在任务完成后明确返回方案审查链接。
 

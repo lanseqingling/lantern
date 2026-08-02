@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to create, draw, compose, revise, organize, inspect, or review a creator's comics through the domain capabilities Lantern currently exposes. Use for comic work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "1.4.0"
-  minimum_catalog_revision: "17"
+  version: "1.5.0"
+  minimum_catalog_revision: "19"
 ---
 
 # Create with Lantern
@@ -48,6 +48,20 @@ When the request creates or edits Frames, places or replaces fixed images, chang
 When the request creates or edits Dialogue, balloons, narration, paper text, frame-anchored balloon breakout, or a gutter-safe cross-page balloon, read [references/dialogue-and-text.md](references/dialogue-and-text.md). Keep Dialogue semantics, visual carriers, coordinate spaces, and true-spread gutter safety distinct.
 
 When the request asks for a page-composition review, character or scene consistency check, adjacent-storyboard continuity check, creative-expression analysis, or a comparison with the latest saved version, read [references/review.md](references/review.md) together with the domain reference relevant to the finding. These are read-only Agent judgments, not Lantern validation results or automatic fixes.
+
+## Handle artwork annotations
+
+Artwork annotations are creator-authored instructions with an ordered collection of zero or more references. A single annotation may be unbound text, refer to one or several paper coordinates or elements, include fixed image attachments, or mix all of them. Treat Lantern's stored content and references as the source of truth instead of asking the creator to restate pages, frames, objects, or coordinates.
+
+1. Resolve the explicit Project scope, then call `lantern_annotation_list`. Unless the creator asks otherwise, process the actionable statuses returned by default and keep annotations from different Projects separate.
+2. Call `lantern_annotation_inspect` for every annotation you intend to act on before choosing a change. Preserve the returned reference order. For each relevant reference, inspect its `pageHandle` with `lantern_composition_inspect` before editing and use the returned target state plus the narrowest current-revision handle together. For each relevant image attachment, inspect its fixed-version handle with `lantern_images_inspect`.
+3. Evaluate target state per reference. If one is `changed`, inspect its current evidence and decide whether the requested intent still applies. If one is `missing`, do not redirect that reference to a guessed replacement; report the conflict precisely. An annotation with no references is valid: follow its text or attachments, but never invent a page or target when location matters.
+4. Group compatible annotations into one coherent task and one AgentDraft. Apply the narrowest available comic capabilities, reusing only handles refreshed from the current draft revision.
+5. Immediately after the first mutation has returned an AgentDraft, call `lantern_annotation_start_work` once with that draft and every annotation included in the task. Use one stable idempotency key for that logical binding. This collaboration call does not modify the comic.
+6. When useful, call `lantern_annotation_reply` once with a concise shared processing note. Do not claim that the official Working Revision changed.
+7. Finish the AgentDraft exactly once. Lantern automatically links the resulting ChangeProposal to the annotations and returns them to the creator as awaiting review.
+
+Never resolve, dismiss, delete, or rewrite a creator's annotation. Only the creator controls those decisions in Lantern. Applying a ChangeProposal also does not resolve its annotations; they remain awaiting review until the creator confirms the result. If no matching edit capability exists, leave the annotation open and explain the capability gap without starting work.
 
 ## Respect Lantern's creative boundaries
 

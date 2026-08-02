@@ -7,6 +7,7 @@ import { balloonCutCornerPoints, frameBalloonCoordinateBounds, frameCornerDragAx
 import type { Selection } from "@/app/lib/workbench-state";
 import { contentSafeArea, snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type MoveSnapGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 import { uiCopy } from "@/app/lib/ui-copy";
+import { Icon } from "@lantern/ui";
 
 type ElementPatch = Record<string, unknown>;
 type ElementPatchBatch = Array<{ elementId: string; patch: ElementPatch }>;
@@ -43,7 +44,8 @@ type ComicRendererProps = {
   selection?: Selection;
   editable?: boolean;
   interactionMode?: "select" | "move" | "crop" | "preview";
-  creationMode?: "dialogue" | "narration";
+  creationMode?: "dialogue" | "narration" | "annotation";
+  annotationMarkers?: Array<{ id: string; annotationId: string; referenceId: string; x: number; y: number; targetLabel: string; status: string; focused?: boolean }>;
   multiSelectedIds?: ReadonlySet<string>;
   multiMoving?: boolean;
   multiMoveDelta?: { x: number; y: number };
@@ -54,6 +56,8 @@ type ComicRendererProps = {
   onPlaceDialogue?: (unitId: string, frameId: string, position: { x: number; y: number }) => void;
   onPlacePageDialogue?: (unitId: string, position: { x: number; y: number }) => void;
   onPlaceNarration?: (unitId: string, position: { x: number; y: number }) => void;
+  onPlaceAnnotation?: (unitId: string, position: { x: number; y: number }, target?: Selection) => void;
+  onAnnotationMarkerSelect?: (annotationId: string, referenceId: string) => void;
   onCommitElement?: (unitId: string, elementId: string, patch: ElementPatch, label: string) => void;
   onCommitElements?: (unitId: string, patches: ElementPatchBatch, label: string) => void;
   onPageClick?: (pageIndex: number) => void;
@@ -163,7 +167,7 @@ function FrameShapeVisual({ frame, fill, stroke }: { frame: Frame; fill: string;
   </svg>;
 }
 
-export function ComicRenderer({ document, resolvedResources, pageIndex, selection, editable = false, interactionMode = "select", creationMode, multiSelectedIds, multiMoving = false, multiMoveDelta, crossPageSnapFrames = [], onSelect, onContextAction, onObjectDoubleClick, onPlaceDialogue, onPlacePageDialogue, onPlaceNarration, onCommitElement, onCommitElements, onPageClick, className }: ComicRendererProps) {
+export function ComicRenderer({ document, resolvedResources, pageIndex, selection, editable = false, interactionMode = "select", creationMode, annotationMarkers = [], multiSelectedIds, multiMoving = false, multiMoveDelta, crossPageSnapFrames = [], onSelect, onContextAction, onObjectDoubleClick, onPlaceDialogue, onPlacePageDialogue, onPlaceNarration, onPlaceAnnotation, onAnnotationMarkerSelect, onCommitElement, onCommitElements, onPageClick, className }: ComicRendererProps) {
   const requestedUnitId = document.reading.unitOrder[pageIndex];
   const unit = document.units.find((item) => item.id === requestedUnitId) ?? document.units[0];
   const paperRef = useRef<HTMLDivElement>(null);
@@ -200,7 +204,6 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
   };
   const scene = projectComicRenderScene(document, draftUnit);
   const frames = scene.frames.map((node) => node.frame);
-  const framesById = new Map(frames.map((frame) => [frame.id, frame]));
   const readingOrder = new Map(unit.readingSequence.map((entry, index) => [entry.frameId, index + 1]));
   const images = scene.elements.filter((node): node is ImageSceneNode => node.element.kind === "image");
   // A frame image is edited as an image while cropping, but otherwise belongs to
@@ -236,6 +239,13 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
 
   const frameLabel = (frame: Frame) => `${unit.kind === "spread" && frame.surfaceScope === "unit" ? uiCopy.workbench.object.crossPageFrame : uiCopy.workbench.object.frame} ${String(readingOrder.get(frame.id) ?? "").padStart(2, "0")}`.trim();
   const selectFrame = (frame: Frame) => onSelect?.({ type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) });
+  const placeAnnotation = (event: ReactMouseEvent<HTMLElement>, target?: Selection) => {
+    if (creationMode !== "annotation") return false;
+    const point = eventPoint(event);
+    if (point) onPlaceAnnotation?.(unit.id, { x: point.canvasX, y: point.canvasY }, target);
+    event.stopPropagation();
+    return true;
+  };
   const doubleClick = (event: ReactMouseEvent, next: Selection) => {
     if (!editable || !onObjectDoubleClick) return;
     event.preventDefault();
@@ -577,7 +587,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
 
   return <div className={`comic-page ${editable ? "is-editable" : "is-preview"} interaction-${interactionMode} ${creationMode ? `creation-${creationMode}` : ""} ${multiMoving ? "multi-moving" : ""} ${className ?? ""}`} data-testid="comic-page" data-page-id={unit.id} ref={paperRef}
     style={{ aspectRatio: `${unit.canvas.width} / ${unit.canvas.height}`, background: unit.canvas.background.color, "--multi-move-x": `${multiMoveDelta?.x ?? 0}px`, "--multi-move-y": `${multiMoveDelta?.y ?? 0}px` } as CSSProperties} onPointerMoveCapture={pointerMove} onPointerUpCapture={finishDrag} onPointerCancelCapture={finishDrag}
-    onClick={(event) => { const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue" && point) { const frame = frameAtPoint(point); if (!frame) onPlacePageDialogue?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (interactionMode !== "select") return; const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); onPageClick?.(pageIndex); }}
+    onClick={(event) => { const point = eventPoint(event); if (creationMode === "annotation" && point) { onPlaceAnnotation?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue" && point) { const frame = frameAtPoint(point); if (!frame) onPlacePageDialogue?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (interactionMode !== "select") return; const frame = point ? frameAtPoint(point) : undefined; if (frame) selectFrame(frame); else onSelect?.({ type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); onPageClick?.(pageIndex); }}
     onContextMenu={(event) => { const point = eventPoint(event); if (!point) return; const frame = frameAtPoint(point); contextFor(event, frame ? { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) } : { type: "presentation_unit", id: unit.id, pageId: unit.id, label: uiCopy.renderer.pageSelection(pageIndex + 1) }); }}>
     <div className="paper-grain" aria-hidden="true" />
     {safeAreaVisible || snapGuides ? <svg className="snap-guide-layer" viewBox={`0 0 ${unit.canvas.width} ${unit.canvas.height}`} preserveAspectRatio="none" aria-hidden="true">
@@ -603,7 +613,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       return <div className="lcd-frame-fill" key={`${frame.id}-fill`} style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: fillZIndex }}>
         <FrameShapeVisual frame={frame} fill="#fff" />
         {editable ? <button type="button" className="lcd-frame-hit-target" data-element-id={frame.id} data-page-id={unit.id} tabIndex={-1} aria-label={uiCopy.renderer.selectFrameAria(frameLabel(frame))} style={{ clipPath: frameClipPath(frame, frame.geometry) }}
-          onClick={(event) => { event.stopPropagation(); const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
+          onClick={(event) => { event.stopPropagation(); if (placeAnnotation(event, frameSelection)) return; const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
           onDoubleClick={(event) => doubleClick(event, frameSelection)}
           onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection); }}
           onContextMenu={(event) => contextFor(event, frameSelection)} /> : null}
@@ -645,6 +655,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         onWheel={(event) => { if (cropTargetSelected && interactionMode === "crop") zoomCropWithWheel(event, cropTargetImage, cropTargetFrame?.geometry ?? cropTarget.geometry); }}
         onClick={(event) => {
           event.stopPropagation();
+          if (placeAnnotation(event, imageSelection)) return;
           if (suppressClick.current) {
             suppressClick.current = false;
             lastImageClickRef.current = null;
@@ -692,7 +703,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const frameSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
       return <div className={`lcd-frame ${selected ? "selected" : ""} ${cropEditing ? "crop-editing" : ""} ${multiSelectedIds?.has(frame.id) ? "multi-selected" : ""}`} data-element-id={frame.id} data-page-id={unit.id} key={frame.id}
         style={{ ...geometryStyle(frame.geometry, unit.canvas.width, unit.canvas.height), zIndex: borderZIndex }}
-        onClick={(event) => { event.stopPropagation(); const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
+        onClick={(event) => { event.stopPropagation(); if (placeAnnotation(event, frameSelection)) return; const point = eventPoint(event); if (creationMode === "narration" && point) { onPlaceNarration?.(unit.id, { x: point.canvasX, y: point.canvasY }); return; } if (creationMode === "dialogue") { if (point) onPlaceDialogue?.(unit.id, frame.id, { x: clamp((point.canvasX - frame.geometry.x) / frame.geometry.width, 0, 1), y: clamp((point.canvasY - frame.geometry.y) / frame.geometry.height, 0, 1) }); return; } if (!suppressClick.current) selectFrame(frame); }}
         onDoubleClick={(event) => doubleClick(event, frameSelection)}
         onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, frameSelection); }}
         onContextMenu={(event) => contextFor(event, frameSelection)}>
@@ -723,7 +734,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const minimumWidth = text.style.writingMode === "vertical" ? Math.min(text.transform.width, oneColumnWidth) : undefined;
       return <div className={`lcd-text role-${text.role} ${editableNarration ? "editable-narration" : ""} ${selected ? "selected" : ""}`} data-element-id={text.id} data-page-id={unit.id} key={text.id}
         style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), zIndex: selected && interactionMode === "crop" ? 2_147_483_646 : node.zIndex, color: text.style.color, WebkitTextStroke: text.style.stroke ? `${projectTextStrokeWidth(text) / unit.canvas.width * 100}cqw ${text.style.stroke}` : undefined, paintOrder: "stroke fill", fontFamily: text.style.fontFamily, fontSize: `${text.style.fontSize / unit.canvas.width * 100}cqw`, fontWeight: text.style.fontWeight, textAlign: text.style.align, writingMode: text.style.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb", textOrientation: text.style.writingMode === "vertical" ? "upright" : undefined }}
-        onClick={editableNarration ? (event) => { event.stopPropagation(); if (!suppressClick.current) onSelect?.(textSelection); } : undefined}
+        onClick={(event) => { if (placeAnnotation(event, textSelection)) return; if (editableNarration) { event.stopPropagation(); if (!suppressClick.current) onSelect?.(textSelection); } }}
         onDoubleClick={editableNarration ? (event) => doubleClick(event, textSelection) : undefined}
         onContextMenu={editableNarration ? (event) => contextFor(event, textSelection) : undefined}
         onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; if (selected && interactionMode === "move") startDrag(event, { mode: "text_move", elementId: text.id, anchorGeometry, startTransform: text.transform }, textSelection); }}>
@@ -734,7 +745,21 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
     {effects.map((node) => {
       const effect = node.element;
       const src = effect.assetVersionId ? resolvedResources?.[effect.assetVersionId]?.url : undefined;
-      return src ? <div className="lcd-effect" data-element-id={effect.id} data-page-id={unit.id} key={effect.id} style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: effect.opacity, pointerEvents: "none" }}><img src={src} alt="" draggable={false} /></div> : null;
+      const label = uiCopy.renderer.effect(effects.findIndex((candidate) => candidate.element.id === effect.id) + 1);
+      const effectSelection: Selection = { type: "effect", id: effect.id, pageId: unit.id, label };
+      const selected = selection?.type === "effect" && selection.id === effect.id;
+      return src ? <div
+        className={`lcd-effect ${selected ? "selected" : ""}`}
+        data-element-id={effect.id}
+        data-page-id={unit.id}
+        key={effect.id}
+        role={editable ? "button" : undefined}
+        tabIndex={editable ? 0 : undefined}
+        aria-label={editable ? label : undefined}
+        style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: effect.opacity, pointerEvents: editable ? "auto" : "none" }}
+        onClick={(event) => { if (placeAnnotation(event, effectSelection)) return; event.stopPropagation(); onSelect?.(effectSelection); }}
+        onKeyDown={(event) => { if (event.key !== "Enter" && event.key !== " ") return; event.preventDefault(); onSelect?.(effectSelection); }}
+      ><img src={src} alt="" draggable={false} /></div> : null;
     })}
     {balloons.map((node) => {
       const balloon = node.element;
@@ -757,7 +782,7 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const minimumWidth = Math.min(balloon.transform.width, frame ? oneCharacterWidth / frame.geometry.width : oneCharacterWidth);
       return <button type="button" className={`lcd-balloon shape-${balloon.shape} ${node.source === "overlay" ? "scene-overlay" : ""} ${selected ? "selected" : ""} ${multiSelectedIds?.has(balloon.id) ? "multi-selected" : ""}`} data-element-id={balloon.id} data-page-id={unit.id} key={balloon.id}
         style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), zIndex: selected && interactionMode === "crop" ? 2_147_483_646 : node.zIndex, color: balloon.style.textColor, fontFamily: balloon.style.fontFamily, fontSize: `${balloon.style.fontSize / unit.canvas.width * 100}cqw`, writingMode: balloon.style.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb", textOrientation: balloon.style.writingMode === "vertical" ? "upright" : undefined }}
-        onClick={(event) => { event.stopPropagation(); if (!suppressClick.current) onSelect?.(balloonSelection); }}
+        onClick={(event) => { event.stopPropagation(); if (placeAnnotation(event, balloonSelection)) return; if (!suppressClick.current) onSelect?.(balloonSelection); }}
         onDoubleClick={(event) => doubleClick(event, balloonSelection)}
         onContextMenu={(event) => contextFor(event, balloonSelection)}
         onPointerDown={(event) => { if (event.button === 0 && event.detail > 1) return; if (selected && interactionMode === "move" && event.button === 0) startDrag(event, { mode: "balloon_move", elementId: balloon.id, frameId: frame?.id, anchorGeometry, coordinateBounds: moveCoordinateBounds, startTransform: balloon.transform, startTailTarget: balloon.tailTarget }, balloonSelection); }}>
@@ -808,6 +833,16 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
         const nextSelection: Selection = { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) };
         return <button type="button" className={`reading-order frame-order-button ${cornerEditing ? "corner-editing" : ""} ${crossPage ? "cross-page" : ""} ${selection?.type === "comic_frame" && selection.id === frame.id ? "selected" : ""}`} data-frame-id={frame.id} key={`${frame.id}-order`} style={{ left: `calc(${frame.geometry.x / unit.canvas.width * 100}% - 12px + ${badgeOffsets.get(`frame:${frame.id}`) ?? 0}px)`, top: `calc(${frame.geometry.y / unit.canvas.height * 100}% - ${cornerEditing ? 34 : 12}px)` }} aria-label={uiCopy.renderer.selectFrameAria(frameLabel(frame))} onClick={(event) => { event.stopPropagation(); if (event.detail === 0) selectFrame(frame); }} onDoubleClick={(event) => doubleClick(event, nextSelection)} onContextMenu={(event) => contextFor(event, nextSelection)} onPointerDown={(event) => { if (event.button !== 0 || event.detail > 1) return; event.stopPropagation(); selectFrame(frame); }}>{crossPage ? frameLabel(frame) : order}</button>;
       })}
+    </div> : null}
+    {annotationMarkers.length ? <div className="artwork-annotation-marker-layer" aria-label={uiCopy.workbench.annotation.panelAria}>
+      {annotationMarkers.map((marker) => <button
+        type="button"
+        key={marker.id}
+        className={`artwork-annotation-marker status-${marker.status} ${marker.focused ? "focused" : ""}`}
+        style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}
+        aria-label={uiCopy.workbench.annotation.markerAria(marker.targetLabel)}
+        onClick={(event) => { event.stopPropagation(); onAnnotationMarkerSelect?.(marker.annotationId, marker.referenceId); }}
+      ><Icon name="annotation" /></button>)}
     </div> : null}
     <span className="page-watermark">{unit.kind === "vertical_segment" ? uiCopy.renderer.watermark.scroll(pageIndex + 1) : unit.kind === "four_panel_unit" ? uiCopy.renderer.watermark.fourPanel : uiCopy.renderer.watermark.page(pageIndex + 1)}</span>
   </div>;

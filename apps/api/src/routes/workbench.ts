@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  artworkAnnotationCreateInputSchema,
+  artworkAnnotationStatusSchema,
+  artworkAnnotationUpdateInputSchema,
   workspaceChangeSetRequestSchema,
   type WorkspaceChangeSet,
 } from "@lantern/shared";
@@ -24,6 +27,13 @@ import {
   updateChangeProposalStatus,
 } from "@lantern/server/version-service";
 import { getProjectAgentActivity } from "@lantern/server/agent-activity-service";
+import {
+  createArtworkAnnotation,
+  deleteArtworkAnnotation,
+  getArtworkAnnotation,
+  listArtworkAnnotations,
+  updateArtworkAnnotation,
+} from "@lantern/server/artwork-annotation-service";
 
 const selectionSchema = z.object({
   type: z.string().min(1),
@@ -131,6 +141,53 @@ export function registerWorkbenchRoutes(app: FastifyInstance) {
       cursor: request.query.cursor,
       limit,
     }));
+  });
+
+  app.get<{
+    Params: { projectId: string };
+    Querystring: { status?: string; unitId?: string; limit?: string };
+  }>("/v1/projects/:projectId/annotations", async (request) => {
+    const user = await currentUser(request);
+    const statuses = request.query.status
+      ? request.query.status.split(",").filter(Boolean).map((status) => artworkAnnotationStatusSchema.parse(status))
+      : undefined;
+    const limit = request.query.limit === undefined
+      ? undefined
+      : z.coerce.number().int().min(1).max(200).parse(request.query.limit);
+    return ok(request, await listArtworkAnnotations(user.id, request.params.projectId, {
+      statuses,
+      unitId: request.query.unitId,
+      limit,
+    }));
+  });
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>("/v1/projects/:projectId/annotations", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await createArtworkAnnotation(
+      user.id,
+      request.params.projectId,
+      artworkAnnotationCreateInputSchema.parse(request.body),
+    ));
+  });
+
+  app.get<{ Params: { annotationId: string } }>("/v1/annotations/:annotationId", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await getArtworkAnnotation(user.id, request.params.annotationId));
+  });
+
+  app.patch<{ Params: { annotationId: string }; Body: unknown }>("/v1/annotations/:annotationId", async (request) => {
+    const user = await currentUser(request);
+    return ok(request, await updateArtworkAnnotation(
+      user.id,
+      request.params.annotationId,
+      artworkAnnotationUpdateInputSchema.parse(request.body),
+    ));
+  });
+
+  app.delete<{ Params: { annotationId: string } }>("/v1/annotations/:annotationId", async (request) => {
+    const user = await currentUser(request);
+    await deleteArtworkAnnotation(user.id, request.params.annotationId);
+    return ok(request, { deleted: true });
   });
 
   app.get<{ Params: { kind: string; id: string } }>("/v1/version-comparisons/:kind/:id", async (request) => {

@@ -26,6 +26,11 @@ function cleanupPrismaMock() {
     candidate: model("candidate"),
     agentActivityEvent: model("agentActivityEvent"),
     agentActivityGroup: model("agentActivityGroup"),
+    artworkAnnotationWork: model("artworkAnnotationWork"),
+    artworkAnnotationMessage: model("artworkAnnotationMessage"),
+    artworkAnnotationAttachment: model("artworkAnnotationAttachment"),
+    artworkAnnotationReference: model("artworkAnnotationReference"),
+    artworkAnnotation: model("artworkAnnotation"),
     changeProposal: model("changeProposal"),
     agentDraftRevision: model("agentDraftRevision"),
     agentDraft: model("agentDraft"),
@@ -61,6 +66,11 @@ test("comic cleanup removes external uploads before their assets", async () => {
   assert.ok(operations.indexOf("externalAssetUpload.deleteMany") < operations.indexOf("asset.deleteMany"));
   assert.ok(operations.indexOf("agentActivityEvent.deleteMany") < operations.indexOf("agentActivityGroup.deleteMany"));
   assert.ok(operations.indexOf("agentActivityGroup.deleteMany") < operations.indexOf("agentDraft.deleteMany"));
+  assert.ok(operations.indexOf("artworkAnnotationWork.deleteMany") < operations.indexOf("changeProposal.deleteMany"));
+  assert.ok(operations.indexOf("artworkAnnotationMessage.deleteMany") < operations.indexOf("artworkAnnotation.deleteMany"));
+  assert.ok(operations.indexOf("artworkAnnotationAttachment.deleteMany") < operations.indexOf("artworkAnnotation.deleteMany"));
+  assert.ok(operations.indexOf("artworkAnnotationReference.deleteMany") < operations.indexOf("artworkAnnotation.deleteMany"));
+  assert.ok(operations.indexOf("artworkAnnotation.deleteMany") < operations.indexOf("project.deleteMany"));
   assert.ok(operations.indexOf("changeProposal.deleteMany") < operations.indexOf("agentDraftRevision.deleteMany"));
   assert.ok(operations.indexOf("agentDraftRevision.deleteMany") < operations.indexOf("agentDraft.deleteMany"));
   assert.ok(operations.indexOf("agentDraft.deleteMany") < operations.indexOf("project.deleteMany"));

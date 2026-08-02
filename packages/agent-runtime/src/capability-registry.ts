@@ -4,6 +4,7 @@ import { compositionObservationSchema } from "./composition-observation";
 import { candidateCapabilities } from "./candidate-capabilities";
 import { agentDraftCapabilities } from "./agent-draft-capabilities";
 import { compositionCapabilities } from "./composition-capabilities";
+import { artworkAnnotationCapabilities } from "./artwork-annotation-capabilities";
 import { pageCapabilities } from "./page-capabilities";
 import { resourceCapabilities } from "./resource-capabilities";
 import type {
@@ -68,6 +69,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   ...agentDraftCapabilities,
   ...pageCapabilities,
   ...compositionCapabilities,
+  ...artworkAnnotationCapabilities,
   {
     id: "context.inspect_images",
     version: 1,
@@ -170,7 +172,7 @@ const semanticCapabilities: readonly SemanticCapabilityManifest[] = [
   },
 ] as const;
 
-export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 18;
+export const SEMANTIC_CAPABILITY_CATALOG_REVISION = 19;
 
 function jsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, { target: "draft-7" });

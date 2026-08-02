@@ -6,6 +6,7 @@ import { createSignedAssetPath } from "./signed-assets";
 import { applyWorkspaceChangeSet, planEditorCapability } from "@lantern/editor-core";
 import { mergeAssetVersionHeads, normalizeStoryboardBeats, validateComicDocument, type StoryboardBeat, type WorkspaceChangeSet } from "@lantern/shared";
 import { isWorkbenchAgentCandidateVisible, workbenchAgentCandidateKinds, workbenchAgentTaskTypes } from "./workbench-agent-visibility";
+import { markArtworkAnnotationProposalApplied } from "./artwork-annotation-service";
 
 function json<T>(value: Prisma.JsonValue) {
   return structuredClone(value) as T;
@@ -569,6 +570,7 @@ export async function commitChangeSet(args: {
         },
       });
       if (appliedProposal.count !== 1) throw new AppError("conflict", "Agent 方案已经变化，无法完成应用。", 409);
+      await markArtworkAnnotationProposalApplied(tx, args.appliedChangeProposalId);
     }
     const resolved = await withResolvedResources(next.document);
     return {

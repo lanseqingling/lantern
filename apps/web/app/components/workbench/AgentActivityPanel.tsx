@@ -19,11 +19,13 @@ export function AgentActivityPanel({
   projectId,
   active,
   onInitialAttentionDetected,
+  onAttentionChange,
   onNavigate,
 }: {
   projectId?: string;
   active: boolean;
   onInitialAttentionDetected: () => void;
+  onAttentionChange: (needsAttention: boolean) => void;
   onNavigate: (navigation: AgentActivityNavigation) => void;
 }) {
   const [groups, setGroups] = useState<AgentActivityGroupData[]>([]);
@@ -33,6 +35,7 @@ export function AgentActivityPanel({
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [error, setError] = useState("");
   const [refreshWarning, setRefreshWarning] = useState("");
+  const groupsRef = useRef<AgentActivityGroupData[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const requestInFlightRef = useRef(false);
   const hasLoadedRef = useRef(false);
@@ -51,7 +54,10 @@ export function AgentActivityPanel({
       const scrollElement = listRef.current;
       const previousScrollHeight = scrollElement?.scrollHeight ?? 0;
       const previousScrollTop = scrollElement?.scrollTop ?? 0;
-      setGroups((current) => initial ? result.groups : mergeAgentActivityGroups(current, result.groups));
+      const nextGroups = initial ? result.groups : mergeAgentActivityGroups(groupsRef.current, result.groups);
+      groupsRef.current = nextGroups;
+      setGroups(nextGroups);
+      onAttentionChange(agentActivityFeedNeedsAttention(nextGroups));
       if (!initial && scrollElement && previousScrollTop > 4) {
         window.requestAnimationFrame(() => {
           scrollElement.scrollTop = previousScrollTop + scrollElement.scrollHeight - previousScrollHeight;
@@ -82,7 +88,7 @@ export function AgentActivityPanel({
         if (initial) setInitialLoading(false);
       }
     }
-  }, [onInitialAttentionDetected, projectId]);
+  }, [onAttentionChange, onInitialAttentionDetected, projectId]);
 
   useEffect(() => {
     const timer = projectId
@@ -92,8 +98,10 @@ export function AgentActivityPanel({
       if (timer !== undefined) window.clearTimeout(timer);
       requestGenerationRef.current += 1;
       requestInFlightRef.current = false;
+      groupsRef.current = [];
+      onAttentionChange(false);
     };
-  }, [loadLatest, projectId]);
+  }, [loadLatest, onAttentionChange, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -118,7 +126,9 @@ export function AgentActivityPanel({
     try {
       const result = await apiGetAgentActivity(projectId, { cursor: nextCursor, limit: pageSize });
       if (requestGeneration !== requestGenerationRef.current) return;
-      setGroups((current) => appendAgentActivityGroups(current, result.groups));
+      const nextGroups = appendAgentActivityGroups(groupsRef.current, result.groups);
+      groupsRef.current = nextGroups;
+      setGroups(nextGroups);
       setNextCursor(result.nextCursor);
       hasLoadedEarlierRef.current = true;
       setRefreshWarning("");

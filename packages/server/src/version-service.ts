@@ -15,6 +15,10 @@ import { createSignedAssetPath } from "./signed-assets";
 import { commitChangeSet, getLatestWorking, getOwnedProject } from "./workbench-service";
 import { deleteObject } from "./object-storage";
 import { ensureExternalAgentActivityGroup } from "./agent-activity-service";
+import {
+  discardArtworkAnnotationProposal,
+  markAgentDraftAnnotationsAwaitingReview,
+} from "./artwork-annotation-service";
 
 function json<T>(value: Prisma.JsonValue) {
   return structuredClone(value) as T;
@@ -201,6 +205,7 @@ export async function freezeAgentDraft(input: {
       data: { status: "READY" },
     });
     if (frozen.count !== 1) throw new AppError("conflict", "该 Agent 工作草稿已经冻结。", 409);
+    await markAgentDraftAnnotationsAwaitingReview(tx, draft.id, proposal.id);
     return result(proposal);
   }, { isolationLevel: "Serializable" });
 }
@@ -367,7 +372,11 @@ export async function updateChangeProposalStatus(ownerUserId: string, proposalId
   if (!["AVAILABLE", "RETAINED", "STALE"].includes(proposal.status)) {
     throw new AppError("conflict", "该方案已经处理，不能再次丢弃。", 409);
   }
-  return prisma.changeProposal.update({ where: { id: proposal.id }, data: { status: "DISCARDED" } });
+  return prisma.$transaction(async (tx) => {
+    const discarded = await tx.changeProposal.update({ where: { id: proposal.id }, data: { status: "DISCARDED" } });
+    await discardArtworkAnnotationProposal(tx, proposal.id);
+    return discarded;
+  }, { isolationLevel: "Serializable" });
 }
 
 export async function applyChangeProposal(ownerUserId: string, proposalId: string, expectedWorkingRevision: number) {

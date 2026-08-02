@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export type AgentTaskType = "storyboard" | "frame_image_generate" | "asset_image_generate";
 export type AgentCapabilityExecution = "synchronous" | "asynchronous";
-export type AgentCapabilityEffect = "observe" | "resource_mutation" | "direct_change" | "candidate";
+export type AgentCapabilityEffect = "observe" | "resource_mutation" | "collaboration_change" | "direct_change" | "candidate";
 export type AgentCapabilityRisk = "low" | "medium" | "high";
 export type AgentCapabilityAccess = "disabled" | "observe" | "preview" | "execute";
 export type AgentCapabilityActor = "internal" | "external";

@@ -27,6 +27,7 @@ export function ReferenceCard({
   onMove,
   onZoom,
   onReference,
+  onAnnotate,
   onSaveToAssets,
   onOpenContextMenu,
   assetSaved,
@@ -45,6 +46,7 @@ export function ReferenceCard({
   onMove: (x: number, y: number) => void;
   onZoom: (zoom: number) => void;
   onReference: () => void;
+  onAnnotate: () => void;
   onSaveToAssets: (anchor: { left: number; right: number; top: number; bottom: number }) => void;
   onOpenContextMenu: () => void;
   assetSaved: boolean;
@@ -264,7 +266,7 @@ export function ReferenceCard({
       </div>
       {contextMenu ? createPortal(
         <FloatingMenu className="reference-context-menu" style={{ left: contextMenu.left, top: contextMenu.top }} onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
-            <MenuSection className="reference-menu-section"><button type="button" onClick={() => { onReference(); setContextMenu(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button></MenuSection>
+            <MenuSection className="reference-menu-section"><button type="button" onClick={() => { onReference(); setContextMenu(null); }}><span><Icon name="ai" />{uiCopy.asset.action.referenceInChat}</span></button><button type="button" onClick={() => { onAnnotate(); setContextMenu(null); }}><span><Icon name="annotation" />{uiCopy.workbench.annotation.addAssetReference}</span></button></MenuSection>
             {isUploadedReference ? <><MenuDivider className="reference-menu-divider" /><MenuSection className="reference-menu-section"><button type="button" disabled={assetSaved} onClick={(event) => { const anchor = cardRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect(); onSaveToAssets({ left: anchor.left, right: anchor.right, top: anchor.top, bottom: anchor.bottom }); setContextMenu(null); }}><span><Icon name="save" />{assetSaved ? uiCopy.asset.status.linked : uiCopy.asset.action.saveToLibrary}</span></button></MenuSection></> : null}
             <MenuDivider className="reference-menu-divider" />
             <MenuSection className="reference-menu-section reference-menu-actions"><button type="button" onClick={(event) => {

@@ -1,4 +1,14 @@
-import type { AgentActivityFeed, Candidate, ReferencePlacement, WorkbenchFixture, WorkspaceChangeSet } from "@lantern/shared";
+import type {
+  AgentActivityFeed,
+  ArtworkAnnotation,
+  ArtworkAnnotationAnchor,
+  ArtworkAnnotationAttachmentInput,
+  ArtworkAnnotationStatus,
+  Candidate,
+  ReferencePlacement,
+  WorkbenchFixture,
+  WorkspaceChangeSet,
+} from "@lantern/shared";
 import type { ActiveTaskLike, AgentMessage, PersistedWorkbench } from "@/app/lib/workbench-state";
 import { normalizeAssetVersionDimensions, type AssetVersionWithNullableDimensions } from "@/app/lib/asset-version-normalization";
 import { normalizeResolvedResourceUrls } from "@/app/lib/document-asset-urls";
@@ -808,6 +818,48 @@ export function apiGetAgentActivity(projectId: string, options: { cursor?: strin
   }));
 }
 
+export function apiListArtworkAnnotations(projectId: string, options: { statuses?: ArtworkAnnotationStatus[]; unitId?: string; limit?: number } = {}) {
+  const query = new URLSearchParams();
+  if (options.statuses?.length) query.set("status", options.statuses.join(","));
+  if (options.unitId) query.set("unitId", options.unitId);
+  if (options.limit) query.set("limit", String(options.limit));
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return api<{ projectId: string; workingRevision: number; annotations: ArtworkAnnotation[] }>(
+    `/v1/projects/${encodeURIComponent(projectId)}/annotations${suffix}`,
+  );
+}
+
+export function apiCreateArtworkAnnotation(projectId: string, input: {
+  expectedWorkingRevision: number;
+  content: string;
+  references: ArtworkAnnotationAnchor[];
+  attachments: ArtworkAnnotationAttachmentInput[];
+}) {
+  return api<ArtworkAnnotation>(`/v1/projects/${encodeURIComponent(projectId)}/annotations`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function apiUpdateArtworkAnnotation(annotationId: string, input: {
+  expectedVersion: number;
+  content?: string;
+  action?: "resolve" | "reopen" | "dismiss";
+  references?: ArtworkAnnotationAnchor[];
+  attachments?: ArtworkAnnotationAttachmentInput[];
+}) {
+  return api<ArtworkAnnotation>(`/v1/annotations/${encodeURIComponent(annotationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function apiDeleteArtworkAnnotation(annotationId: string) {
+  return api<{ deleted: true }>(`/v1/annotations/${encodeURIComponent(annotationId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function apiGetVersionComparison(kind: "saved_snapshot" | "change_proposal", id: string) {
   const result = await api<VersionComparison>(`/v1/version-comparisons/${kind}/${encodeURIComponent(id)}`);
   return {
@@ -983,6 +1035,22 @@ export async function apiUploadAgentAttachment(projectId: string, file: File) {
   form.set("kind", "reference_image");
   form.set("name", file.name.replace(/\.[^.]+$/, ""));
   const response = await fetch(`${uploadApiBase()}/v1/projects/${encodeURIComponent(projectId)}/assets?usage=conversation`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  const body = await readApiResponse<{ id: string; versions: Array<{ id: string }> }>(response, uiCopy.asset.error.attachmentUpload);
+  if (!response.ok || !body.data?.versions[0]) throw new Error(body.error?.message ?? uiCopy.asset.error.attachmentUpload);
+  return { assetId: body.data.id, versionId: body.data.versions[0].id, name: file.name };
+}
+
+export async function apiUploadAnnotationAttachment(projectId: string, file: File) {
+  validateUploadFile(file);
+  const form = new FormData();
+  form.set("file", file);
+  form.set("kind", "reference_image");
+  form.set("name", file.name.replace(/\.[^.]+$/, ""));
+  const response = await fetch(`${uploadApiBase()}/v1/projects/${encodeURIComponent(projectId)}/assets?usage=annotation`, {
     method: "POST",
     body: form,
     credentials: "include",

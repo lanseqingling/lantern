@@ -28,6 +28,7 @@ test("server-renders the workbench route shell", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /漫画工作台 · Lantern AI/);
-  assert.match(html, /正在载入工作稿/);
+  assert.match(html, /workbench-loading-blank/);
+  assert.match(html, /aria-busy="true"/);
   assert.match(html, /WorkbenchApp/);
 });

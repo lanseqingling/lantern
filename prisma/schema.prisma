@@ -142,6 +142,33 @@ enum AgentActivityEventStatus {
   FAILED
 }
 
+enum ArtworkAnnotationStatus {
+  OPEN
+  IN_PROGRESS
+  AWAITING_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum ArtworkAnnotationAnchorKind {
+  POINT
+  OBJECT
+}
+
+enum ArtworkAnnotationAuthorType {
+  USER
+  EXTERNAL_AGENT
+  INTERNAL_AGENT
+  SYSTEM
+}
+
+enum ArtworkAnnotationWorkStatus {
+  IN_PROGRESS
+  AWAITING_REVIEW
+  APPLIED
+  DISCARDED
+}
+
 model User {
   id          String   @id @default(cuid())
   email       String   @unique
@@ -165,6 +192,7 @@ model User {
   agentDrafts         AgentDraft[]
   changeProposals     ChangeProposal[]
   agentActivityGroups AgentActivityGroup[]
+  artworkAnnotations  ArtworkAnnotation[]
 }
 
 model Comic {
@@ -261,6 +289,7 @@ model Project {
   agentDrafts         AgentDraft[]
   changeProposals     ChangeProposal[]
   agentActivityGroups AgentActivityGroup[]
+  artworkAnnotations  ArtworkAnnotation[]
 
   @@index([ownerUserId])
 }
@@ -315,11 +344,12 @@ model AgentDraft {
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
 
-  owner         User                 @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
-  project       Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  revisions     AgentDraftRevision[]
-  proposal      ChangeProposal?
-  activityGroup AgentActivityGroup?
+  owner          User                    @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project        Project                 @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  revisions      AgentDraftRevision[]
+  proposal       ChangeProposal?
+  activityGroup  AgentActivityGroup?
+  annotationWork ArtworkAnnotationWork[]
 
   @@index([ownerUserId, projectId, status, updatedAt])
   @@index([projectId, baseWorkingRevision])
@@ -362,10 +392,11 @@ model ChangeProposal {
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
 
-  owner         User               @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
-  project       Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  agentDraft    AgentDraft         @relation(fields: [agentDraftId], references: [id], onDelete: Restrict)
-  draftRevision AgentDraftRevision @relation(fields: [agentDraftRevisionId], references: [id], onDelete: Restrict)
+  owner          User                    @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project        Project                 @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  agentDraft     AgentDraft              @relation(fields: [agentDraftId], references: [id], onDelete: Restrict)
+  draftRevision  AgentDraftRevision      @relation(fields: [agentDraftRevisionId], references: [id], onDelete: Restrict)
+  annotationWork ArtworkAnnotationWork[]
 
   @@index([ownerUserId, projectId, status, createdAt])
   @@index([projectId, baseWorkingRevision])
@@ -417,15 +448,16 @@ model Asset {
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
-  owner           User                       @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
-  comic           Comic                      @relation(fields: [comicId], references: [id], onDelete: Restrict)
-  versions        AssetVersion[]
-  images          AssetImage[]
-  variantOf       Asset?                     @relation("AssetVariants", fields: [variantOfAssetId], references: [id], onDelete: Restrict)
-  variants        Asset[]                    @relation("AssetVariants")
-  placements      CanvasReferencePlacement[]
-  canvasListItems CanvasAssetListItem[]
-  externalUploads ExternalAssetUpload[]
+  owner                 User                          @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  comic                 Comic                         @relation(fields: [comicId], references: [id], onDelete: Restrict)
+  versions              AssetVersion[]
+  images                AssetImage[]
+  variantOf             Asset?                        @relation("AssetVariants", fields: [variantOfAssetId], references: [id], onDelete: Restrict)
+  variants              Asset[]                       @relation("AssetVariants")
+  placements            CanvasReferencePlacement[]
+  canvasListItems       CanvasAssetListItem[]
+  externalUploads       ExternalAssetUpload[]
+  annotationAttachments ArtworkAnnotationAttachment[]
 
   @@index([ownerUserId, comicId, kind, archivedAt])
   @@index([variantOfAssetId, variantSortIndex, createdAt])
@@ -468,9 +500,10 @@ model AssetVersion {
   sourceTaskId String?
   createdAt    DateTime           @default(now())
 
-  asset      Asset                      @relation(fields: [assetId], references: [id], onDelete: Restrict)
-  imageSlot  AssetImage?
-  placements CanvasReferencePlacement[]
+  asset                 Asset                         @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  imageSlot             AssetImage?
+  placements            CanvasReferencePlacement[]
+  annotationAttachments ArtworkAnnotationAttachment[]
 
   @@unique([assetId, version])
   @@index([assetId, createdAt])
@@ -759,4 +792,98 @@ model AgentActivityEvent {
   @@unique([groupId, dedupeKey])
   @@index([groupId, startedAt])
   @@index([observedStatus, updatedAt])
+}
+
+/// A creator-authored instruction with an ordered set of artwork references.
+/// Annotations are collaboration facts and never enter LCD,
+/// WorkingRevision, SavedSnapshot, reading preview, or export.
+model ArtworkAnnotation {
+  id                     String                  @id @default(cuid())
+  ownerUserId            String
+  projectId              String
+  status                 ArtworkAnnotationStatus @default(OPEN)
+  createdWorkingRevision Int
+  version                Int                     @default(1)
+  resolvedAt             DateTime?
+  dismissedAt            DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  owner       User                          @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  project     Project                       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  references  ArtworkAnnotationReference[]
+  attachments ArtworkAnnotationAttachment[]
+  messages    ArtworkAnnotationMessage[]
+  work        ArtworkAnnotationWork[]
+
+  @@index([ownerUserId, projectId, status, updatedAt])
+}
+
+model ArtworkAnnotationReference {
+  id                String                      @id @default(cuid())
+  annotationId      String
+  sortIndex         Int
+  anchorKind        ArtworkAnnotationAnchorKind
+  unitId            String
+  surfaceId         String?
+  objectType        String?
+  objectId          String?
+  localX            Float?
+  localY            Float?
+  unitX             Float
+  unitY             Float
+  targetFingerprint String?
+
+  annotation ArtworkAnnotation @relation(fields: [annotationId], references: [id], onDelete: Restrict)
+
+  @@unique([annotationId, sortIndex])
+  @@index([annotationId, unitId])
+  @@index([unitId, objectType, objectId])
+}
+
+model ArtworkAnnotationAttachment {
+  id             String @id @default(cuid())
+  annotationId   String
+  assetId        String
+  assetVersionId String
+  name           String
+  sortIndex      Int
+
+  annotation   ArtworkAnnotation @relation(fields: [annotationId], references: [id], onDelete: Restrict)
+  asset        Asset             @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  assetVersion AssetVersion      @relation(fields: [assetVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([annotationId, sortIndex])
+  @@index([assetId, assetVersionId])
+}
+
+model ArtworkAnnotationMessage {
+  id           String                      @id @default(cuid())
+  annotationId String
+  authorType   ArtworkAnnotationAuthorType
+  content      String
+  createdAt    DateTime                    @default(now())
+
+  annotation ArtworkAnnotation @relation(fields: [annotationId], references: [id], onDelete: Restrict)
+
+  @@index([annotationId, createdAt])
+}
+
+model ArtworkAnnotationWork {
+  id               String                      @id @default(cuid())
+  annotationId     String
+  agentDraftId     String
+  changeProposalId String?
+  actorType        ArtworkAnnotationAuthorType
+  status           ArtworkAnnotationWorkStatus @default(IN_PROGRESS)
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  annotation     ArtworkAnnotation @relation(fields: [annotationId], references: [id], onDelete: Restrict)
+  agentDraft     AgentDraft        @relation(fields: [agentDraftId], references: [id], onDelete: Restrict)
+  changeProposal ChangeProposal?   @relation(fields: [changeProposalId], references: [id], onDelete: Restrict)
+
+  @@unique([annotationId, agentDraftId])
+  @@index([agentDraftId, status])
+  @@index([changeProposalId])
 }

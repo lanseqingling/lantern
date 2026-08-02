@@ -165,6 +165,10 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "narration.update",
     "narration.duplicate",
     "narration.delete",
+    "annotation.list",
+    "annotation.inspect",
+    "annotation.start_work",
+    "annotation.reply",
     "context.inspect_images",
     "context.inspect_composition",
     "storyboard.edit_single_entry",
@@ -218,6 +222,14 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "convert_balloon_to_cross_page",
     "reorder_overlay_element",
   ]);
+  const annotationList = getAgentCapability("annotation.list");
+  assert.equal(annotationList?.effect, "observe");
+  assert.equal(annotationList?.agentAccess.external, "observe");
+  assert.equal(annotationList?.agentAccess.internal, "disabled");
+  const annotationStartWork = getAgentCapability("annotation.start_work");
+  assert.equal(annotationStartWork?.effect, "collaboration_change");
+  assert.equal(annotationStartWork?.idempotency, "required");
+  assert.deepEqual(annotationStartWork?.target.types, ["annotation", "agent_draft"]);
   const frameUpdateEnvelope = {
     scope: "lantern://chapters/chapter-1",
     targetHandles: ["frame-handle"],
@@ -235,6 +247,7 @@ test("semantic capability manifest is versioned, serializable and shared by inte
   const externalCatalog = listExternalCapabilities().capabilities;
   assert.equal(externalCatalog.some((capability) => capability.id === "page.create"), true);
   assert.equal(externalCatalog.some((capability) => capability.id === "image.update"), true);
+  assert.equal(externalCatalog.some((capability) => capability.id === "annotation.inspect"), true);
   assert.equal(externalCatalog.some((capability) => capability.id === "storyboard.edit_single_entry"), false);
 });
 

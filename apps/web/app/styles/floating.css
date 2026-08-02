@@ -159,3 +159,4 @@
 @media (prefers-reduced-motion: reduce) {
   .image-viewer-overlay { animation: none; }
 }
+.annotation-cursor-preview { position: fixed; z-index: 110; width: 18px; height: 18px; transform: translate(2px, -17px) rotate(-45deg); border: 1.5px solid rgba(255,255,255,.96); border-radius: 50% 50% 50% 2px; background: var(--cyan); box-shadow: 0 5px 14px rgba(36,127,130,.24); pointer-events: none; }

@@ -1429,6 +1429,55 @@ test("database candidate apply and revert preserve version heads atomically", as
     frameImage = currentComposition.unit.elements.find((element) => element.id === frameImage!.id);
     assert.ok(frameImage?.handle);
     assert.equal(frameImage.assetVersionId, ids.assetVariantV1);
+    const createdTrueBreakout = await invokeExternalCompositionCapability(ids.user, "image.breakout.create", {
+      scope: chapterScope,
+      targetHandles: [frameImage.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-true-breakout-${suffix}`,
+      asset: `lantern://assets/${ids.asset}`,
+      assetVersionId: ids.assetV1,
+    });
+    assert.equal(createdTrueBreakout.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    frameImage = currentComposition.unit.elements.find((element) => element.id === frameImage!.id);
+    let trueBreakout = currentComposition.unit.elements.find((element) => element.kind === "image" && element.projection?.sourceElementId === frameImage!.id);
+    assert.ok(frameImage?.handle && trueBreakout?.handle);
+    assert.deepEqual(trueBreakout.transform, frameImage.transform);
+    assert.deepEqual(trueBreakout.crop, frameImage.crop);
+    await assert.rejects(() => invokeExternalCompositionCapability(ids.user, "image.update", {
+      scope: chapterScope,
+      targetHandles: [frameImage!.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-bound-replace-${suffix}`,
+      asset: `lantern://assets/${ids.asset}`,
+      assetVersionId: ids.assetVariantV1,
+    }), /先移除真出格前景/);
+    const synchronizedSource = await invokeExternalCompositionCapability(ids.user, "image.update", {
+      scope: chapterScope,
+      targetHandles: [frameImage.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-bound-update-${suffix}`,
+      transform: { x: -.12, y: -.04, width: 1.24, height: 1.14 },
+      crop: { x: .12, y: .04, width: .76, height: .86 },
+    });
+    assert.equal(synchronizedSource.workingRevision, ++compositionRevision);
+    currentComposition = await compositionPage();
+    frameImage = currentComposition.unit.elements.find((element) => element.id === frameImage!.id);
+    trueBreakout = currentComposition.unit.elements.find((element) => element.id === trueBreakout!.id);
+    assert.deepEqual(trueBreakout?.transform, frameImage?.transform);
+    assert.deepEqual(trueBreakout?.crop, frameImage?.crop);
+    const removedTrueBreakout = await invokeExternalCompositionCapability(ids.user, "image.remove", {
+      scope: chapterScope,
+      targetHandles: [trueBreakout!.handle],
+      expectedRevision: compositionRevision,
+      idempotencyKey: `composition-image-true-breakout-remove-${suffix}`,
+    });
+    assert.equal(removedTrueBreakout.workingRevision, ++compositionRevision);
+
+    currentComposition = await compositionPage();
+    frameImage = currentComposition.unit.elements.find((element) => element.id === frameImage!.id);
+    assert.ok(frameImage?.handle);
     const promotedBreakout = await invokeExternalCompositionCapability(ids.user, "image.update", {
       scope: chapterScope,
       targetHandles: [frameImage.handle],

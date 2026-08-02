@@ -2,8 +2,8 @@
 name: create-with-lantern
 description: Use Lantern's application MCP to create, draw, compose, revise, organize, inspect, or review a creator's comics through the domain capabilities Lantern currently exposes. Use for comic work in Lantern; do not use for developing the Lantern source repository.
 metadata:
-  version: "1.3.2"
-  minimum_catalog_revision: "16"
+  version: "1.4.0"
+  minimum_catalog_revision: "17"
 ---
 
 # Create with Lantern

@@ -13,6 +13,7 @@ import {
   imageViewerZoomStep,
   type ImageViewerMode,
 } from "@/app/lib/image-viewer";
+import { AppDialogPortal } from "@/app/components/AppDialogPortal";
 import { uiCopy } from "@/app/lib/ui-copy";
 
 export type ImageViewerItem = {
@@ -166,7 +167,7 @@ export function ImageViewer({
 
   if (!activeImage) return null;
 
-  return <div className="image-viewer-overlay" role="presentation" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  const viewer = <div className="image-viewer-overlay" role="presentation" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <button ref={closeRef} type="button" className="image-viewer-close" aria-label={uiCopy.imageViewer.closeAria} onClick={onClose}><Icon name="close" /></button>
     <div ref={stageRef} className="image-viewer-stage" role="dialog" aria-modal="true" aria-label={activeImage.alt} onClick={onClose} onWheel={zoomWithWheel}>
       <div className="image-viewer-image-space">
@@ -193,4 +194,6 @@ export function ImageViewer({
       </button>
     </div>
   </div>;
+
+  return <AppDialogPortal>{viewer}</AppDialogPortal>;
 }

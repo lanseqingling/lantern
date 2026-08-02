@@ -7,7 +7,7 @@ import type {
   WorkspaceChangeSet,
   WorkspaceCommand,
 } from "@lantern/shared";
-import { changeSetCommands, normalizeStoryboardBeats, orderedUnitSurfaces, reframeFramePreservingContent, validateComicDocument, workspaceChangeSetSchema } from "@lantern/shared";
+import { changeSetCommands, frameGeometryKeepsPrimaryArtCovered, normalizeStoryboardBeats, orderedUnitSurfaces, reframeFramePreservingContent, validateComicDocument, workspaceChangeSetSchema } from "@lantern/shared";
 import { planEditorCapability, type EditorCapabilityContext, type EditorCapabilityId } from "./capabilities";
 
 export * from "./capabilities";
@@ -45,6 +45,20 @@ export function applyWorkspaceChangeSet(
     const layer = frame.layers.find((item) => item.id === layerId);
     if (!layer) throw new Error(`missing FrameLayer: ${layerId}`);
     return { unit, frame, layer };
+  };
+  const synchronizeBreakoutProjections = (unitId: string, frameId: string, sourceElementId?: string) => {
+    const { unit, frame } = findFrame(unitId, frameId);
+    const sources = frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[]).filter((element) => element.kind === "image" && (!sourceElementId || element.id === sourceElementId));
+    for (const source of sources) {
+      if (source.kind !== "image") continue;
+      for (const layer of unit.overlayLayers) {
+        for (const element of layer.elements) {
+          if (element.kind !== "image" || element.projection?.kind !== "frame_image_breakout" || element.projection.sourceElementId !== source.id) continue;
+          element.transform = structuredClone(source.transform);
+          element.crop = structuredClone(source.crop);
+        }
+      }
+    }
   };
 
   for (const operation of changeSetCommands(parsedChangeSet)) {
@@ -179,9 +193,13 @@ export function applyWorkspaceChangeSet(
     }
     if (operation.type === "resize_frame") {
       const located = findFrame(operation.unitId, operation.frameId);
+      if (!frameGeometryKeepsPrimaryArtCovered(located.frame, operation.geometry)) {
+        throw new Error("画格不能扩展到格内主图覆盖范围之外");
+      }
       const reframed = reframeFramePreservingContent(located.frame, operation.geometry);
       located.frame.geometry = reframed.geometry;
       located.frame.layers = reframed.layers;
+      synchronizeBreakoutProjections(operation.unitId, operation.frameId);
       continue;
     }
     if (operation.type === "set_frame_surface_scope") {
@@ -255,6 +273,7 @@ export function applyWorkspaceChangeSet(
       const element = layer?.elements.find((item) => item.id === operation.elementId);
       if (!element || element.kind !== "image") throw new Error(`missing ArtElement: ${operation.elementId}`);
       element.crop = structuredClone(operation.crop);
+      if (operation.frameId) synchronizeBreakoutProjections(operation.unitId, operation.frameId, element.id);
       continue;
     }
     if (operation.type === "set_element_transform") {
@@ -263,6 +282,7 @@ export function applyWorkspaceChangeSet(
         const element = layer.elements.find((item) => item.id === operation.elementId);
         if (!element) throw new Error(`missing FrameElement: ${operation.elementId}`);
         element.transform = structuredClone(operation.transform);
+        synchronizeBreakoutProjections(operation.unitId, operation.frameId, element.id);
       } else {
         const unit = findUnit(operation.unitId);
         const layer = unit.overlayLayers.find((item) => item.id === operation.layerId);

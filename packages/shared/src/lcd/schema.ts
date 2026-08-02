@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ComicDocument } from "./types";
+import type { ComicDocument, FrameElement } from "./types";
 
 export const rectSchema = z.object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() });
 export const geometrySchema = rectSchema.extend({ rotate: z.number().optional() });
@@ -11,7 +11,9 @@ const visibilitySchema = { visible: z.boolean().optional(), name: z.string().opt
 const artElementSchema = z.object({
   id: z.string().min(1), kind: z.literal("image"), assetId: z.string().min(1), assetVersionId: z.string().min(1),
   transform: localTransformSchema, crop: normalizedRectSchema, opacity: z.number().min(0).max(1).optional(),
-  blendMode: z.enum(["normal", "multiply", "screen"]).optional(), overflow: overflowSchema.optional(), ...visibilitySchema,
+  blendMode: z.enum(["normal", "multiply", "screen"]).optional(),
+  projection: z.strictObject({ kind: z.literal("frame_image_breakout"), sourceElementId: z.string().min(1) }).optional(),
+  overflow: overflowSchema.optional(), ...visibilitySchema,
 });
 const textStyleSchema = z.object({
   fontFamily: z.string(), fontSize: z.number().positive(), fontWeight: z.number().optional(), color: z.string(),
@@ -160,11 +162,13 @@ export function validateComicDocument(input: unknown): ComicDocument {
         layer.elements.forEach((element) => {
           claimId(element.id);
           if (element.kind === "image" && !resourceKeys.has(`${element.assetId}:${element.assetVersionId}`)) throw new Error(`${element.id} references an undeclared asset version`);
+          if (element.kind === "image" && element.projection) throw new Error(`${element.id} frame image cannot be a breakout projection`);
           if (element.kind === "text" || element.kind === "balloon") assertAppearanceResource(element);
           if (element.kind === "balloon" && !dialogueIds.has(element.dialogueId)) throw new Error(`${element.id} references missing dialogue ${element.dialogueId}`);
         });
       });
     });
+    const projectedSourceIds = new Set<string>();
     unit.overlayLayers.forEach((layer) => {
       claimId(layer.id);
       if (layer.anchor.type === "frame" && !frameIds.has(layer.anchor.frameId)) throw new Error(`${layer.id} references missing anchor frame`);
@@ -178,6 +182,27 @@ export function validateComicDocument(input: unknown): ComicDocument {
         claimId(element.id);
         if (constrainedSurface && !insideCanvas({ x: element.transform.x - constrainedSurface.geometry.x, y: element.transform.y - constrainedSurface.geometry.y, width: element.transform.width, height: element.transform.height }, { width: constrainedSurface.geometry.width, height: constrainedSurface.geometry.height })) throw new Error(`${element.id} must stay inside constrained surface ${constrainedSurface.id}`);
         if (element.kind === "image" && !resourceKeys.has(`${element.assetId}:${element.assetVersionId}`)) throw new Error(`${element.id} references an undeclared asset version`);
+        if (element.kind === "image" && element.projection) {
+          if (projectedSourceIds.has(element.projection.sourceElementId)) throw new Error(`${element.id} duplicates a breakout projection source`);
+          projectedSourceIds.add(element.projection.sourceElementId);
+          if (layer.purpose !== "breakout" || layer.anchor.type !== "frame") throw new Error(`${element.id} breakout projection requires a frame-anchored breakout layer`);
+          const anchor = layer.anchor;
+          if (anchor.type !== "frame") throw new Error(`${element.id} breakout projection requires a frame anchor`);
+          const frame = unit.frames.find((candidate) => candidate.id === anchor.frameId)!;
+          const source = frame.layers.flatMap((candidate) => [...candidate.elements] as FrameElement[]).find((candidate) => candidate.id === element.projection!.sourceElementId);
+          if (!source || source.kind !== "image") throw new Error(`${element.id} references missing frame image ${element.projection.sourceElementId}`);
+          if (source.assetVersionId === element.assetVersionId) throw new Error(`${element.id} breakout projection requires a distinct transparent image version`);
+          if (JSON.stringify(source.transform) !== JSON.stringify(element.transform) || JSON.stringify(source.crop) !== JSON.stringify(element.crop)) {
+            throw new Error(`${element.id} breakout projection must mirror its source transform and crop`);
+          }
+          const sourceResource = resourceByKey.get(`${source.assetId}:${source.assetVersionId}`);
+          const projectionResource = resourceByKey.get(`${element.assetId}:${element.assetVersionId}`);
+          if (!projectionResource || !["image/png", "image/webp"].includes(projectionResource.mediaType)) throw new Error(`${element.id} breakout projection requires PNG or WebP`);
+          if (sourceResource?.width && sourceResource.height && projectionResource.width && projectionResource.height
+            && (sourceResource.width !== projectionResource.width || sourceResource.height !== projectionResource.height)) {
+            throw new Error(`${element.id} breakout projection must match its source pixel dimensions`);
+          }
+        }
         if (element.kind === "text" || element.kind === "balloon") assertAppearanceResource(element);
         if (element.kind === "balloon" && !dialogueIds.has(element.dialogueId)) throw new Error(`${element.id} references missing dialogue ${element.dialogueId}`);
       });

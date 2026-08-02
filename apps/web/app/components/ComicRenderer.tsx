@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import type { ArtElement, BalloonElement, BalloonOverlapMask, ComicDocument, EffectElement, Frame, FrameCornerAxis, FrameCornerIndex, FrameShape, Geometry, LocalTransform, Point, ResolvedResourceMap, SceneElementNode, TextElement } from "@lantern/shared";
-import { balloonCutCornerPoints, frameBalloonCoordinateBounds, frameCornerDragAxis, frameQuadrilateralPoints, projectBalloonOverlapMasks, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reframeFramePreservingContent, reshapeFrameCorner, scaleImageCrop } from "@lantern/shared";
+import { balloonCutCornerPoints, frameBalloonCoordinateBounds, frameCornerDragAxis, frameGeometryKeepsPrimaryArtCovered, frameQuadrilateralPoints, projectBalloonOverlapMasks, projectBalloonStrokeWidths, projectBalloonTail, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reframeFramePreservingContent, reshapeFrameCorner, scaleImageCrop } from "@lantern/shared";
 import type { Selection } from "@/app/lib/workbench-state";
 import { contentSafeArea, snapFrameCornerToNeighborParallel, snapFrameCornerToOrthogonal, snapGeometrySizeToFrameEdgeExtensions, snapGeometryToFrameEdgeExtensions, type EdgeExtensionGuide, type MoveSnapGuide, type ParallelCornerGuide } from "@/app/lib/editor-snapping";
 import { uiCopy } from "@/app/lib/ui-copy";
@@ -542,8 +542,9 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const safeTarget = surface ? [{ geometry: contentSafeArea(surface.geometry) }] : [];
       const snapped = snapGeometrySizeToFrameEdgeExtensions(rawGeometry, [...unit.frames.filter((frame) => frame.id !== drag.frameId), ...safeTarget], moveSnapThreshold, corner);
       const snappedAllowed = snapped.geometry.width >= minimumFrameWidth && snapped.geometry.height >= minimumFrameHeight && frameGeometryAllowed(drag.frameId, snapped.geometry);
-      const geometry = snappedAllowed ? snapped.geometry : rawGeometry;
-      if (!frameGeometryAllowed(drag.frameId, geometry)) return;
+      const snappedKeepsArtCovered = !currentFrame || frameGeometryKeepsPrimaryArtCovered(currentFrame, snapped.geometry);
+      const geometry = snappedAllowed && snappedKeepsArtCovered ? snapped.geometry : rawGeometry;
+      if (!frameGeometryAllowed(drag.frameId, geometry) || (currentFrame && !frameGeometryKeepsPrimaryArtCovered(currentFrame, geometry))) return;
       if (snappedAllowed && snapped.guides.length) setSnapGuides({ edgeGuides: snapped.guides });
       patch = { geometry };
     }
@@ -612,20 +613,36 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
       const image = node.element;
       const frame = node.frame;
       const selected = selection?.type === "image" && selection.id === image.id;
+      const breakoutSource = interactionMode === "crop" && image.projection?.kind === "frame_image_breakout"
+        ? images.find((candidate) => candidate.source === "frame" && candidate.element.id === image.projection?.sourceElementId)
+        : undefined;
+      const cropTarget = breakoutSource ?? node;
+      const cropTargetImage = cropTarget.element;
+      const cropTargetFrame = cropTarget.frame;
+      const cropTargetSelected = selection?.type === "image" && selection.id === cropTargetImage.id;
       const showImageSelection = selected && (node.source === "overlay" || interactionMode === "crop");
       const src = resolvedResources?.[image.assetVersionId]?.url;
       const source = document.resources.find((resource) => resource.assetVersionId === image.assetVersionId);
+      const cropSource = document.resources.find((resource) => resource.assetVersionId === cropTargetImage.assetVersionId);
       const label = node.source === "overlay"
         ? overlayImageLabel(node)
         : frame
           ? uiCopy.renderer.framePrimaryImage(frameLabel(frame))
           : uiCopy.renderer.pageImage;
       const imageSelection: Selection = { type: "image", id: image.id, pageId: unit.id, label };
+      const cropTargetLabel = cropTarget.source === "overlay"
+        ? overlayImageLabel(cropTarget)
+        : cropTargetFrame
+          ? uiCopy.renderer.framePrimaryImage(frameLabel(cropTargetFrame))
+          : uiCopy.renderer.pageImage;
+      const cropTargetSelection: Selection = { type: "image", id: cropTargetImage.id, pageId: unit.id, label: cropTargetLabel };
+      const interactionSelection = breakoutSource ? cropTargetSelection : imageSelection;
+      const interactionSelectionId = interactionSelection.id ?? image.id;
       const anchorGeometry = frame?.geometry ?? { x: 0, y: 0, width: unit.canvas.width, height: unit.canvas.height };
       const coordinateBounds = nodeCoordinateBounds(node, frame);
       return <div className={`lcd-image ${node.source === "overlay" ? "scene-overlay" : ""} ${showImageSelection ? "selected" : ""} ${multiSelectedIds?.has(image.id) ? "multi-selected" : ""}`} data-element-id={image.id} data-page-id={unit.id} key={image.id}
         style={{ ...elementSceneStyle(node, unit.canvas.width, unit.canvas.height), opacity: image.opacity, mixBlendMode: image.blendMode }}
-        onWheel={(event) => { if (selected && interactionMode === "crop") zoomCropWithWheel(event, image, frame?.geometry ?? node.geometry); }}
+        onWheel={(event) => { if (cropTargetSelected && interactionMode === "crop") zoomCropWithWheel(event, cropTargetImage, cropTargetFrame?.geometry ?? cropTarget.geometry); }}
         onClick={(event) => {
           event.stopPropagation();
           if (suppressClick.current) {
@@ -633,31 +650,35 @@ export function ComicRenderer({ document, resolvedResources, pageIndex, selectio
             lastImageClickRef.current = null;
             return;
           }
-          onSelect?.(imageSelection);
+          onSelect?.(interactionSelection);
           const now = performance.now();
           const previous = lastImageClickRef.current;
           const isDoubleClick = previous
-            && previous.id === image.id
+            && previous.id === interactionSelectionId
             && now - previous.at <= 420
             && Math.abs(event.clientX - previous.x) <= 7
             && Math.abs(event.clientY - previous.y) <= 7;
-          lastImageClickRef.current = isDoubleClick ? null : { id: image.id, at: now, x: event.clientX, y: event.clientY };
+          lastImageClickRef.current = isDoubleClick ? null : { id: interactionSelectionId, at: now, x: event.clientX, y: event.clientY };
           if (!isDoubleClick || !onObjectDoubleClick) return;
           event.preventDefault();
-          onObjectDoubleClick(imageSelection);
+          onObjectDoubleClick(interactionSelection);
         }}
-        onContextMenu={(event) => contextFor(event, imageSelection)}
+        onContextMenu={(event) => contextFor(event, interactionSelection)}
         onPointerDown={(event) => {
           if (event.button === 0 && event.detail > 1) return;
+          if (image.projection?.kind === "frame_image_breakout" && frame && frameIsSelected(frame.id) && interactionMode === "move" && event.button === 0) {
+            startDrag(event, { mode: "frame_move", elementId: frame.id, frameId: frame.id, startGeometry: frame.geometry }, { type: "comic_frame", id: frame.id, pageId: unit.id, label: frameLabel(frame) });
+            return;
+          }
           if (node.source === "overlay" && selected && interactionMode === "move" && event.button === 0) {
             startDrag(event, { mode: "image_move", elementId: image.id, frameId: frame?.id, anchorGeometry, coordinateBounds, startTransform: image.transform, startSceneGeometry: node.geometry }, imageSelection);
             return;
           }
-          if (!selected || interactionMode !== "crop") return;
+          if (interactionMode !== "crop" || (!cropTargetSelected && !breakoutSource)) return;
           // Match the source crop to its on-canvas viewport before panning.
           // This preserves the entire horizontal travel range of a wide image.
-          const startCrop = cropWindowForViewport(image.crop, source, node.geometry);
-          startDrag(event, { mode: "image_crop", elementId: image.id, frameId: frame?.id, anchorGeometry: frame?.geometry ?? node.geometry, startCrop }, imageSelection);
+          const startCrop = cropWindowForViewport(cropTargetImage.crop, cropSource, cropTarget.geometry);
+          startDrag(event, { mode: "image_crop", elementId: cropTargetImage.id, frameId: cropTargetFrame?.id, anchorGeometry: cropTargetFrame?.geometry ?? cropTarget.geometry, startCrop }, cropTargetSelection);
         }}>
         <div className="lcd-image-crop">
           {src ? <img src={src} alt={uiCopy.renderer.frameImageAlt} draggable={false} style={cropStyle(image, source, node.geometry)} /> : <div className="missing-frame-image" aria-label={uiCopy.renderer.waitingFrameImageAria}><span>{uiCopy.renderer.waitingFrameImageAria}</span></div>}

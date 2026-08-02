@@ -155,6 +155,7 @@ test("semantic capability manifest is versioned, serializable and shared by inte
     "frame.delete",
     "image.place",
     "image.update",
+    "image.breakout.create",
     "image.remove",
     "balloon.create",
     "balloon.update",

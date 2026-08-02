@@ -393,6 +393,23 @@ async function imagePlacePlan(parsed: ParsedCompositionInput, context: ExternalD
   };
 }
 
+async function imageBreakoutCreatePlan(parsed: ParsedCompositionInput, context: ExternalDirectChangeContext) {
+  const located = targetImage(context);
+  if (located.source !== "frame") throw new AppError("invalid_image_placement", "真出格必须绑定一个格内源图片。", 422);
+  const image = await fixedImage(context, String(parsed.asset), parsed.assetVersionId as string | undefined);
+  if (!["image/png", "image/webp"].includes(image.mediaType)) throw new AppError("invalid_breakout_image", "真出格前景只支持带透明通道的 PNG 或 WebP。", 422);
+  const plan = planDomainCapability("place_frame_breakout_image", {
+    unitId: located.unit.id,
+    frameId: located.frame.id,
+    sourceLayerId: located.layer.id,
+    sourceElementId: located.element.id,
+    ...image,
+  }, context);
+  const added = plan.commands.find((command) => command.type === "add_overlay_element" && command.element.kind === "image");
+  if (!added || added.type !== "add_overlay_element") throw new AppError("capability_contract_error", "真出格能力没有返回前景投影。", 500);
+  return { commands: plan.commands, data: { action: "created_bound_breakout", assetVersionId: image.assetVersionId, sourceElementId: located.element.id } };
+}
+
 async function imageUpdatePlan(parsed: ParsedCompositionInput, context: ExternalDirectChangeContext) {
   const located = targetImage(context);
   const base = locatedElementInput(located);
@@ -634,6 +651,7 @@ async function compositionPlan(
     return frameSingleActionPlan(capability.id, context);
   }
   if (capability.id === "image.place") return imagePlacePlan(parsed, context);
+  if (capability.id === "image.breakout.create") return imageBreakoutCreatePlan(parsed, context);
   if (capability.id === "image.update") return imageUpdatePlan(parsed, context);
   if (capability.id === "image.remove") return imageRemovePlan(context);
   if (capability.id === "balloon.create") return balloonCreatePlan(parsed, context);

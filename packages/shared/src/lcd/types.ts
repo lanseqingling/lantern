@@ -175,6 +175,8 @@ export type ArtElement = {
   crop: NormalizedRect;
   opacity?: number;
   blendMode?: "normal" | "multiply" | "screen";
+  /** A transparent foreground projection whose geometry and crop follow one frame image. */
+  projection?: { kind: "frame_image_breakout"; sourceElementId: string };
   overflow?: LayerOverflow;
   visible?: boolean;
   name?: string;
@@ -478,6 +480,35 @@ export function reframeFramePreservingContent(frame: Frame, geometry: Geometry):
     }),
   }) as FrameLayer);
   return { ...frame, geometry: { ...geometry }, layers };
+}
+
+/**
+ * Returns the primary fixed artwork for a Frame. A Frame has at most one such
+ * image; auxiliary art should not determine whether its viewport may expand.
+ */
+export function primaryFrameArtImage(frame: Frame): ArtElement | undefined {
+  return frame.layers
+    .filter((layer): layer is ArtLayer => layer.kind === "art")
+    .flatMap((layer) => layer.elements)
+    .find((element): element is ArtElement => element.kind === "image");
+}
+
+/**
+ * A Frame with non-fill primary art must not grow into paper that its source
+ * image cannot cover. Fill art is reframed through crop and always covers its
+ * own viewport; other frame-local art keeps its resolved paper geometry.
+ */
+export function frameGeometryKeepsPrimaryArtCovered(frame: Frame, geometry: Geometry): boolean {
+  const source = primaryFrameArtImage(frame);
+  if (!source) return true;
+  const reframed = reframeFramePreservingContent(frame, geometry);
+  const reframedSource = primaryFrameArtImage(reframed);
+  if (!reframedSource) return true;
+  const sourceGeometry = resolveLocalTransform(reframed.geometry, reframedSource.transform);
+  return geometry.x >= sourceGeometry.x
+    && geometry.y >= sourceGeometry.y
+    && geometry.x + geometry.width <= sourceGeometry.x + sourceGeometry.width
+    && geometry.y + geometry.height <= sourceGeometry.y + sourceGeometry.height;
 }
 
 export function resolveLocalTransform(frame: Geometry, local: LocalTransform): Geometry {

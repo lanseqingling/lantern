@@ -26,6 +26,7 @@ import {
   type WorkspaceCommand,
   createBalloonCutCorners,
   deriveLocalTransform,
+  frameGeometryKeepsPrimaryArtCovered,
   orderedUnitSurfaces,
   resolveLocalTransform,
 } from "@lantern/shared";
@@ -124,6 +125,12 @@ function findLocatedElement(context: EditorCapabilityContext, input: { unitId: s
   return input.frameId
     ? findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId)
     : findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+}
+
+function breakoutProjections(unit: PresentationUnit, sourceElementId: string) {
+  return unit.overlayLayers.flatMap((layer) => layer.elements
+    .filter((element): element is ArtElement => element.kind === "image" && element.projection?.kind === "frame_image_breakout" && element.projection.sourceElementId === sourceElementId)
+    .map((element) => ({ layer, element })));
 }
 
 function overlayLayerFor(context: EditorCapabilityContext, unit: PresentationUnit, anchor: UnitOverlayLayer["anchor"], purpose: UnitOverlayLayer["purpose"], name: string, surfaceId?: string) {
@@ -350,7 +357,7 @@ const duplicateFrameCapability = defineCapability({
   externalAgentAccess: "execute",
   risk: "medium",
   preconditions: ["frame_exists", "duplicate_fits_available_surface", "resulting_document_is_valid"],
-  outputCommandTypes: ["add_dialogue", "add_frame", "create_frame_storyboard_beat"],
+  outputCommandTypes: ["add_dialogue", "add_frame", "add_overlay_layer", "add_overlay_element", "create_frame_storyboard_beat"],
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
@@ -358,11 +365,12 @@ const duplicateFrameCapability = defineCapability({
     assertPageRoleAllows(unit, "frame");
     const geometry = availableFrameGeometry(unit, { x: frame.geometry.x + frame.geometry.width * 1.5 + 24, y: frame.geometry.y + frame.geometry.height / 2 }, frame.geometry);
     const dialogueCommands: WorkspaceCommand[] = [];
+    const elementIds = new Map(frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[]).map((element) => [element.id, context.createId(element.kind)]));
     const layers = frame.layers.map((layer): FrameLayer => ({
       ...structuredClone(layer),
       id: context.createId(`${layer.kind}-layer`),
       elements: layer.elements.map((element) => {
-        const next = { ...structuredClone(element), id: context.createId(element.kind) };
+        const next = { ...structuredClone(element), id: elementIds.get(element.id)! };
         if (next.kind === "balloon") {
           const source = context.fixture.working.document.dialogues.find((dialogue) => dialogue.id === next.dialogueId);
           const dialogueId = context.createId("dialogue");
@@ -377,6 +385,31 @@ const duplicateFrameCapability = defineCapability({
       ...dialogueCommands,
       { type: "add_frame", unitId: unit.id, frame: nextFrame, readingIndex: readingIndexForGeometry(context, unit, geometry) },
     ];
+    const projections = unit.overlayLayers.flatMap((layer) => layer.elements
+      .filter((element): element is ArtElement => element.kind === "image" && element.projection?.kind === "frame_image_breakout" && elementIds.has(element.projection.sourceElementId))
+      .map((element) => ({ layer, element })));
+    if (projections.length) {
+      const overlay: UnitOverlayLayer = {
+        id: context.createId("breakout-overlay"),
+        name: "真出格前景",
+        zIndex: nextFrame.zIndex,
+        visible: true,
+        anchor: { type: "frame", frameId: nextFrame.id },
+        purpose: "breakout",
+        elements: [],
+      };
+      commands.push({ type: "add_overlay_layer", unitId: unit.id, layer: overlay });
+      projections.forEach(({ element }) => commands.push({
+        type: "add_overlay_element",
+        unitId: unit.id,
+        layerId: overlay.id,
+        element: {
+          ...structuredClone(element),
+          id: context.createId("breakout-image"),
+          projection: { kind: "frame_image_breakout", sourceElementId: elementIds.get(element.projection!.sourceElementId)! },
+        },
+      }));
+    }
     const primary = frame.storyRefs.find((reference) => reference.role === "primary");
     const beat = primary ? context.fixture.storyboardBeats.find((candidate) => candidate.id === primary.storyboardBeatId) : undefined;
     if (beat) {
@@ -465,6 +498,59 @@ const placeFrameImageCapability = defineCapability({
   },
 });
 
+const frameBreakoutImageInputSchema = frameImageInputSchema.extend({
+  sourceLayerId: z.string().min(1),
+  sourceElementId: z.string().min(1),
+  mediaType: z.enum(["image/png", "image/webp"]),
+});
+
+const placeFrameBreakoutImageCapability = defineCapability({
+  id: "place_frame_breakout_image",
+  version: 1,
+  inputSchema: frameBreakoutImageInputSchema,
+  scope: "element",
+  humanEntry: "planned",
+  agentAccess: "disabled",
+  externalAgentAccess: "execute",
+  risk: "low",
+  preconditions: ["frame_image_exists", "transparent_foreground_version_is_fixed", "source_and_foreground_dimensions_match", "resulting_document_is_valid"],
+  outputCommandTypes: ["declare_resource", "add_overlay_layer", "add_overlay_element"],
+  previewPolicy: "inline",
+  undoPolicy: "atomic",
+  execute(input, context) {
+    const { unit, element: source } = findFrameElement(context, input.unitId, input.frameId, input.sourceLayerId, input.sourceElementId);
+    if (source.kind !== "image") throw new Error(`missing source ArtElement: ${input.sourceElementId}`);
+    if (breakoutProjections(unit, source.id).length) throw new Error("格内图片已经存在真出格前景");
+    if (source.assetVersionId === input.assetVersionId) throw new Error("真出格前景必须使用独立的透明图片版本");
+    const sourceResource = context.fixture.working.document.resources.find((resource) => resource.assetId === source.assetId && resource.assetVersionId === source.assetVersionId);
+    if (sourceResource?.width && sourceResource.height && input.width && input.height
+      && (sourceResource.width !== input.width || sourceResource.height !== input.height)) throw new Error("真出格前景必须与格内源图保持相同像素尺寸");
+    const commands: WorkspaceCommand[] = [];
+    if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) {
+      commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
+    }
+    const overlay = overlayLayerFor(context, unit, { type: "frame", frameId: input.frameId }, "breakout", "真出格前景");
+    if (overlay.command) commands.push(overlay.command);
+    commands.push({
+      type: "add_overlay_element",
+      unitId: unit.id,
+      layerId: overlay.layer.id,
+      element: {
+        id: context.createId("breakout-image"),
+        kind: "image",
+        assetId: input.assetId,
+        assetVersionId: input.assetVersionId,
+        transform: structuredClone(source.transform),
+        crop: structuredClone(source.crop),
+        projection: { kind: "frame_image_breakout", sourceElementId: source.id },
+        overflow: "visible",
+        name: "真出格前景",
+      },
+    });
+    return commands;
+  },
+});
+
 const replaceFrameImageCapability = defineCapability({
   id: "replace_frame_image",
   version: 1,
@@ -479,8 +565,9 @@ const replaceFrameImageCapability = defineCapability({
   undoPolicy: "atomic",
   execute(input, context) {
     if (!input.frameId) throw new Error("纸面、破格、跨页和跨段图片不能直接更换，请先删除后重新放入");
-    const { element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    const { unit, element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
     if (element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
+    if (breakoutProjections(unit, element.id).length) throw new Error("格内图片已有真出格绑定，请先移除真出格前景");
     const commands: WorkspaceCommand[] = [];
     if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) {
       commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
@@ -512,8 +599,17 @@ const replaceImageCapability = defineCapability({
   previewPolicy: "inline",
   undoPolicy: "atomic",
   execute(input, context) {
-    const { element } = findLocatedElement(context, input);
+    const located = findLocatedElement(context, input);
+    const { element } = located;
     if (element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
+    if (input.frameId && breakoutProjections(located.unit, element.id).length) throw new Error("格内图片已有真出格绑定，请先移除真出格前景");
+    if (!input.frameId && element.projection) {
+      const source = located.unit.frames.flatMap((frame) => frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[])).find((candidate) => candidate.id === element.projection!.sourceElementId);
+      const sourceResource = source?.kind === "image" ? context.fixture.working.document.resources.find((resource) => resource.assetId === source.assetId && resource.assetVersionId === source.assetVersionId) : undefined;
+      if (sourceResource?.width && sourceResource.height && input.width && input.height
+        && (sourceResource.width !== input.width || sourceResource.height !== input.height)) throw new Error("真出格前景必须与格内源图保持相同像素尺寸");
+      if (!["image/png", "image/webp"].includes(input.mediaType)) throw new Error("真出格前景只支持带透明通道的 PNG 或 WebP");
+    }
     const commands: WorkspaceCommand[] = [];
     if (!context.fixture.working.document.resources.some((resource) => resource.assetId === input.assetId && resource.assetVersionId === input.assetVersionId)) {
       commands.push({ type: "declare_resource", resource: { assetId: input.assetId, assetVersionId: input.assetVersionId, kind: "image", mediaType: input.mediaType, width: input.width, height: input.height } });
@@ -555,7 +651,16 @@ const removeFrameImageCapability = defineCapability({
     const located = findLocatedElement(context, input);
     const { element } = located;
     if (element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
-    if (input.frameId) return [{ type: "remove_layer_element", ...input, frameId: input.frameId }];
+    if (input.frameId) {
+      const projections = breakoutProjections(located.unit, element.id);
+      const commands: WorkspaceCommand[] = projections.map(({ layer, element: projection }) => ({ type: "remove_overlay_element", unitId: input.unitId, layerId: layer.id, elementId: projection.id }));
+      for (const layerId of new Set(projections.map(({ layer }) => layer.id))) {
+        const layer = located.unit.overlayLayers.find((candidate) => candidate.id === layerId)!;
+        if (layer.elements.length === projections.filter((candidate) => candidate.layer.id === layerId).length) commands.push({ type: "remove_overlay_layer", unitId: input.unitId, layerId });
+      }
+      commands.push({ type: "remove_layer_element", ...input, frameId: input.frameId });
+      return commands;
+    }
     return [
       { type: "remove_overlay_element", unitId: input.unitId, layerId: input.layerId, elementId: input.elementId },
       ...(located.layer.elements.length === 1 ? [{ type: "remove_overlay_layer" as const, unitId: input.unitId, layerId: input.layerId }] : []),
@@ -954,6 +1059,7 @@ const promoteElementToOverlayCapability = defineCapability({
   undoPolicy: "atomic",
   execute(input, context) {
     const { unit, element } = findFrameElement(context, input.unitId, input.frameId, input.layerId, input.elementId);
+    if (element.kind === "image" && breakoutProjections(unit, element.id).length) throw new Error("格内图片已有真出格绑定，不能迁移为普通破格对象");
     const overlay = overlayLayerFor(context, unit, { type: "frame", frameId: input.frameId }, "breakout", "破格内容");
     return [
       { type: "remove_layer_element", ...input },
@@ -1019,6 +1125,7 @@ const convertElementToPageCapability = defineCapability({
       height,
     };
     const nextElement = { ...structuredClone(element), transform: fittedGeometry } as OverlayElement;
+    if (nextElement.kind === "image" && nextElement.projection) delete nextElement.projection;
     if (nextElement.kind === "balloon" && unitTail) nextElement.tailTarget = unitTail;
     const target = overlayLayerFor(context, unit, { type: "unit" }, "page_content", "纸面内容", surface.id);
     if (target.command) commands.push(target.command);
@@ -1041,6 +1148,7 @@ const returnElementToFrameCapability = defineCapability({
   undoPolicy: "atomic",
   execute(input, context) {
     const { unit, layer, element } = findOverlayElement(context, input.unitId, input.layerId, input.elementId);
+    if (element.kind === "image" && element.projection) throw new Error("真出格前景是格内源图的派生投影，不能收回为格内主图");
     const frame = unit.frames.find((item) => item.id === input.frameId);
     if (!frame) throw new Error(`missing Frame: ${input.frameId}`);
     const existingImage = element.kind === "image" ? frame.layers.flatMap((frameLayer) => frameLayer.elements.map((frameElement) => ({ frameLayer, frameElement }))).find(({ frameElement }) => frameElement.kind === "image") : undefined;
@@ -1281,6 +1389,7 @@ const setArtCropCapability = defineCapability({
       : unit.overlayLayers.find((item) => item.id === input.layerId);
     const element = layer?.elements.find((item) => item.id === input.elementId);
     if (!element || element.kind !== "image") throw new Error(`missing ArtElement: ${input.elementId}`);
+    if (!input.frameId && element.projection) throw new Error("真出格前景的裁切由格内源图统一控制");
     return [{ type: "set_art_crop", ...input }];
   },
 });
@@ -1394,6 +1503,9 @@ const resizeFrameCapability = defineCapability({
   execute(input, context) {
     const { unit, frame } = findFrame(context, input.unitId, input.frameId);
     assertFrameGeometry(unit, input.geometry, { frameId: frame.id, surfaceScope: frame.surfaceScope, allowOverlap: input.allowOverlap });
+    if (!frameGeometryKeepsPrimaryArtCovered(frame, input.geometry)) {
+      throw new Error("画格不能扩展到格内主图覆盖范围之外");
+    }
     return [
       ...(input.allowOverlap && unit.layoutPolicy.frameOverlap !== "allow"
         ? [{ type: "set_frame_overlap_policy" as const, unitId: unit.id, frameOverlap: "allow" as const }]
@@ -1575,6 +1687,7 @@ const setElementTransformCapability = defineCapability({
   undoPolicy: "atomic",
   execute(input, context) {
     const { element } = findLocatedElement(context, input);
+    if (!input.frameId && element.kind === "image" && element.projection) throw new Error("真出格前景的位置和尺寸由格内源图统一控制");
     if (input.frameId && element.kind === "balloon" && !frameBalloonTransformKeepsSafeArea(input.transform)) {
       throw new Error("格内气泡必须在画格内保留可选择区域");
     }
@@ -2093,6 +2206,10 @@ function duplicatePresentationUnit(context: EditorCapabilityContext, source: Pre
   const unitId = context.createId(source.kind === "vertical_segment" ? "segment" : source.kind === "spread" ? "spread" : "page");
   const surfaceIds = new Map(source.surfaces.map((surface) => [surface.id, context.createId("surface")]));
   const frameIds = new Map(source.frames.map((frame) => [frame.id, context.createId("frame")]));
+  const elementIds = new Map([
+    ...source.frames.flatMap((frame) => frame.layers.flatMap((layer) => [...layer.elements] as FrameElement[])),
+    ...source.overlayLayers.flatMap((layer) => layer.elements),
+  ].map((element) => [element.id, context.createId(element.kind)]));
   const primaryBeats = source.frames.flatMap((frame) => {
     const reference = frame.storyRefs.find((item) => item.role === "primary");
     const beat = reference ? context.fixture.storyboardBeats.find((item) => item.id === reference.storyboardBeatId) : undefined;
@@ -2116,8 +2233,9 @@ function duplicatePresentationUnit(context: EditorCapabilityContext, source: Pre
     return id;
   };
   const duplicateElement = <T extends FrameElement | OverlayElement>(element: T): T => {
-    const copy = { ...structuredClone(element), id: context.createId(element.kind) } as T;
+    const copy = { ...structuredClone(element), id: elementIds.get(element.id)! } as T;
     if (copy.kind === "balloon") copy.dialogueId = duplicateDialogueId(copy.dialogueId);
+    if (copy.kind === "image" && copy.projection) copy.projection.sourceElementId = elementIds.get(copy.projection.sourceElementId)!;
     return copy;
   };
   const unit: PresentationUnit = {
@@ -2295,6 +2413,7 @@ const capabilityRegistry = {
   duplicate_frame: duplicateFrameCapability,
   delete_frame: deleteFrameCapability,
   place_frame_image: placeFrameImageCapability,
+  place_frame_breakout_image: placeFrameBreakoutImageCapability,
   replace_frame_image: replaceFrameImageCapability,
   replace_image: replaceImageCapability,
   remove_frame_image: removeFrameImageCapability,

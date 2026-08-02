@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { demoStoryboardBeats } from "@lantern/shared/fixtures/storyboard-beats";
-import { balloonCutCornerPoints, createComicPageView, frameBalloonCoordinateBounds, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type PresentationUnit } from "@lantern/shared";
+import { balloonCutCornerPoints, createComicPageView, frameBalloonCoordinateBounds, frameCornerDragAxis, frameElements, frameQuadrilateralPoints, normalizeStoryboardBeat, pageDisplayGroups, projectComicRenderScene, projectImageCrop, projectTextStrokeWidth, reshapeFrameCorner, resolveLocalTransform, validateComicDocument, workspaceCommandSchema, workspaceChangeSetRequestSchema, type BalloonElement, type FrameElement, type PresentationUnit } from "@lantern/shared";
 import { applyWorkspaceChangeSet, createSnapshot, dryRunEditorCapability, listEditorCapabilities, planEditorCapabilities, planEditorCapability, verticalSegmentHeight, type VerticalSegmentAspectRatio } from "@lantern/editor-core";
 import { createInitialFixture, fourPanelPlan, previewFixtures } from "@lantern/demo-runtime";
 import { compileChapterLayoutPlan } from "@lantern/layout-engine";
@@ -161,6 +161,33 @@ test("resizing a frame preserves its balloon and image projection", () => {
   }
   const resizedImageGeometry = projectedImage(resizedFrame, resizedImage);
   assert.ok((["x", "y", "width", "height"] as const).every((key) => approximatelyEqual(resizedImageGeometry[key], imageGeometry[key])));
+});
+
+test("resizing a frame cannot expose paper outside its non-fill primary artwork", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const layer = frame.layers.find((candidate) => candidate.kind === "art")!;
+  const image = layer.elements.find((element) => element.kind === "image")!;
+  image.transform = { x: -.01, y: -.01, width: 1.02, height: 1.02 };
+
+  assert.throws(() => dryRunEditorCapability("resize_frame", {
+    unitId: unit.id,
+    frameId: frame.id,
+    geometry: { ...frame.geometry, x: frame.geometry.x - 16, y: frame.geometry.y - 16, width: frame.geometry.width + 16, height: frame.geometry.height + 16 },
+  }, {
+    fixture,
+    createId: (prefix) => `${prefix}-art-boundary`,
+    actor: "human",
+  }), /主图覆盖范围之外/);
+
+  assert.throws(() => applyWorkspaceChangeSet({ working: fixture.working, storyboardBeats: fixture.storyboardBeats }, {
+    id: "resize-outside-primary-art",
+    projectId: fixture.working.projectId,
+    baseRevision: fixture.working.revision,
+    source: "manual",
+    commands: [{ type: "resize_frame", unitId: unit.id, frameId: frame.id, geometry: { ...frame.geometry, x: frame.geometry.x - 16, y: frame.geometry.y - 16, width: frame.geometry.width + 16, height: frame.geometry.height + 16 } }],
+  }), /主图覆盖范围之外/);
 });
 
 test("frame corner gestures lock to one axis and rebase an outward trapezoid", () => {
@@ -435,6 +462,7 @@ test("only single-frame candidate capabilities are open to Agent preview", () =>
     "duplicate_frame",
     "delete_frame",
     "place_frame_image",
+    "place_frame_breakout_image",
     "replace_frame_image",
     "replace_image",
     "remove_frame_image",
@@ -1105,6 +1133,101 @@ test("page objects, breakout and frame overlap preserve explicit ownership and v
   assert.equal(fixture.working.document.units[0].layoutPolicy.frameOverlap, "allow");
   const reordered = dryRunEditorCapability("reorder_frame", { unitId: unit.id, frameId: frame.id, zIndex: 99 }, context());
   assert.equal(reordered.result.working.document.units[0].frames.find((item) => item.id === frame.id)?.zIndex, 99);
+});
+
+test("true breakout projections stay bound to their frame image transform and crop", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const layer = frame.layers.find((candidate) => candidate.kind === "art")!;
+  const source = layer.elements.find((element) => element.kind === "image")!;
+  const sourceResource = fixture.working.document.resources.find((resource) => resource.assetId === source.assetId && resource.assetVersionId === source.assetVersionId)!;
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-bound-${++sequence}`, actor: "external_agent" as const });
+
+  fixture.working = dryRunEditorCapability("place_frame_breakout_image", {
+    unitId: unit.id,
+    frameId: frame.id,
+    sourceLayerId: layer.id,
+    sourceElementId: source.id,
+    assetId: "cutout-asset",
+    assetVersionId: "cutout-version",
+    mediaType: "image/png",
+    width: sourceResource.width,
+    height: sourceResource.height,
+  }, context()).result.working;
+
+  const projection = fixture.working.document.units[0].overlayLayers.flatMap((candidate) => candidate.elements).find((element) => element.kind === "image" && element.projection?.sourceElementId === source.id);
+  assert.ok(projection?.kind === "image");
+  assert.deepEqual(projection.transform, source.transform);
+  assert.deepEqual(projection.crop, source.crop);
+  assert.throws(() => dryRunEditorCapability("place_frame_breakout_image", {
+    unitId: unit.id,
+    frameId: frame.id,
+    sourceLayerId: layer.id,
+    sourceElementId: source.id,
+    assetId: "another-cutout-asset",
+    assetVersionId: "another-cutout-version",
+    mediaType: "image/png",
+    width: sourceResource.width,
+    height: sourceResource.height,
+  }, context()), /已经存在真出格前景/);
+
+  const nextCrop = { x: .1, y: .08, width: .75, height: .82 };
+  fixture.working = dryRunEditorCapability("set_art_crop", { unitId: unit.id, frameId: frame.id, layerId: layer.id, elementId: source.id, crop: nextCrop }, context()).result.working;
+  const transformedSource = fixture.working.document.units[0].frames[0].layers.flatMap((candidate) => [...candidate.elements]).find((element) => element.id === source.id)!;
+  const transformedProjection = fixture.working.document.units[0].overlayLayers.flatMap((candidate) => candidate.elements).find((element) => element.id === projection.id)!;
+  assert.equal(transformedSource.kind, "image");
+  assert.equal(transformedProjection.kind, "image");
+  if (transformedSource.kind !== "image" || transformedProjection.kind !== "image") return;
+  assert.deepEqual(transformedProjection.crop, nextCrop);
+
+  const nextTransform = { x: -.12, y: -.05, width: 1.24, height: 1.18 };
+  fixture.working = dryRunEditorCapability("set_element_transform", { unitId: unit.id, frameId: frame.id, layerId: layer.id, elementId: source.id, transform: nextTransform }, context()).result.working;
+  const boundProjection = fixture.working.document.units[0].overlayLayers.flatMap((candidate) => candidate.elements).find((element) => element.id === projection.id)!;
+  assert.equal(boundProjection.kind, "image");
+  if (boundProjection.kind !== "image") return;
+  assert.deepEqual(boundProjection.transform, nextTransform);
+  assert.throws(() => dryRunEditorCapability("set_element_transform", { unitId: unit.id, layerId: fixture.working.document.units[0].overlayLayers[0].id, elementId: projection.id, transform: { x: 0, y: 0, width: 1, height: 1 } }, context()), /统一控制/);
+
+  const sceneProjection = projectComicRenderScene(fixture.working.document, fixture.working.document.units[0]).elements.find((node) => node.element.id === projection.id);
+  assert.deepEqual(sceneProjection?.geometry, resolveLocalTransform(fixture.working.document.units[0].frames[0].geometry, nextTransform));
+
+  const duplicated = dryRunEditorCapability("duplicate_presentation_unit", { unitId: unit.id }, context()).result.working.document.units.find((candidate) => candidate.id !== unit.id)!;
+  const duplicatedProjection = duplicated.overlayLayers.flatMap((candidate) => candidate.elements).find((element) => element.kind === "image" && element.projection);
+  assert.ok(duplicatedProjection?.kind === "image" && duplicatedProjection.projection);
+  const duplicatedSource = duplicated.frames.flatMap((candidate) => candidate.layers.flatMap((frameLayer) => [...frameLayer.elements] as FrameElement[])).find((element) => element.id === duplicatedProjection.projection!.sourceElementId);
+  assert.equal(duplicatedSource?.kind, "image");
+  assert.notEqual(duplicatedSource?.id, source.id);
+});
+
+test("true breakout creation rejects mismatched dimensions and source removal cascades", () => {
+  const fixture = createInitialFixture();
+  const unit = fixture.working.document.units[0];
+  const frame = unit.frames[0];
+  const layer = frame.layers.find((candidate) => candidate.kind === "art")!;
+  const source = layer.elements.find((element) => element.kind === "image")!;
+  const resource = fixture.working.document.resources.find((candidate) => candidate.assetVersionId === source.assetVersionId)!;
+  const sourceWidth = 100;
+  const sourceHeight = 80;
+  resource.width = sourceWidth;
+  resource.height = sourceHeight;
+  let sequence = 0;
+  const context = () => ({ fixture, createId: (prefix: string) => `${prefix}-cascade-${++sequence}`, actor: "external_agent" as const });
+  assert.throws(() => dryRunEditorCapability("place_frame_breakout_image", {
+    unitId: unit.id, frameId: frame.id, sourceLayerId: layer.id, sourceElementId: source.id,
+    assetId: "bad-cutout", assetVersionId: "bad-cutout-v1", mediaType: "image/png", width: sourceWidth + 1, height: sourceHeight,
+  }, context()), /相同像素尺寸/);
+  fixture.working = dryRunEditorCapability("place_frame_breakout_image", {
+    unitId: unit.id, frameId: frame.id, sourceLayerId: layer.id, sourceElementId: source.id,
+    assetId: "cutout", assetVersionId: "cutout-v1", mediaType: "image/webp", width: sourceWidth, height: sourceHeight,
+  }, context()).result.working;
+  assert.throws(() => dryRunEditorCapability("replace_frame_image", {
+    unitId: unit.id, frameId: frame.id, layerId: layer.id, elementId: source.id,
+    assetId: "replacement", assetVersionId: "replacement-v1", mediaType: "image/png",
+  }, { ...context(), actor: "human" }), /先移除真出格前景/);
+  fixture.working = dryRunEditorCapability("remove_frame_image", { unitId: unit.id, frameId: frame.id, layerId: layer.id, elementId: source.id }, context()).result.working;
+  assert.equal(fixture.working.document.units[0].overlayLayers.some((candidate) => candidate.elements.some((element) => element.kind === "image" && element.projection?.sourceElementId === source.id)), false);
 });
 
 test("restoring a workspace version is one validated revision", () => {

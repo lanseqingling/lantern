@@ -98,6 +98,14 @@ const imagePlaceSchema = z.strictObject({
   }
 });
 
+const imageBreakoutCreateSchema = z.strictObject({
+  ...singleTargetEnvelopeShape,
+  asset: z.string().trim().min(1).max(2048),
+  assetVersionId: z.string().min(1).optional(),
+}).superRefine((input, context) => {
+  if (input.targetHandles.length !== 1) context.addIssue({ code: "custom", path: ["targetHandles"], message: "创建真出格只接受一个格内源图片目标。" });
+});
+
 const imageUpdateSchema = z.strictObject({
   ...singleTargetEnvelopeShape,
   asset: z.string().trim().min(1).max(2048).optional(),
@@ -316,6 +324,16 @@ export const compositionCapabilities = [
     effect: "direct_change",
     risk: "medium",
     domainCapabilities: ["replace_image", "set_element_transform", "set_art_crop", "promote_element_to_overlay", "convert_element_to_page", "reorder_overlay_element"],
+    confirmation: "none",
+  }),
+  compositionCapability({
+    id: "image.breakout.create",
+    description: "为一个格内源图片添加同像素尺寸、带 Alpha 的 PNG 或 WebP 前景版本，形成与源图 transform 和 crop 持续同步的 frame-anchored 真出格投影。目标必须是格内图片；该能力保留源图，不执行抠图或图片生成。",
+    inputSchema: imageBreakoutCreateSchema,
+    target: { required: true, types: ["image"], min: 1, max: 1 },
+    effect: "direct_change",
+    risk: "low",
+    domainCapabilities: ["place_frame_breakout_image"],
     confirmation: "none",
   }),
   compositionCapability({

@@ -17,7 +17,10 @@ const document: ComicDocument = {
   chapterId: "chapter-source",
   format: "page",
   reading: { direction: "ltr", viewer: "paged", unitOrder: ["unit-1"], showPageNumber: true },
-  resources: [{ assetId: "asset-1", assetVersionId: "asset-1-v1", kind: "image", mediaType: "image/png" }],
+  resources: [
+    { assetId: "asset-1", assetVersionId: "asset-1-v1", kind: "image", mediaType: "image/png", width: 720, height: 1080 },
+    { assetId: "asset-2", assetVersionId: "asset-2-v1", kind: "image", mediaType: "image/png", width: 720, height: 1080 },
+  ],
   dialogues: [{ id: "dialogue-1", storyboardBeatId: "beat-1", storyboardBeatVersionId: "beat-1-v1", speakerAssetId: "speaker-asset", content: "你也在这里？" }],
   units: [{
     id: "unit-1",
@@ -50,7 +53,24 @@ const document: ComicDocument = {
         }],
       }],
     }],
-    overlayLayers: [],
+    overlayLayers: [{
+      id: "overlay-1",
+      name: "真出格前景",
+      zIndex: 1,
+      visible: true,
+      anchor: { type: "frame", frameId: "frame-1" },
+      purpose: "breakout",
+      elements: [{
+        id: "image-2",
+        kind: "image",
+        assetId: "asset-2",
+        assetVersionId: "asset-2-v1",
+        transform: { x: 0, y: 0, width: 1, height: 1 },
+        crop: { x: 0, y: 0, width: 1, height: 1 },
+        projection: { kind: "frame_image_breakout", sourceElementId: "image-1" },
+        overflow: "visible",
+      }],
+    }],
     readingSequence: [{ frameId: "frame-1" }],
     layoutPolicy: { frameOverlap: "forbid", defaultOverflow: "clip" },
   }],
@@ -62,9 +82,13 @@ function archive() {
     storyboardBeats: [storyboardBeat],
     assets: [
       { assetId: "asset-1", kind: "generated_image", name: "站台画面", description: "雨夜站台成稿" },
+      { assetId: "asset-2", kind: "generated_image", name: "人物透明前景", description: "与站台画面绑定的同源透明前景" },
       { assetId: "speaker-asset", kind: "character", name: "林澄", description: "雨夜故事的主角" },
     ],
-    resources: [{ assetId: "asset-1", assetVersionId: "asset-1-v1", mediaType: "image/png", width: 720, height: 1080, bytes: Buffer.from("test-png-bytes") }],
+    resources: [
+      { assetId: "asset-1", assetVersionId: "asset-1-v1", mediaType: "image/png", width: 720, height: 1080, bytes: Buffer.from("test-png-bytes") },
+      { assetId: "asset-2", assetVersionId: "asset-2-v1", mediaType: "image/png", width: 720, height: 1080, bytes: Buffer.from("test-foreground-png-bytes") },
+    ],
     createdAt: "2026-07-20T00:00:00.000Z",
   });
 }
@@ -74,8 +98,9 @@ test("complete chapter archive round-trips LCD, storyboard beats, and fixed imag
   assert.deepEqual(parsed.document, document);
   assert.deepEqual(parsed.storyboardBeats, [storyboardBeat]);
   assert.equal(parsed.manifest.protocol, "lantern-chapter-archive-1");
-  assert.equal(parsed.manifest.resources.length, 1);
+  assert.equal(parsed.manifest.resources.length, 2);
   assert.deepEqual(parsed.resourceFiles.get("asset-1-v1"), Buffer.from("test-png-bytes"));
+  assert.deepEqual(parsed.resourceFiles.get("asset-2-v1"), Buffer.from("test-foreground-png-bytes"));
 });
 
 test("complete chapter archive rejects image bytes that do not match the manifest checksum", () => {

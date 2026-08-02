@@ -74,6 +74,7 @@ export const compositionElementSchema = z.object({
   overflow: z.string().optional(),
   opacity: z.number().optional(),
   blendMode: z.string().optional(),
+  projection: z.strictObject({ kind: z.literal("frame_image_breakout"), sourceElementId: z.string().min(1) }).optional(),
 });
 
 export const compositionUnitSchema = z.object({
@@ -153,7 +154,7 @@ function elementProjection(node: ReturnType<typeof projectComicRenderScene>["ele
     ...(node.surfaceId ? { surfaceId: node.surfaceId } : {}),
   };
   if (element.kind === "image") {
-    return { ...base, assetId: element.assetId, assetVersionId: element.assetVersionId, crop: element.crop, opacity: element.opacity, blendMode: element.blendMode, overflow: element.overflow };
+    return { ...base, assetId: element.assetId, assetVersionId: element.assetVersionId, crop: element.crop, opacity: element.opacity, blendMode: element.blendMode, overflow: element.overflow, projection: element.projection };
   }
   if (element.kind === "balloon") {
     return { ...base, dialogueId: element.dialogueId, dialogueText: node.dialogueText ?? "", shape: element.shape, style: element.style, tailTarget: element.tailTarget, overflow: element.overflow, appearanceAssetVersionId: element.appearance?.assetVersionId };

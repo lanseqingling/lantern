@@ -29,7 +29,7 @@ Duplicate and delete only the exact returned Frame handle. Deleting a Frame also
 
 ## Resize Frames without scaling their contents
 
-Resizing a Frame changes its viewport, not the visible size of its frame-local balloons, text, effects, or non-fill images. Lantern rebases their local transforms to preserve their resolved unit-space geometry; the primary fill image adjusts its crop so its visual scale and position remain stable while the resized Frame changes what is visible. Moving a Frame is different: frame-local content follows it.
+Resizing a Frame changes its viewport, not the visible size of its frame-local balloons, text, effects, or non-fill images. Lantern rebases their local transforms to preserve their resolved unit-space geometry; the primary fill image adjusts its crop so its visual scale and position remain stable while the resized Frame changes what is visible. A Frame with non-fill primary art cannot expand beyond the area that artwork covers, so a resize never exposes blank paper; revise the source crop or transform first when more viewport is needed. Moving a Frame is different: frame-local content follows it.
 
 After resizing, inspect the new draft for intentional clipping. Do not compensate by resizing each child unless the creator separately asks to change those objects.
 
@@ -45,6 +45,21 @@ Use an Asset URI and, when the creator needs exact reproducibility, an explicit 
 - Overlay `zOrder` affects paper or breakout layers. A frame-layer image follows its Frame's visual layer.
 
 The same fixed image may be placed more than once with different crop values. This creates distinct placement elements referencing one immutable AssetVersion.
+
+## Create a bound true breakout
+
+Use `image.breakout.create` when a character, hair, clothing, weapon, prop, or coherent foreground effect should cross its source Frame while the complete panel image remains clipped inside. Target the frame image itself. This creates a frame-anchored transparent projection whose transform and crop remain bound to that source image; moving or reframing the source updates both. `image.update placement=breakout` is a different operation that migrates one existing image out of the Frame and does not create this two-projection composition.
+
+Prepare the foreground outside Lantern from the exact fixed source image returned through its image handle:
+
+- use PNG, or lossless WebP with alpha; never use JPEG for a true-breakout foreground;
+- preserve the source pixel dimensions, canvas origin, color, and subject pixels;
+- hide only the background through alpha instead of regenerating the subject;
+- retain one continuous subject region crossing the border plus enough interior overlap to avoid a seam;
+- exclude baked panel borders, balloons, text, neighbouring panels, and page-preview pixels;
+- keep the full source canvas instead of tightly cropping around the subject.
+
+Upload the result as a fixed Asset Version, call `image.breakout.create` with that asset while targeting the source frame-image handle, then inspect the new composition. Check alignment, alpha halos, doubled edges, border visibility, neighbouring-frame occlusion, and reading clarity. The foreground cannot be transformed or cropped independently; remove it to end the binding. Lantern does not perform segmentation, background removal, subject regeneration, or hidden mask editing in this capability.
 
 ## Bring images from the host
 

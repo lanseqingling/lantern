@@ -114,21 +114,27 @@ export function projectComicRenderScene(document: ComicDocument, unit: Presentat
     if (anchor.type === "frame" && !anchorFrame) continue;
     layer.elements.forEach((element, index) => {
       if (element.visible === false) return;
-        elements.push({
-          element,
-          geometry: anchorFrame ? resolveLocalTransform(anchorFrame.geometry, element.transform) : element.transform,
-          // Frame and overlay composition levels share the same numeric space.
-          // An overlay at a given level sits above that frame's border; moving a
-          // frame or an overlay layer changes their relative visual order.
-          zIndex: layer.purpose === "narration"
-            ? 2_000_000_000 + index
-            : layer.zIndex * FRAME_STRIDE + FRAME_BORDER_OFFSET + 1 + index,
+      const projectionSource = element.kind === "image" && element.projection && anchorFrame
+        ? anchorFrame.layers.flatMap((candidate) => [...candidate.elements] as FrameElement[]).find((candidate) => candidate.id === element.projection!.sourceElementId && candidate.kind === "image")
+        : undefined;
+      const projectedElement = projectionSource?.kind === "image"
+        ? { ...element, transform: projectionSource.transform, crop: projectionSource.crop }
+        : element;
+      elements.push({
+        element: projectedElement,
+        geometry: anchorFrame ? resolveLocalTransform(anchorFrame.geometry, projectedElement.transform) : projectedElement.transform,
+        // Frame and overlay composition levels share the same numeric space.
+        // An overlay at a given level sits above that frame's border; moving a
+        // frame or an overlay layer changes their relative visual order.
+        zIndex: layer.purpose === "narration"
+          ? 2_000_000_000 + index
+          : layer.zIndex * FRAME_STRIDE + FRAME_BORDER_OFFSET + 1 + index,
         source: "overlay",
         frame: anchorFrame,
         layerId: layer.id,
         overlayPurpose: layer.purpose,
         surfaceId: layer.surfaceId,
-        dialogueText: element.kind === "balloon" ? dialogues.get(element.dialogueId) ?? "" : undefined,
+        dialogueText: projectedElement.kind === "balloon" ? dialogues.get(projectedElement.dialogueId) ?? "" : undefined,
       });
     });
   }
